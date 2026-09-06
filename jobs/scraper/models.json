@@ -1,0 +1,19 @@
+{
+  "$comment": "V1 car-model reference list (PRD P0.2). Adding model #13 is a data change here — the scraper logic is not touched. 2 models per brand across the top 6 brands.",
+  "angles": ["front", "side", "rear", "interior"],
+  "minAnglesRequired": 4,
+  "models": [
+    { "brand": "Hyundai", "model": "Creta", "listingSlug": "hyundai/creta" },
+    { "brand": "Hyundai", "model": "Venue", "listingSlug": "hyundai/venue" },
+    { "brand": "Maruti Suzuki", "model": "Baleno", "listingSlug": "maruti-suzuki/baleno" },
+    { "brand": "Maruti Suzuki", "model": "Brezza", "listingSlug": "maruti-suzuki/brezza" },
+    { "brand": "Mahindra", "model": "Scorpio-N", "listingSlug": "mahindra/scorpio-n" },
+    { "brand": "Mahindra", "model": "XUV700", "listingSlug": "mahindra/xuv700" },
+    { "brand": "Tata", "model": "Nexon", "listingSlug": "tata/nexon" },
+    { "brand": "Tata", "model": "Punch", "listingSlug": "tata/punch" },
+    { "brand": "Kia", "model": "Seltos", "listingSlug": "kia/seltos" },
+    { "brand": "Kia", "model": "Sonet", "listingSlug": "kia/sonet" },
+    { "brand": "Toyota", "model": "Innova Hycross", "listingSlug": "toyota/innova-hycross" },
+    { "brand": "Toyota", "model": "Fortuner", "listingSlug": "toyota/fortuner" }
+  ]
+}

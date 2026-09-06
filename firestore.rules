@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// v1 is a single-user tool (PRD non-goal: no multi-tenant auth). Lock everything
+// to the owner's UID once Firebase Auth is added; until then, deny all client
+// access and let the Cloud Run backend (Admin SDK) be the only writer.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,1714 @@
+<title>Dealer Video Prompt Builder</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#FAF7F2; --surface:#FFFFFF; --surface-2:#F3EEE5;
+  --ink:#211D17; --ink-muted:#6B6357; --ink-faint:#9C9284;
+  --line:#E7E0D4; --line-strong:#D8CFC0;
+  --accent:#E2600A; --accent-ink:#FFFFFF; --accent-wash:#FBE7D6;
+  --good:#1B7A4A; --warn:#B4570A; --bad:#B3261E; --bad-wash:#FBE3E1;
+  --shadow: 0 1px 2px rgba(33,29,23,.06), 0 8px 24px -12px rgba(33,29,23,.18);
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#17140F; --surface:#221D16; --surface-2:#2A241B;
+    --ink:#F3EEE4; --ink-muted:#B4A997; --ink-faint:#7D7362;
+    --line:#3A3226; --line-strong:#4A4132;
+    --accent:#FF8A3D; --accent-ink:#231704; --accent-wash:#3D2A15;
+    --good:#4CC98A; --warn:#FFB05C; --bad:#FF8A80; --bad-wash:#3D1F1C;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#17140F; --surface:#221D16; --surface-2:#2A241B;
+  --ink:#F3EEE4; --ink-muted:#B4A997; --ink-faint:#7D7362;
+  --line:#3A3226; --line-strong:#4A4132;
+  --accent:#FF8A3D; --accent-ink:#231704; --accent-wash:#3D2A15;
+  --good:#4CC98A; --warn:#FFB05C; --bad:#FF8A80; --bad-wash:#3D1F1C;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box;}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:14px; line-height:1.5;
+}
+h1,h2,h3{font-family:"Manrope",sans-serif; font-weight:800; text-wrap:balance; margin:0;}
+::selection{background:var(--accent-wash);}
+button{font-family:inherit; cursor:pointer;}
+input,select,textarea{font-family:inherit; font-size:13.5px; color:var(--ink); background:var(--surface); border:1px solid var(--line-strong); border-radius:8px; padding:8px 10px; width:100%;}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent); outline-offset:1px;}
+textarea{resize:vertical; min-height:64px;}
+label{display:block; font-size:12.5px; font-weight:600; color:var(--ink-muted); margin-bottom:4px;}
+.field{margin-bottom:12px;}
+.hint{font-size:11.5px; color:var(--ink-faint); margin-top:3px; line-height:1.45;}
+.row2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+.row3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;}
+@media (max-width:560px){ .row2,.row3{grid-template-columns:1fr;} }
+
+.app{max-width:1520px; margin:0 auto; padding:20px 20px 64px;}
+.topbar{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  padding:14px 18px; margin-bottom:18px;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);
+}
+.brand{display:flex; align-items:center; gap:10px;}
+.brand .mark{
+  width:32px; height:32px; border-radius:8px; background:linear-gradient(155deg, var(--accent), #B4460A);
+  display:flex; align-items:center; justify-content:center; color:#fff; font-weight:800; font-size:14px; flex:none;
+}
+.brand h1{font-size:16px;}
+.brand .sub{font-size:11.5px; color:var(--ink-muted); font-weight:600;}
+.db-status{display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--ink-muted); font-weight:600;}
+.dot{width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:none;}
+.dot.on{background:var(--good);}
+.dot.off{background:var(--warn);}
+
+.grid{display:grid; grid-template-columns:minmax(0,1.35fr) minmax(380px,1fr); gap:18px; align-items:start;}
+@media (max-width:980px){ .grid{grid-template-columns:1fr;} }
+
+.card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); margin-bottom:16px; overflow:hidden;}
+.card > .head{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 18px; border-bottom:1px solid var(--line);}
+.card > .head h2{font-size:14.5px;}
+.card > .head .step{font-size:11px; font-weight:700; color:var(--accent); letter-spacing:.03em; text-transform:uppercase;}
+.card > .body{padding:16px 18px;}
+.card > .body.tight{padding:12px 18px;}
+.section-desc{font-size:12px; color:var(--ink-muted); margin:-6px 0 12px;}
+
+.cat-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+@media (max-width:640px){.cat-grid{grid-template-columns:1fr 1fr;}}
+.cat-chip{
+  --h:220;
+  position:relative; text-align:left; border-radius:9px; padding:11px 12px 11px 14px;
+  border:1px solid var(--line-strong); background:var(--surface-2);
+  border-left:4px solid hsl(var(--h) 45% 45%);
+  transition:box-shadow .12s ease;
+}
+.cat-chip:hover{box-shadow:var(--shadow);}
+.cat-chip .name{font-weight:700; font-size:12.8px; display:block; padding-right:18px;}
+.cat-chip .purpose{font-size:11px; color:var(--ink-muted); display:block; margin-top:3px; line-height:1.35;}
+.cat-chip[aria-pressed="true"]{ background:hsl(var(--h) 55% 94%); border-color:hsl(var(--h) 45% 45%); }
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .cat-chip[aria-pressed="true"]{ background:hsl(var(--h) 35% 20%); }
+}
+:root[data-theme="dark"] .cat-chip[aria-pressed="true"]{ background:hsl(var(--h) 35% 20%); }
+.cat-chip[aria-pressed="true"]::after{
+  content:"\2713"; position:absolute; top:8px; right:9px; width:16px; height:16px; border-radius:50%;
+  background:hsl(var(--h) 45% 40%); color:#fff; font-size:10px; display:flex; align-items:center; justify-content:center; font-weight:700;
+}
+
+.lib-list{display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; padding-right:2px;}
+.lib-item{display:flex; align-items:center; gap:10px; padding:8px 9px; border:1px solid var(--line); border-radius:8px; background:var(--surface-2); cursor:pointer;}
+.lib-item:hover{border-color:var(--line-strong);}
+.lib-item.selected{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset;}
+.lib-item img.thumb{width:36px; height:36px; border-radius:7px; object-fit:cover; flex:none; background:var(--line);}
+.lib-item .thumb-fallback{width:36px; height:36px; border-radius:7px; flex:none; background:var(--line); display:flex; align-items:center; justify-content:center; font-size:13px; color:var(--ink-faint); font-weight:700;}
+.lib-item .meta{min-width:0; flex:1;}
+.lib-item .meta .n{font-weight:700; font-size:12.5px; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.lib-item .meta .d{font-size:11px; color:var(--ink-muted); display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.lib-item .del{border:none; background:transparent; color:var(--ink-faint); font-size:15px; line-height:1; padding:4px 6px; border-radius:6px; flex:none;}
+.lib-item .del:hover{background:var(--bad-wash); color:var(--bad);}
+.lib-empty{font-size:12px; color:var(--ink-faint); padding:10px 4px;}
+
+.btn{border-radius:8px; border:1px solid var(--line-strong); background:var(--surface); color:var(--ink); font-weight:700; font-size:12.5px; padding:9px 14px; display:inline-flex; align-items:center; gap:6px;}
+.btn:hover{border-color:var(--ink-faint);}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
+.btn.primary:hover{filter:brightness(1.05);}
+.btn.ghost{background:transparent; border-color:transparent; color:var(--ink-muted); padding:6px 8px;}
+.btn.small{padding:6px 10px; font-size:11.5px;}
+.btn:disabled{opacity:.5; cursor:not-allowed;}
+
+.toolbar{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+.divider{height:1px; background:var(--line); margin:14px 0;}
+
+.upload-slot{border:1.5px dashed var(--line-strong); border-radius:9px; padding:12px; display:flex; align-items:center; gap:10px; background:var(--surface-2); flex-wrap:wrap;}
+.upload-slot img{width:44px; height:44px; border-radius:7px; object-fit:cover; flex:none;}
+.upload-slot .u-meta{flex:1; min-width:120px;}
+.upload-slot .u-meta .t{font-size:12px; font-weight:700;}
+.upload-slot .u-meta .s{font-size:11px; color:var(--ink-faint);}
+.upload-slot input[type=file]{display:none;}
+
+.photo-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(72px,1fr)); gap:8px; margin-top:10px;}
+.photo-cell{position:relative; border-radius:8px; overflow:hidden; border:1px solid var(--line); aspect-ratio:1;}
+.photo-cell img{width:100%; height:100%; object-fit:cover; display:block;}
+.photo-cell .cap{position:absolute; left:0; right:0; bottom:0; font-size:9px; padding:2px 4px; background:rgba(20,16,10,.68); color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.photo-cell button{position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:50%; background:rgba(20,16,10,.72); color:#fff; border:none; font-size:11px; line-height:1;}
+
+fieldset{border:1px solid var(--line); border-radius:9px; padding:12px 14px 14px; margin:0 0 14px;}
+fieldset legend{padding:0 6px; font-size:12px; font-weight:800; display:flex; align-items:center; gap:7px;}
+fieldset legend .sw{width:9px; height:9px; border-radius:50%; flex:none;}
+fieldset .fs-purpose{font-size:11.5px; color:var(--ink-muted); margin:-2px 0 10px;}
+.check-row{display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; margin-bottom:10px;}
+.check-row input{width:auto;}
+.req-missing{border-color:var(--bad) !important;}
+
+.preview-wrap{position:sticky; top:20px;}
+.preview-card .head{align-items:flex-start;}
+.preview-meta{display:flex; gap:14px; font-size:11px; color:var(--ink-muted); font-weight:700; flex-wrap:wrap;}
+.prompt-body{
+  font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace; font-size:12px; line-height:1.65;
+  white-space:pre-wrap; word-break:break-word; max-height:70vh; overflow-y:auto;
+  padding:16px 18px; background:var(--surface-2);
+}
+.prompt-empty{padding:28px 18px; text-align:center; color:var(--ink-faint); font-size:12.5px;}
+.prompt-empty .big{font-size:26px; display:block; margin-bottom:8px;}
+.copy-toast{font-size:11.5px; color:var(--good); font-weight:700; margin-left:auto;}
+
+.parts-wrap{display:flex; flex-direction:column; gap:2px;}
+.part-card{border-top:1px solid var(--line);}
+.part-card:first-child{border-top:none;}
+.part-head{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 18px; background:var(--surface);}
+.part-head .p-name{font-size:12.5px; font-weight:800;}
+.part-head .p-range{font-size:11px; color:var(--ink-muted); font-weight:700; margin-left:8px;}
+.part-head .p-instruction{font-size:10.5px; color:var(--warn); font-weight:700; text-transform:uppercase; letter-spacing:.02em; display:block; margin-top:2px;}
+.part-card .prompt-body{max-height:38vh;}
+.multi-part-banner{font-size:11.5px; padding:9px 18px; background:var(--accent-wash); color:var(--warn); font-weight:600; line-height:1.5;}
+
+.notice{font-size:11.5px; padding:9px 12px; border-radius:8px; background:var(--accent-wash); color:var(--warn); margin-bottom:14px; line-height:1.5;}
+.notice.error{background:var(--bad-wash); color:var(--bad);}
+.notice strong{color:inherit;}
+
+.checks{padding:12px 18px; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:7px;}
+.check{display:flex; gap:8px; font-size:11.5px; line-height:1.45; align-items:flex-start;}
+.check .icon{flex:none; width:15px; height:15px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:800; color:#fff; margin-top:1px;}
+.check.warn .icon{background:var(--warn);}
+.check.bad .icon{background:var(--bad);}
+.check.ok .icon{background:var(--good);}
+.check .txt{color:var(--ink-muted);}
+.check .txt b{color:var(--ink);}
+
+.attach-list{display:flex; flex-direction:column; gap:6px;}
+.attach-item{display:flex; gap:9px; align-items:center; font-size:11.5px; padding:7px 9px; border:1px solid var(--line); border-radius:8px; background:var(--surface-2);}
+.attach-item img{width:30px; height:30px; border-radius:6px; object-fit:cover; flex:none;}
+.attach-item .a-meta{min-width:0;}
+.attach-item .a-meta b{display:block; font-size:11.5px;}
+.attach-item .a-meta span{display:block; color:var(--ink-faint); font-size:10.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+.foot-note{font-size:11px; color:var(--ink-faint); text-align:center; margin-top:20px; line-height:1.6;}
+.foot-note code{background:var(--surface-2); padding:1px 5px; border-radius:4px;}
+</style>
+
+<div class="app">
+  <div class="topbar">
+    <div class="brand">
+      <div class="mark">DV</div>
+      <div>
+        <h1>Dealer Video Prompt Builder</h1>
+        <div class="sub">CarDekho ad-slot videos &middot; Lumina prompt generator</div>
+      </div>
+    </div>
+    <div class="db-status" id="dbStatus"><span class="dot" id="dbDot"></span><span id="dbStatusText">Checking shared library&hellip;</span></div>
+  </div>
+
+  <div id="dbNoticeSlot"></div>
+
+  <div class="grid">
+    <div class="left-col">
+
+      <div class="card">
+        <div class="head"><h2>1. Video categories</h2><span class="step">Composable &mdash; pick 1 or more</span></div>
+        <div class="body">
+          <div class="section-desc">Combine categories when they genuinely overlap in one video (Festival + Offer, or Offer + Feature + Walkaround, are the two combos dealers actually post).</div>
+          <div class="cat-grid" id="catGrid"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><h2>2. Format &amp; narration</h2><span class="step">Sets the whole prompt</span></div>
+        <div class="body">
+          <div class="section-desc">Not every dealer video has a presenter talking to camera. Pick how this one carries its message &mdash; it changes the dialogue, lip-sync and audio instructions in the prompt.</div>
+          <div class="row2">
+            <div class="field">
+              <label for="g_narration">Narration mode</label>
+              <select id="g_narration">
+                <option value="presenter">Presenter on camera (speaks to camera)</option>
+                <option value="voiceover">Voiceover over b-roll (no one on camera)</option>
+                <option value="silent">Music + on-screen text only (no speech)</option>
+                <option value="customer">Customer speaking to camera (testimonial)</option>
+              </select>
+              <div class="hint" id="narrationHint"></div>
+            </div>
+            <div class="field">
+              <label for="g_music">Music / audio bed</label>
+              <input id="g_music" placeholder="e.g. upbeat modern commercial track, low under the voice">
+              <div class="hint">Every real dealer reel has a music bed. Leave blank and the prompt asks for a neutral commercial track.</div>
+            </div>
+          </div>
+          <div class="row3">
+            <div class="field"><label for="g_duration">Total video duration (seconds)</label><input id="g_duration" type="number" value="27" min="6" max="120"></div>
+            <div class="field"><label for="g_maxChunk">Max seconds per generation</label><input id="g_maxChunk" type="number" value="10" min="4" max="60">
+              <div class="hint">Your model&rsquo;s per-call cap (usually 10 or 15). Longer videos split into sequential generate-then-extend prompts.</div>
+            </div>
+            <div class="field"><label for="g_aspect">Aspect ratio</label>
+              <select id="g_aspect"><option>vertical 9:16</option><option>square 1:1</option><option>horizontal 16:9</option></select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><h2>3. Dealer &amp; branding</h2><span class="step">Placeholders</span></div>
+        <div class="body">
+          <div class="toolbar" style="margin-top:0;">
+            <select id="dealerLoadSelect" style="max-width:260px;"><option value="">Load saved dealer&hellip;</option></select>
+            <button class="btn small" id="dealerLoadBtn" type="button">Load</button>
+            <button class="btn small" id="dealerNewBtn" type="button">Clear / new</button>
+          </div>
+          <div class="divider"></div>
+          <div class="row2">
+            <div class="field"><label for="f_dealerName">Dealer / showroom name</label><input id="f_dealerName" placeholder="e.g. Jasper Tata"></div>
+            <div class="field"><label for="f_brandModel">Brand + model</label><input id="f_brandModel" placeholder="e.g. Tata Safari"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label for="f_phone">Phone</label><input id="f_phone" placeholder="+91 98765 43210"></div>
+            <div class="field"><label for="f_tier">Dealer tier</label>
+              <select id="f_tier">
+                <option value="Metro Premium">Metro Premium (long, narrative tone)</option>
+                <option value="Regional/Volume">Regional / Volume (structured, offer-forward)</option>
+                <option value="Hyperlocal">Hyperlocal (short, minimalist)</option>
+              </select>
+            </div>
+          </div>
+          <div class="field"><label for="f_address">Address / locations (for footer)</label><input id="f_address" placeholder="e.g. City Centre | North Point | Riverside"></div>
+
+          <div class="field">
+            <label for="logoInput">Dealer logo (thumbnail reference only)</label>
+            <div class="upload-slot" id="logoSlot">
+              <img id="logoPreview" alt="" style="display:none;">
+              <div class="u-meta"><div class="t" id="logoLabel">No logo uploaded</div><div class="s">JPG/PNG, stored as a small reference thumbnail</div></div>
+              <label class="btn small" for="logoInput">Upload</label>
+              <input type="file" id="logoInput" accept="image/*">
+            </div>
+          </div>
+
+          <div class="check-row" style="margin-top:14px;">
+            <input type="checkbox" id="f_fictionalize" checked>
+            <label style="margin:0; font-weight:700;" for="f_fictionalize">Fictionalize brand/dealer names in the prompt text (recommended)</label>
+          </div>
+          <div class="hint" style="margin:-6px 0 12px;">Video models render real OEM logos badly and often refuse trademarked branding. When on, give a placeholder below &mdash; your real dealer details still drive the footer and end card.</div>
+          <div class="row2" id="fictionalizeFields">
+            <div class="field"><label for="f_fakeBrandModel">Placeholder brand + model</label><input id="f_fakeBrandModel" placeholder="e.g. BYTE VANTA X"></div>
+            <div class="field"><label for="f_fakeDealer">Placeholder dealership name</label><input id="f_fakeDealer" placeholder="e.g. Byte Premier Motors"></div>
+          </div>
+
+          <div class="toolbar">
+            <button class="btn primary small" id="dealerSaveBtn" type="button">Save dealer to shared library</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="actorCard">
+        <div class="head"><h2>4. Actor / promoter</h2><span class="step">Shared library</span></div>
+        <div class="body">
+          <div class="row2" style="align-items:start; gap:18px;">
+            <div>
+              <div class="lib-list" id="actorLibList"><div class="lib-empty">No saved actors yet.</div></div>
+            </div>
+            <div>
+              <div class="field"><label for="a_name">Name / label</label><input id="a_name" placeholder="e.g. Meera &mdash; Metro Premium promoter"></div>
+              <div class="row2">
+                <div class="field"><label for="a_gender">Gender</label>
+                  <select id="a_gender"><option value="female">Female</option><option value="male">Male</option></select>
+                </div>
+                <div class="field"><label for="a_age">Age range</label><input id="a_age" placeholder="e.g. late 20s"></div>
+              </div>
+              <div class="field"><label for="a_style">Styling / look</label><textarea id="a_style" placeholder="e.g. fitted maroon polo dress, nude heels, subtle jewellery"></textarea></div>
+              <div class="field"><label for="a_voice">Voice / delivery notes</label><input id="a_voice" placeholder="e.g. warm, energetic, confident dealership-ad pace"></div>
+              <div class="field">
+                <label for="actorPhotoInput">Reference photo (thumbnail only)</label>
+                <div class="upload-slot" id="actorPhotoSlot">
+                  <img id="actorPhotoPreview" alt="" style="display:none;">
+                  <div class="u-meta"><div class="t" id="actorPhotoLabel">No photo uploaded</div><div class="s">Keep the high-res original to attach in Lumina</div></div>
+                  <label class="btn small" for="actorPhotoInput">Upload</label>
+                  <input type="file" id="actorPhotoInput" accept="image/*">
+                </div>
+              </div>
+              <div class="field"><label for="a_sourceNote">Full-res file location (optional)</label><input id="a_sourceNote" placeholder="e.g. Drive: AI Video / Actors / Meera.jpg"></div>
+              <div class="toolbar">
+                <button class="btn small" id="actorSaveBtn" type="button">Save actor to shared library</button>
+                <button class="btn ghost small" id="actorClearBtn" type="button">Clear selection</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><h2>5. Supporting photos</h2><span class="step">Dealer photo set</span></div>
+        <div class="body">
+          <div class="section-desc">Showroom, model or delivery photos for this dealer. They appear in the &ldquo;attach in Lumina&rdquo; checklist and are named in the prompt as reference images.</div>
+          <div class="upload-slot">
+            <div class="u-meta"><div class="t">Add a reference photo</div><div class="s">Label it first &mdash; the label is what the prompt refers to</div></div>
+            <input id="photoLabelInput" placeholder="Label, e.g. Showroom exterior" style="max-width:180px;">
+            <label class="btn small" for="dealerPhotoInput">Upload</label>
+            <input type="file" id="dealerPhotoInput" accept="image/*">
+          </div>
+          <div class="photo-grid" id="dealerPhotoGrid"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><h2>6. On-screen text &amp; end card</h2><span class="step">Rendered in the video</span></div>
+        <div class="body">
+          <div class="section-desc">Video models garble long on-screen strings. Everything you enter here is repeated in the prompt as an exact-spelling lock &mdash; keep each line short.</div>
+          <div class="row2">
+            <div class="field"><label for="g_textLang">On-screen text language</label>
+              <select id="g_textLang">
+                <option value="english">English only</option>
+                <option value="mixed">Hindi + English mixed (like the Galaxy Honda reference)</option>
+                <option value="hindi">Devanagari-led</option>
+              </select>
+            </div>
+            <div class="field"><label for="g_captionStyle">Caption / copy style</label>
+              <select id="g_captionStyle">
+                <option value="Long Narrative">Long Narrative (Metro Premium)</option>
+                <option value="Short Punchy">Short Punchy (Regional/Volume)</option>
+                <option value="Structured">Structured minimal (Hyperlocal)</option>
+              </select>
+            </div>
+          </div>
+          <div class="field"><label for="g_footer">Persistent footer bar text</label><input id="g_footer" placeholder="e.g. Jasper Tata | Model Town | 98765 43210"></div>
+          <div class="row2">
+            <div class="field"><label for="g_cta">Primary CTA</label><input id="g_cta" value="Book your test drive today"></div>
+            <div class="field"><label for="g_style">Visual style</label><input id="g_style" value="Bright premium modern showroom, glossy floors, realistic reflections, energetic dealership-ad feel"></div>
+          </div>
+          <div class="check-row"><input type="checkbox" id="g_endcardOn" checked><label style="margin:0;font-weight:700;" for="g_endcardOn">Include a closing end card</label></div>
+          <div class="field"><label for="g_endcard">End card content</label><textarea id="g_endcard" placeholder="e.g. Jasper Tata | Book your Safari test drive today | Model Town | 98765 43210"></textarea></div>
+        </div>
+      </div>
+
+      <div class="card" id="dynamicFieldsCard" style="display:none;">
+        <div class="head"><h2>7. Category details</h2><span class="step">Shown for selected categories</span></div>
+        <div class="body" id="dynamicFieldsBody"></div>
+      </div>
+
+    </div>
+
+    <div class="right-col">
+      <div class="preview-wrap">
+        <div class="card preview-card">
+          <div class="head">
+            <div>
+              <h2>Lumina prompt</h2>
+              <div class="preview-meta" id="previewMeta" style="margin-top:4px;"></div>
+            </div>
+            <span class="copy-toast" id="copyToast"></span>
+          </div>
+          <div class="body tight" style="padding:14px 18px;">
+            <div class="toolbar" style="margin-top:0;">
+              <button class="btn primary" id="generateBtn" type="button">Generate prompt</button>
+              <button class="btn" id="copyBtn" type="button" disabled>Copy all parts</button>
+              <button class="btn" id="saveGenBtn" type="button" disabled>Save to library</button>
+            </div>
+          </div>
+          <div class="checks" id="checksPanel" style="display:none;"></div>
+          <div id="promptOutput">
+            <div class="prompt-empty"><span class="big">&#127916;</span>Pick your categories and fill in the dealer details, then hit Generate.</div>
+          </div>
+        </div>
+
+        <div class="card" id="attachCard" style="display:none;">
+          <div class="head"><h2>Attach in Lumina</h2><span class="step">Designer checklist</span></div>
+          <div class="body tight" style="padding:14px 18px;">
+            <div class="attach-list" id="attachList"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="head"><h2>Saved prompts</h2><span class="step">This dealer</span></div>
+          <div class="body tight">
+            <div class="lib-list" id="genLibList"><div class="lib-empty">Nothing saved yet.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot-note">Actor and dealer libraries are shared across your team. Reference photos are stored as small thumbnails for identification &mdash; keep the high-resolution originals to attach in Lumina. Pronunciation and delivery rules come from <code>AI Video Promoter &mdash; Script Rules</code> and are injected into every prompt that contains speech.</div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ===================== CATEGORY LIBRARY =====================
+   Beat shape: {title, shot, dialogue, card, note}
+   - shot     : camera / shot-type direction (real dealer reels are shot-type driven)
+   - dialogue : what is said; in silent mode this is rendered as a visual story beat
+   - card     : EXACT on-screen string, collected into the spelling-lock block
+   - note     : any other visual note
+   Shot vocabulary is drawn from the Galaxy Honda and Premier Motors reference reels:
+   wide exterior establishing -> walk-in tracking -> medium beside car -> macro detail
+   -> scenic road b-roll -> front beauty shot -> clean end card.
+============================================================ */
+var CATEGORIES = [
+  { id:"delivery", hue:350, label:"Delivery / Handover", music:"warm emotional uplifting track, soft piano into strings",
+    purpose:"Celebrate the customer's new car purchase — the highest-emotion content type.",
+    mandatory:[{id:"deliveryMoment", label:"The handover moment"}],
+    avoid:["Price or discount mentions — this is an emotional post, not an offer post","Competitor references","Generic stock phrases with no real emotion"],
+    fields:[
+      {id:"customerName", label:"Customer name (optional)", type:"text", ph:"Leave blank to use “our valued customer”"},
+      {id:"deliveryMoment", label:"Describe the handover moment", type:"textarea", ph:"e.g. young family, kids seeing the car for the first time, keys handed over outside the showroom"}
+    ],
+    beats:function(f, ctx){ return [
+      {title:"Welcome + congratulations", shot:"Wide exterior establishing shot of the showroom with the new car and the family, slow push-in.", shotAlt:"Wide exterior establishing shot of the showroom with the new car outside, ribbon or garland on the bonnet, slow push-in, no people in frame.",
+       dialogue:"Congratulate "+(f.customerName||"our valued customer")+" by name and name the model. Warm and genuine, not scripted.",
+       card:"Welcome to the "+ctx.dealerShort+" family"},
+      {title:"The handover moment", shot:"Medium two-shot at the car, then a close-up cutaway of the keys passing hand to hand.", shotAlt:"Close-up of the keys resting on the bonnet, then a slow tilt up the car — hands only, no faces.",
+       dialogue:"Show and narrate this specific moment: "+(f.deliveryMoment||"the family receiving the car, a genuine reaction"),
+       note:"Let the reaction play — no graphics over this beat."},
+      {title:"Why this was the right choice", shot:"Slow orbit around the car with the family in frame.", shotAlt:"Slow orbit around the car, showroom lights sweeping across the paint.",
+       dialogue:"One line validating the choice of this model — a feeling, not a spec."},
+      {title:"Gratitude + the road ahead", shot:"Wide shot, family beside the car, presenter or dealer team gesturing toward the road.", shotAlt:"Wide shot of the car pulling out of the showroom driveway onto the road.",
+       dialogue:"Thank the customer and gesture toward the journeys ahead with this car.",
+       card:"Your story on the road begins now"}
+    ];}
+  },
+  { id:"festival", hue:60, label:"Festival / Occasion", music:"warm festive underscore with light percussion, celebratory but not loud",
+    purpose:"Connect the brand with a cultural moment. Emotion first — never lead with price.",
+    mandatory:[{id:"occasionName", label:"Occasion name"}],
+    avoid:["Leading with price or discount language during a festival beat","Generic “happy [festival]” with no dealer voice"],
+    fields:[
+      {id:"occasionName", label:"Occasion", type:"text", ph:"e.g. Diwali, Raksha Bandhan, Father's Day"},
+      {id:"occasionType", label:"Occasion type (sets the tone)", type:"select", options:["Hindu festival — warm, celebratory, blessings","Islamic occasion — inclusive, community-focused","National day — pride-forward, mission-linked","International awareness day — educational, brand philosophy","Personal occasion (Father's/Mother's Day) — emotional, no product push"]},
+      {id:"festiveDressing", label:"Festive dressing in frame", type:"text", ph:"e.g. marigold garlands, diyas at the entrance, rangoli on the showroom floor"}
+    ],
+    beats:function(f, ctx){ return [
+      {title:"Occasion greeting", shot:"Wide exterior of the showroom dressed for the occasion"+(f.festiveDressing?(" — "+f.festiveDressing):"")+", presenter centred.", shotAlt:"Wide exterior of the showroom dressed for the occasion"+(f.festiveDressing?(" — "+f.festiveDressing):"")+", no people in frame.",
+       dialogue:"Open with a sincere, specific greeting for "+(f.occasionName||"the occasion")+". Tone: "+(f.occasionType||"warm and celebratory")+".",
+       card:"Happy "+(f.occasionName||"[Occasion]")},
+      {title:"Emotional connection", shot:"Medium shot, warm practical lighting, festive decor visible behind.", shotAlt:"Detail shots of the festive decor — diya flames, marigold, warm bokeh — cut against the car.",
+       dialogue:"Talk about what the occasion means to people — not what the car means. Human before commercial."},
+      {title:"Dealer tie-in", shot:"Slow push-in past the festive decor to the car on the showroom floor.",
+       dialogue:"One soft line linking the dealer to the occasion. Skip it if it feels forced."},
+      {title:"Warm closing wish", shot:"Presenter beside the car, warm smile, festive bokeh behind.", shotAlt:"Hero shot of the car with festive bokeh behind, slow push-in.",
+       dialogue:"Close with a warm occasion wish, then a light invitation to visit the showroom.",
+       card:(f.occasionName?(f.occasionName+" greetings from "+ctx.dealerShort):("Greetings from "+ctx.dealerShort))}
+    ];}
+  },
+  { id:"offer", hue:165, label:"Offer / Deal", music:"upbeat modern commercial track, energetic but sitting under the voice",
+    purpose:"Drive leads. Create urgency without cheapening the brand. Clarity over cleverness.",
+    mandatory:[{id:"cashDiscount", label:"Cash discount amount"}],
+    avoid:["Percentage-off framing — use “up to ₹X” instead","Vague “great offer” language","More than three number cards in one video — the model drops the extras"],
+    fields:[
+      {id:"cashDiscount", label:"Cash discount — amount only", type:"text", ph:"e.g. ₹2,25,000"},
+      {id:"downPayment", label:"Down payment — amount only", type:"text", ph:"e.g. ₹0"},
+      {id:"interestRate", label:"Interest rate — rate only", type:"text", ph:"e.g. 7.49%"},
+      {id:"warrantyYears", label:"Warranty (years)", type:"text", ph:"e.g. 7"},
+      {id:"warrantyKm", label:"Warranty (km)", type:"text", ph:"e.g. Unlimited"},
+      {id:"expirySignal", label:"Urgency / expiry signal", type:"text", ph:"e.g. this month only, limited units, before the price hike"}
+    ],
+    beats:function(f, ctx){ var s=[];
+      s.push({title:"Attention hook", shot:"Wide exterior establishing shot, presenter addressing camera, showroom facade behind.", shotAlt:"Wide exterior establishing shot of the showroom facade and signage, slow push-in.",
+        dialogue:"Open with a value headline or question hook for the model — energetic, not shouty.",
+        card:ctx.dealerShort+" Offers"});
+      if(f.cashDiscount) s.push({title:"Cash benefit", shot:"Backward tracking shot as the presenter walks beside the car.",
+        shotAlt:"Backward tracking shot moving along the flank of the car on the showroom floor, no people in frame.",
+        dialogue:"State the cash benefit. Follow the number and currency rules — say the amount in words, never say “rupees”.",
+        card:stripSuffix(f.cashDiscount,"Cash Discount"), cardSub:"Cash Discount"});
+      if(f.warrantyYears) s.push({title:"Warranty", shot:"Presenter stops beside the bonnet, gestures toward the car; shield icon card animates in.",
+        shotAlt:"Slow push-in on the bonnet and badge; shield icon card animates in over the shot.",
+        dialogue:"State the warranty as "+f.warrantyYears+" years, "+(f.warrantyKm||"unlimited")+" kilometres.",
+        card:String(f.warrantyYears).replace(/\s*years?$/i,"")+"-Year Warranty", cardSub:(f.warrantyKm||"Unlimited")+" Kilometres",
+        note:"Use a shield icon on this card."});
+      if(f.downPayment) s.push({title:"Down payment", shot:"Medium shot, presenter counting the benefit on her fingers.",
+        shotAlt:"Interior detail shot — dashboard and steering wheel, slow slider move.",
+        dialogue:"State the down payment framing.",
+        card:stripSuffix(f.downPayment,"Down Payment"), cardSub:"Down Payment"});
+      if(f.interestRate) s.push({title:"Interest rate", shot:"Medium shot beside the car, finance card replaces the previous card.",
+        shotAlt:"Front three-quarter beauty shot; finance card replaces the previous card.",
+        dialogue:"State the interest rate. A decimal is read digit by digit in English style — 7.49% is “seven point four nine percent”.",
+        card:stripSuffix(f.interestRate,"Interest Rate"), cardSub:"Interest Rate",
+        note:"Small print under the card: Terms & Conditions Apply"});
+      s.push({title:"Urgency + CTA", shot:"Wide frontal shot with the car behind the presenter, slow push-in.",
+        shotAlt:"Wide frontal hero shot of the car, slow push-in.",
+        dialogue:"Land the urgency signal ("+(f.expirySignal||"limited-time offer")+") and close on the call to action.",
+        card:ctx.cta});
+      return s; }
+  },
+  { id:"feature", hue:215, label:"Product Feature", music:"modern cinematic bed with a clean beat, confident and premium",
+    purpose:"Educate and desire. Turn specs into feelings, not a spec dump.",
+    mandatory:[{id:"feature1", label:"At least one feature"},{id:"benefit1", label:"…and what it means for the buyer"}],
+    avoid:["Raw spec lists without translation into a benefit","“Industry-first” claims with no explanation","Naming a competitor unless the comparison beat is switched on"],
+    fields:[
+      {id:"feature1", label:"Feature 1", type:"text", ph:"e.g. 6 airbags"},
+      {id:"benefit1", label:"→ Benefit / feeling", type:"text", ph:"e.g. your family is protected — peace of mind, not worry"},
+      {id:"feature2", label:"Feature 2 (optional)", type:"text", ph:"e.g. 27.97 km/l hybrid mileage"},
+      {id:"benefit2", label:"→ Benefit / feeling", type:"text", ph:"e.g. months between fuel stops"},
+      {id:"identity", label:"Who this car is right for", type:"text", ph:"e.g. young families who want one car for the city and the highway"},
+      {id:"competitorCompare", label:"Pull a customer from a competitor model?", type:"checkbox"},
+      {id:"competitorModel", label:"Competitor model", type:"text", ph:"e.g. Honda Elevate", showIf:"competitorCompare"},
+      {id:"customerSegment", label:"Customer's evident budget/segment", type:"text", ph:"e.g. mid-size SUV buyer", showIf:"competitorCompare"}
+    ],
+    beats:function(f, ctx){ var s=[];
+      s.push({title:"Desire hook", shot:"Slow macro pan across the car's signature detail — headlamp DRL, grille or badge — shallow depth of field.",
+        dialogue:"Open with the feeling or situation, not the spec."});
+      if(f.feature1) s.push({title:"Feature 1", shot:"Macro detail shot of "+f.feature1+" with a slow rack focus.",
+        dialogue:f.feature1+" translated into: "+(f.benefit1||"the emotional payoff, one sentence"),
+        card:f.feature1});
+      if(f.feature2) s.push({title:"Feature 2", shot:"Interior close-up or detail shot of "+f.feature2+", slow slider move.",
+        dialogue:f.feature2+" translated into: "+(f.benefit2||"the emotional payoff, one sentence"),
+        card:f.feature2});
+      if(f.competitorCompare){
+        s.push({title:"Competitive pivot", shot:"Medium shot beside the car, presenter addressing camera directly.", shotAlt:"Static medium shot of the car, comparison figures animating on screen.",
+          dialogue:"Acknowledge interest in "+(f.competitorModel||"the competitor model")+" first, then land exactly one or two comparison points (on-road price, running cost, resale or EMI). Never criticise the competitor — it must read as upgrade advice. Stay in the "+(f.customerSegment||"same or adjacent segment")+" — never pitch a downgrade."});
+      }
+      s.push({title:"Who it's for", shot:"Wide shot of the car on the showroom floor, presenter beside it or a clean beauty angle.", shotAlt:"Clean wide beauty angle of the car on the showroom floor.",
+        dialogue:"One line on who this car is right for: "+(f.identity||"name the driver this model fits")});
+      return s; }
+  },
+  { id:"ev", hue:175, label:"EV / Electric", music:"clean modern electronic bed, futuristic and calm",
+    purpose:"Convert skeptics, excite believers. Position EV as an upgrade, not a compromise.",
+    mandatory:[{id:"concernOrHighlight", label:"The concern to address or tech to highlight"}],
+    avoid:["Overpromising range with no qualifier","Ignoring the stated buyer persona"],
+    fields:[
+      {id:"personaSegment", label:"Who is this speaking to?", type:"select", options:["The Range Skeptic — needs reassurance on range and charging","The Progressive Achiever — wants early-adopter status","The Cost Calculator — wants running-cost maths","The Values Driver — environment and sustainability"]},
+      {id:"concernOrHighlight", label:"Concern to address OR tech to highlight", type:"text", ph:"e.g. real-world range, battery safety, fast-charging time"}
+    ],
+    beats:function(f, ctx){ return [
+      {title:"Future-forward hook", shot:"Low-angle beauty shot of the EV, ambient light strip and closed grille in frame, silent glide-by.",
+       dialogue:"Open with a confident statement about driving electric — not apologetic, not overselling."},
+      {title:"Address the concern", shot:"Macro shot of the charging port with the cable going in, then the range readout on the display.",
+       dialogue:"Speak to "+(f.personaSegment||"the target buyer")+". Cover: "+(f.concernOrHighlight||"one concrete range, charging or tech point"),
+       card:f.concernOrHighlight||""},
+      {title:"What it feels like", shot:"Interior driver POV, hands on wheel, quiet pull-away; cabin ambience.",
+       dialogue:"What driving electric actually feels like — quiet, instant torque, effortless."},
+      {title:"Credibility", shot:"Wide shot of the EV on the showroom floor under clean lighting.",
+       dialogue:"One line of credibility — safety testing, battery warranty or scale."}
+    ];}
+  },
+  { id:"newlaunch", hue:275, label:"New Launch", music:"building anticipation track with a clear drop at the reveal",
+    purpose:"Build hype and anticipation — make the audience feel like insiders.",
+    mandatory:[{id:"launchDate", label:"Launch date or countdown"}],
+    avoid:["Giving away the full car in a pre-launch teaser","A flat feature-list reveal with no build-up"],
+    fields:[
+      {id:"launchPhase", label:"Phase", type:"select", options:["Pre-launch teaser — tease, mystify, count down","Launch day — reveal, celebrate, book now","Post-launch — first impressions, test drive invite"]},
+      {id:"launchDate", label:"Date / countdown", type:"text", ph:"e.g. 15th October, or 1 Day To Go"},
+      {id:"teaserHint", label:"One hint to give away", type:"text", ph:"e.g. a new design language, a name, a tech first"}
+    ],
+    beats:function(f, ctx){
+      var isLaunchDay = (f.launchPhase||"").indexOf("Launch day")===0;
+      var s=[];
+      s.push({title:"Curiosity hook", shot: isLaunchDay ? "Full reveal — lights up on the car, wide hero angle." : "Silhouette or partial reveal under a cover, hard side light, detail glints only.",
+        dialogue: isLaunchDay ? "Today it's real — say so plainly and confidently." : "Open cryptic and confident. Hold the reveal back."});
+      s.push({title:"The hint", shot:"Single macro detail — one signature line, lamp or badge, nothing else readable.",
+        dialogue:"Give away exactly one detail: "+(f.teaserHint||"one design, tech or name hint")});
+      s.push({title:"Date", shot:"Clean graphic beat over a dark frame or the covered car.",
+        dialogue:"State the date or countdown clearly.",
+        card:f.launchDate||"Coming Soon"});
+      s.push({title:"CTA", shot: isLaunchDay ? "Wide hero shot of the car with the presenter or showroom behind." : "Slow pull-back from the covered car.", shotAlt: isLaunchDay ? "Wide hero shot of the car on the showroom floor." : "Slow pull-back from the covered car.",
+        dialogue: isLaunchDay ? "Invite them to book or visit now." : "Invite them to join the waiting list.",
+        card:ctx.cta});
+      return s; }
+  },
+  { id:"testdrive", hue:130, label:"Test Drive", music:"light, inviting acoustic-modern bed",
+    purpose:"Remove the commitment barrier — make it feel like an experience, not a sales visit.",
+    mandatory:[{id:"location", label:"Where the test drive happens"}],
+    avoid:["Making it sound transactional or high-pressure"],
+    fields:[
+      {id:"location", label:"Location", type:"text", ph:"e.g. the showroom, or an event location"},
+      {id:"dateWindow", label:"Date / time window", type:"text", ph:"e.g. this weekend, 10am–6pm"}
+    ],
+    beats:function(f, ctx){ return [
+      {title:"The invitation", shot:"Driver's door opening from outside, seat and wheel visible — an invitation into the car.",
+       dialogue:"Open with the feeling that makes someone want to get behind the wheel — not a pitch."},
+      {title:"The drive", shot:"Rolling low-angle tracking shot of the car on an open road, then interior POV over the wheel.",
+       dialogue:"Describe what the drive feels like — the road, the response, the seat."},
+      {title:"No pressure", shot:"Medium shot of the presenter beside the car at the showroom entrance.", shotAlt:"Slow reveal of the car parked at the showroom entrance, doors closed.",
+       dialogue:"Make clear there is no pressure to buy — just come and experience it."},
+      {title:"Logistics + CTA", shot:"Wide showroom entrance shot with the car in frame.",
+       dialogue:"State where and when: "+(f.location||"the showroom")+(f.dateWindow?(", "+f.dateWindow):"")+".",
+       card:ctx.cta}
+    ];}
+  },
+  { id:"testimonial", hue:320, label:"Customer Testimonial", music:"soft warm bed, low — the voice carries this one",
+    purpose:"Social proof — let a real customer sell for you.",
+    mandatory:[{id:"customerContext", label:"Who the customer is"},{id:"specificMoment", label:"The specific moment they loved"}],
+    avoid:["Sounding scripted or stock — keep it specific to this customer","Over-polished delivery; small hesitations read as real"],
+    fields:[
+      {id:"customerContext", label:"Who they are / what they bought", type:"text", ph:"e.g. a first-time buyer, bought the Nexon EV for a daily commute"},
+      {id:"specificMoment", label:"The specific moment or feature they loved", type:"textarea", ph:"e.g. how easy the paperwork was, the feature that won them over"}
+    ],
+    beats:function(f, ctx){ return [
+      {title:"Customer reaction", shot:"Handheld medium shot, customer beside their car, natural light, slight imperfection in the framing.", shotAlt:"Handheld shot of the car in everyday surroundings, natural light.",
+       dialogue:"Open on the customer's genuine reaction or their own words. Ordinary, unpolished delivery — not a presenter voice."},
+      {title:"Context", shot:"Cutaway to the car with the customer in soft focus behind.", shotAlt:"Cutaway to the car in its everyday setting, shallow depth of field.",
+       dialogue:"Establish who they are and what they bought: "+(f.customerContext||"who they are, what they bought")},
+      {title:"The moment", shot:"Close-up on the customer speaking, then a matching detail shot of what they mention.", shotAlt:"Detail shot of the feature being referenced, slow rack focus.",
+       dialogue:"Detail: "+(f.specificMoment||"the moment or feature that won them over")},
+      {title:"Dealer thanks", shot:"Wide shot of the customer and the dealership team beside the car.", shotAlt:"Wide shot of the car outside the showroom, dealership signage in frame.",
+       dialogue:"The dealer thanks the customer and invites viewers to have their own experience.",
+       card:ctx.cta}
+    ];}
+  },
+  { id:"walkaround", hue:245, label:"Showroom Walkaround", music:"smooth premium bed, steady tempo for a continuous walk",
+    purpose:"Give the model-page visitor a feel for the showroom and the car in one continuous flow.",
+    mandatory:[{id:"zonesToHighlight", label:"The zones or features to walk through"}],
+    avoid:["A static, list-like tour with no narrative thread","Cutting so often that the space stops reading as one place"],
+    fields:[
+      {id:"zonesToHighlight", label:"Zones/features to walk through", type:"textarea", ph:"e.g. glass facade, delivery bay, the model on the floor, the accessories wall"}
+    ],
+    beats:function(f, ctx){ return [
+      {title:"Exterior establishing", shot:"Wide exterior of the showroom facade and signage, presenter walking into frame.", shotAlt:"Wide exterior of the showroom facade and signage, slow dolly in toward the entrance.",
+       dialogue:"Open outside the showroom, gesturing toward the facade, addressing camera.",
+       card:ctx.dealerShort},
+      {title:"Walk in", shot:"Continuous gimbal tracking shot following the presenter through the glass doors onto the showroom floor.", shotAlt:"Continuous gimbal tracking shot moving through the glass doors onto the showroom floor, camera-led, no people in frame.",
+       dialogue:"Narrate the space naturally as the walk continues — one unbroken thought."},
+      {title:"The zones", shot:"Continuing gimbal walk past: "+(f.zonesToHighlight||"the main showroom zones")+", holding on each for a beat.",
+       dialogue:"Cover the zones in one flowing walk without listing them mechanically."},
+      {title:"Closing CTA", shot:"Presenter stops beside the hero car, hand on the bonnet, camera settles.", shotAlt:"Camera settles on the hero car, front three-quarter, showroom lighting.",
+       dialogue:"Invite the viewer to visit and see it in person.",
+       card:ctx.cta}
+    ];}
+  }
+];
+var CAT_BY_ID = {}; CATEGORIES.forEach(function(c){ CAT_BY_ID[c.id]=c; });
+
+var NARRATION = {
+  presenter:{ label:"Presenter on camera", speaks:true, onCameraPerson:true, lipSync:true,
+    hint:"A promoter speaks to camera throughout — the format in the Galaxy Honda and Premier Motors references." },
+  voiceover:{ label:"Voiceover over b-roll", speaks:true, onCameraPerson:false, lipSync:false,
+    hint:"No one on camera. A voice narrates over car and showroom footage — safest mode for feature and close-up videos." },
+  silent:{ label:"Music + on-screen text only", speaks:false, onCameraPerson:false, lipSync:false,
+    hint:"No speech at all. The story is carried by footage, on-screen text and music — how most delivery and festive reels are actually cut." },
+  customer:{ label:"Customer speaking to camera", speaks:true, onCameraPerson:true, lipSync:true,
+    hint:"A real customer speaks, not a professional promoter. Delivery should stay unpolished." }
+};
+
+/* Spoken pace: Hindi/Hinglish ad delivery sits near 2.2 words/second once natural
+   pauses are allowed for. Scenes shorter than this floor cannot hold a spoken line. */
+var WORDS_PER_SECOND = 2.2;
+function stripSuffix(value, suffix){
+  var v = String(value||"").trim();
+  if(v.toLowerCase().slice(-suffix.length) === suffix.toLowerCase()) v = v.slice(0, -suffix.length).trim();
+  return v;
+}
+var MIN_SPOKEN_SCENE = 2.0;
+
+/* ===================== SCRIPT RULEBOOK (gender-adapted) ===================== */
+function rulebookText(gender){
+  var verbLine = gender==="male"
+    ? "The promoter is male: lock masculine Hindi verb forms throughout — “रहा हूं”, “करता हूं”, “बताता हूं” — never the feminine forms."
+    : "The promoter is female: lock feminine Hindi verb forms throughout — “रही हूं”, “करती हूं”, “बताती हूं” — never the masculine forms.";
+  return [
+    "1. PERSONA & DELIVERY",
+    "- "+verbLine,
+    "- Base language is Hindi/Hinglish, not English. Keep technical terms (EMI, on-road price, test drive, variant, down payment) in English rather than translating them into formal Hindi.",
+    "- Speak in full, natural sentences. Never deliver a list — a human presenter doesn't talk that way.",
+    "- Don't reuse the same phrasing twice in the same script.",
+    "",
+    "2. LANGUAGE STYLE",
+    "- Keep vocabulary simple. Avoid literary Hindi that doesn't come up in daily speech (समय, सुविधा, जानकारी, कारण, रूचि) — use the plain English word instead (time, facility, information, reason, interest).",
+    "- Avoid scripted-sounding filler: “क्या यह सही है?”, “दोस्त”, “बहुत अच्छा”.",
+    "- Short, punchy sentences — one idea per sentence.",
+    "",
+    "3. NUMBER, CURRENCY & PERCENTAGE PRONUNCIATION",
+    "- Spell out numbers in words, never digit by digit: 307 is “Three Hundred Seven”.",
+    "- Decimals read the point as “point”: 42.8 is “Forty-Two point Eight”.",
+    "- Percentages in full: 8.99% is “eight point nine nine percent”.",
+    "- Currency: never say “Rupees”, “Rs.” or “₹” out loud — state the number in words only (“One Lakh Fifty Thousand”).",
+    "- Variant names with (O) or /O are said as “Optional”, never the letter O: “VXi (O)” is “V-X-I Optional”.",
+    "",
+    "4. TECHNICAL SPEC PRONUNCIATION",
+    "Split the number from the unit, then convert each separately:",
+    "- Mileage “45.71 kmpl” becomes “forty-five point seven one” (drop the unit).",
+    "- Engine “124.8cc” becomes “one hundred twenty-four point eight C C engine”.",
+    "- Torque “10.6 Nm” becomes “ten point six N M”.",
+    "- Power “11.38 PS” becomes “eleven point three eight P S of power”.",
+    "",
+    "5. ABBREVIATIONS",
+    "Read as separate letters: EMI is E-M-I, ABS is A-B-S, CBS is C-B-S, ROI is R-O-I. Exception: CIBIL is said as a word.",
+    "",
+    "6. BREVITY",
+    "- One concise sentence per feature, price or spec claim — don't lecture.",
+    "- Highlight, don't list: one or two strongest points only.",
+    "",
+    "7. COMPETITIVE COMPARISON (only if the script contains a comparison beat)",
+    "Acknowledge the competitor first, then land one or two data points — on-road price, running cost, resale, service network or EMI. Structure: “[Competitor] एक अच्छी कार है, लेकिन आपके budget में [our model] भी एक excellent option है”, then a soft CTA. Never criticise the competitor.",
+    "",
+    "8. RECOMMENDATION LOGIC",
+    "- Never pitch a model below the customer's evident budget or segment.",
+    "- Compare only within the same or an adjacent segment.",
+    "",
+    "9. ACCURACY",
+    "Never invent a price, EMI, mileage, interest rate or waiting period beyond the figures given in this prompt. If a number isn't supplied, use a “starting from” framing instead of inventing one."
+  ].join("\n");
+}
+
+/* ===================== STATE ===================== */
+var state = {
+  selectedCats: [], selectedActorId: null,
+  logoDataUri: null, actorPhotoDataUri: null,
+  dealerPhotos: [], currentDealerDocId: null,
+  actors: [], dealers: [],
+  db: null, lastPrompt: "", lastPromptParts: [], lastChecks: []
+};
+var dynFieldValues = {};
+var DRAFT_KEY = "dvpb.draft.v2";
+
+/* ===================== SMALL HELPERS ===================== */
+function el(id){ return document.getElementById(id); }
+function val(id){ var e = el(id); return e ? String(e.value||"").trim() : ""; }
+function setText(node, txt){ node.textContent = txt==null ? "" : String(txt); }
+
+/* Build a node tree without innerHTML so shared-library strings can never
+   execute. Everything read from the database is untrusted by contract. */
+function mk(tag, cls, txt){
+  var n = document.createElement(tag);
+  if(cls) n.className = cls;
+  if(txt!=null) n.textContent = String(txt);
+  return n;
+}
+function isSafeImageData(s){
+  return typeof s === "string" && /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=\s]+$/.test(s);
+}
+
+function readAndCompress(file, maxDim, quality, cb){
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var img = new Image();
+    img.onload = function(){
+      var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      var cw = Math.max(1, Math.round(img.width*scale)), ch = Math.max(1, Math.round(img.height*scale));
+      var canvas = document.createElement("canvas");
+      canvas.width = cw; canvas.height = ch;
+      canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
+      try{ cb(canvas.toDataURL("image/jpeg", quality)); }catch(err){ cb(null); }
+    };
+    img.onerror = function(){ cb(null); };
+    img.src = e.target.result;
+  };
+  reader.onerror = function(){ cb(null); };
+  reader.readAsDataURL(file);
+}
+
+function approxDocBytes(obj){
+  try{ return new Blob([JSON.stringify(obj)]).size; }catch(e){ return JSON.stringify(obj).length; }
+}
+
+/* ===================== DB ===================== */
+function setDbStatus(on, text){
+  el("dbDot").className = "dot " + (on ? "on" : "off");
+  setText(el("dbStatusText"), text);
+}
+function showNotice(msg, isError){
+  var slot = el("dbNoticeSlot");
+  slot.innerHTML = "";
+  var d = mk("div", "notice" + (isError?" error":""));
+  d.textContent = msg;
+  slot.appendChild(d);
+}
+function dbError(action, err){
+  var code = (err && err.code) ? err.code : "unknown";
+  var msg = "Couldn't " + action + " — " + code + ".";
+  if(code === "invalid_argument") msg += " This is usually a document over the 256 KB limit: remove a photo or two and try again.";
+  else if(code === "quota_exceeded") msg += " The shared library is full — delete some old entries first.";
+  else if(code === "resource_exhausted") msg += " Too many writes at once — wait a moment and retry.";
+  else if(code === "not_granted" || code === "revoked") msg += " This view no longer has access to the shared library.";
+  showNotice(msg, true);
+}
+
+async function initDb(){
+  try{
+    var db = (window.claude && typeof window.claude.use === "function") ? await window.claude.use("db") : null;
+    if(!db){
+      setDbStatus(false, "Shared library unavailable in this view");
+      showNotice("Shared library unavailable here — the tool still generates prompts normally, but actors, dealer profiles and saved prompts won't persist. Open the published link directly if this looks wrong.");
+      return;
+    }
+    state.db = db;
+    setDbStatus(true, "Shared library connected");
+    subscribeLibraries();
+  }catch(err){ setDbStatus(false, "Shared library unavailable"); }
+}
+
+function subscribeLibraries(){
+  if(!state.db) return;
+  state.db.collection("actors").orderBy("name","asc").onSnapshot(function(snap){
+    state.actors = snap.docs.map(function(d){ var v=d.data()||{}; v._id=d.id; return v; });
+    renderActorLib();
+  }, function(e){ dbError("load the actor library", e); });
+  state.db.collection("dealers").orderBy("dealerName","asc").onSnapshot(function(snap){
+    state.dealers = snap.docs.map(function(d){ var v=d.data()||{}; v._id=d.id; return v; });
+    renderDealerSelect();
+  }, function(e){ dbError("load the dealer library", e); });
+}
+
+function loadGenerationsForCurrentDealer(){
+  var list = el("genLibList");
+  if(!state.db){ list.innerHTML=""; list.appendChild(mk("div","lib-empty","Shared library not connected.")); return; }
+  var name = val("f_dealerName");
+  list.innerHTML = "";
+  if(!name){ list.appendChild(mk("div","lib-empty","Enter a dealer name to see its saved prompts.")); return; }
+  state.db.collection("generations").where("dealerName","==",name).orderBy("createdAt","desc").limit(20).get().then(function(snap){
+    list.innerHTML = "";
+    if(snap.empty){ list.appendChild(mk("div","lib-empty","Nothing saved yet for "+name+".")); return; }
+    snap.docs.forEach(function(d){
+      var v = d.data()||{};
+      var row = mk("div","lib-item");
+      row.appendChild(mk("div","thumb-fallback","▶"));
+      var meta = mk("div","meta");
+      var partCount = (v.parts && v.parts.length>1) ? (" · "+v.parts.length+" parts") : "";
+      meta.appendChild(mk("span","n",(v.categories||"Prompt")+partCount));
+      meta.appendChild(mk("span","d",v.createdAtLabel||""));
+      row.appendChild(meta);
+      row.addEventListener("click", function(){
+        var parts = (v.parts && v.parts.length) ? v.parts
+          : [{partNum:1,totalParts:1,start:0,end:0,duration:0,isFirst:true,isLast:true,text:v.promptText||""}];
+        state.lastPromptParts = parts;
+        state.lastPrompt = parts.map(function(p){return p.text;}).join("\n\n\n===== NEXT PART =====\n\n\n");
+        renderPromptOutput(parts);
+        renderChecks([]);
+        el("copyBtn").disabled = false;
+        el("saveGenBtn").disabled = false;
+      });
+      var del = mk("button","del","×");
+      del.type = "button";
+      del.title = "Delete this saved prompt";
+      del.addEventListener("click", function(ev){
+        ev.stopPropagation();
+        if(!confirm("Delete this saved prompt?")) return;
+        state.db.collection("generations").doc(d.id).delete()
+          .then(loadGenerationsForCurrentDealer)
+          .catch(function(e){ dbError("delete the saved prompt", e); });
+      });
+      row.appendChild(del);
+      list.appendChild(row);
+    });
+  }).catch(function(e){ dbError("load saved prompts", e); });
+}
+
+/* ===================== CATEGORY UI ===================== */
+function renderCategoryGrid(){
+  var grid = el("catGrid");
+  grid.innerHTML = "";
+  CATEGORIES.forEach(function(c){
+    var chip = mk("button","cat-chip");
+    chip.type = "button";
+    chip.style.setProperty("--h", c.hue);
+    chip.setAttribute("aria-pressed", state.selectedCats.indexOf(c.id) > -1 ? "true" : "false");
+    chip.appendChild(mk("span","name",c.label));
+    chip.appendChild(mk("span","purpose",c.purpose));
+    chip.addEventListener("click", function(){
+      var idx = state.selectedCats.indexOf(c.id);
+      if(idx>-1) state.selectedCats.splice(idx,1); else state.selectedCats.push(c.id);
+      renderCategoryGrid();
+      renderDynamicFields();
+      suggestMusic();
+      saveDraft();
+    });
+    grid.appendChild(chip);
+  });
+}
+
+function suggestMusic(){
+  var musicEl = el("g_music");
+  if(musicEl.dataset.touched === "1") return;
+  var first = state.selectedCats.length ? CAT_BY_ID[state.selectedCats[0]] : null;
+  musicEl.value = first ? first.music : "";
+}
+
+function renderDynamicFields(){
+  var card = el("dynamicFieldsCard"), body = el("dynamicFieldsBody");
+  if(state.selectedCats.length === 0){ card.style.display="none"; body.innerHTML=""; return; }
+  card.style.display = "block";
+  body.innerHTML = "";
+  state.selectedCats.forEach(function(catId){
+    var cat = CAT_BY_ID[catId];
+    if(!dynFieldValues[catId]) dynFieldValues[catId] = {};
+    var fs = document.createElement("fieldset");
+    var legend = document.createElement("legend");
+    var sw = mk("span","sw"); sw.style.background = "hsl("+cat.hue+" 45% 45%)";
+    legend.appendChild(sw);
+    legend.appendChild(document.createTextNode(cat.label));
+    fs.appendChild(legend);
+    fs.appendChild(mk("div","fs-purpose","Needed: " + (cat.mandatory||[]).map(function(m){ return m.label; }).join(" · ")));
+
+    (cat.fields||[]).forEach(function(f){
+      if(f.showIf && !dynFieldValues[catId][f.showIf]) return;
+      var wrap = mk("div","field");
+      var inputId = "dyn_"+catId+"_"+f.id;
+      var lab = document.createElement("label");
+      lab.setAttribute("for", inputId);
+      lab.textContent = f.label;
+      var input;
+      if(f.type === "textarea"){
+        input = document.createElement("textarea");
+        input.placeholder = f.ph||""; input.value = dynFieldValues[catId][f.id]||"";
+      } else if(f.type === "select"){
+        input = document.createElement("select");
+        f.options.forEach(function(opt){
+          var o = document.createElement("option"); o.value=opt; o.textContent=opt; input.appendChild(o);
+        });
+        input.value = dynFieldValues[catId][f.id] || f.options[0];
+        dynFieldValues[catId][f.id] = input.value;
+      } else if(f.type === "checkbox"){
+        input = document.createElement("input");
+        input.type = "checkbox"; input.checked = !!dynFieldValues[catId][f.id];
+        wrap.style.display="flex"; wrap.style.alignItems="center"; wrap.style.gap="7px";
+        lab.style.margin="0"; lab.style.order="2"; input.style.width="auto";
+      } else {
+        input = document.createElement("input");
+        input.type = "text"; input.placeholder = f.ph||""; input.value = dynFieldValues[catId][f.id]||"";
+      }
+      input.id = inputId;
+      var handler = function(){
+        dynFieldValues[catId][f.id] = (f.type==="checkbox") ? input.checked : input.value;
+        saveDraft();
+        if(f.type==="checkbox" || f.type==="select") renderDynamicFields();
+      };
+      input.addEventListener("input", handler);
+      input.addEventListener("change", handler);
+      wrap.appendChild(lab);
+      wrap.appendChild(input);
+      fs.appendChild(wrap);
+    });
+    body.appendChild(fs);
+  });
+}
+
+/* ===================== ACTOR LIBRARY ===================== */
+function renderActorLib(){
+  var list = el("actorLibList");
+  list.innerHTML = "";
+  if(state.actors.length===0){ list.appendChild(mk("div","lib-empty","No saved actors yet — fill the form and save one.")); return; }
+  state.actors.forEach(function(a){
+    var row = mk("div","lib-item" + (state.selectedActorId===a._id ? " selected":""));
+    if(isSafeImageData(a.photo)){
+      var img = document.createElement("img");
+      img.className = "thumb"; img.alt = ""; img.src = a.photo;
+      row.appendChild(img);
+    } else {
+      row.appendChild(mk("div","thumb-fallback", a.gender==="male" ? "M" : "F"));
+    }
+    var meta = mk("div","meta");
+    meta.appendChild(mk("span","n", a.name || "Unnamed"));
+    meta.appendChild(mk("span","d", [a.gender||"", a.age||""].filter(Boolean).join(" · ")));
+    row.appendChild(meta);
+    row.addEventListener("click", function(){ loadActorIntoForm(a); });
+    var del = mk("button","del","×");
+    del.type = "button"; del.title = "Delete this actor";
+    del.addEventListener("click", function(ev){
+      ev.stopPropagation();
+      if(!confirm("Delete “"+(a.name||"this actor")+"” from the shared library?")) return;
+      state.db.collection("actors").doc(a._id).delete().catch(function(e){ dbError("delete the actor", e); });
+      if(state.selectedActorId===a._id) clearActorForm();
+    });
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+}
+
+function loadActorIntoForm(a){
+  state.selectedActorId = a._id;
+  el("a_name").value = a.name||"";
+  el("a_gender").value = a.gender||"female";
+  el("a_age").value = a.age||"";
+  el("a_style").value = a.style||"";
+  el("a_voice").value = a.voice||"";
+  el("a_sourceNote").value = a.sourceNote||"";
+  state.actorPhotoDataUri = isSafeImageData(a.photo) ? a.photo : null;
+  var prev = el("actorPhotoPreview");
+  if(state.actorPhotoDataUri){ prev.src=state.actorPhotoDataUri; prev.style.display="block"; setText(el("actorPhotoLabel"),"Reference photo loaded"); }
+  else { prev.removeAttribute("src"); prev.style.display="none"; setText(el("actorPhotoLabel"),"No photo uploaded"); }
+  renderActorLib(); saveDraft();
+}
+
+function clearActorForm(){
+  state.selectedActorId = null; state.actorPhotoDataUri = null;
+  ["a_name","a_age","a_style","a_voice","a_sourceNote"].forEach(function(id){ el(id).value=""; });
+  el("a_gender").value = "female";
+  var prev = el("actorPhotoPreview"); prev.removeAttribute("src"); prev.style.display="none";
+  setText(el("actorPhotoLabel"),"No photo uploaded");
+  renderActorLib(); saveDraft();
+}
+
+function currentActorObj(){
+  return {
+    name: val("a_name"), gender: el("a_gender").value, age: val("a_age"),
+    style: val("a_style"), voice: val("a_voice"), sourceNote: val("a_sourceNote"),
+    photo: state.actorPhotoDataUri || null
+  };
+}
+
+/* ===================== DEALER LIBRARY ===================== */
+function renderDealerSelect(){
+  var sel = el("dealerLoadSelect"), cur = sel.value;
+  sel.innerHTML = "";
+  var ph = document.createElement("option"); ph.value=""; ph.textContent="Load saved dealer…"; sel.appendChild(ph);
+  state.dealers.forEach(function(d){
+    var o = document.createElement("option");
+    o.value = d._id; o.textContent = d.dealerName || "Unnamed dealer";
+    sel.appendChild(o);
+  });
+  if(cur) sel.value = cur;
+}
+
+function loadDealerById(id){
+  var d = state.dealers.filter(function(x){ return x._id===id; })[0];
+  if(!d) return;
+  state.currentDealerDocId = d._id;
+  el("f_dealerName").value = d.dealerName||"";
+  el("f_brandModel").value = d.brandModel||"";
+  el("f_phone").value = d.phone||"";
+  el("f_tier").value = d.tier||"Metro Premium";
+  el("f_address").value = d.address||"";
+  el("f_fictionalize").checked = d.fictionalize!==false;
+  el("f_fakeBrandModel").value = d.fakeBrandModel||"";
+  el("f_fakeDealer").value = d.fakeDealer||"";
+  state.logoDataUri = isSafeImageData(d.logo) ? d.logo : null;
+  var lp = el("logoPreview");
+  if(state.logoDataUri){ lp.src=state.logoDataUri; lp.style.display="block"; setText(el("logoLabel"),"Logo loaded"); }
+  else { lp.removeAttribute("src"); lp.style.display="none"; setText(el("logoLabel"),"No logo uploaded"); }
+  state.dealerPhotos = (d.photos||[]).filter(function(p){ return p && isSafeImageData(p.thumb); });
+  renderDealerPhotoGrid(); toggleFictionalizeFields(); loadGenerationsForCurrentDealer(); saveDraft();
+}
+
+function clearDealerForm(){
+  state.currentDealerDocId = null; state.logoDataUri = null; state.dealerPhotos = [];
+  ["f_dealerName","f_brandModel","f_phone","f_address","f_fakeBrandModel","f_fakeDealer"].forEach(function(id){ el(id).value=""; });
+  el("f_tier").value = "Metro Premium";
+  el("f_fictionalize").checked = true;
+  var lp = el("logoPreview"); lp.removeAttribute("src"); lp.style.display="none";
+  setText(el("logoLabel"),"No logo uploaded");
+  renderDealerPhotoGrid(); toggleFictionalizeFields(); loadGenerationsForCurrentDealer(); saveDraft();
+}
+
+function currentDealerObj(){
+  return {
+    dealerName: val("f_dealerName"), brandModel: val("f_brandModel"), phone: val("f_phone"),
+    tier: el("f_tier").value, address: val("f_address"),
+    fictionalize: el("f_fictionalize").checked,
+    fakeBrandModel: val("f_fakeBrandModel"), fakeDealer: val("f_fakeDealer"),
+    logo: state.logoDataUri || null, photos: state.dealerPhotos
+  };
+}
+
+function renderDealerPhotoGrid(){
+  var grid = el("dealerPhotoGrid");
+  grid.innerHTML = "";
+  state.dealerPhotos.forEach(function(p, i){
+    var cell = mk("div","photo-cell");
+    var img = document.createElement("img"); img.alt = p.label||""; img.src = p.thumb;
+    cell.appendChild(img);
+    cell.appendChild(mk("div","cap", p.label||"Photo"));
+    var b = mk("button",null,"×"); b.type="button"; b.setAttribute("aria-label","Remove photo");
+    b.addEventListener("click", function(){ state.dealerPhotos.splice(i,1); renderDealerPhotoGrid(); saveDraft(); });
+    cell.appendChild(b);
+    grid.appendChild(cell);
+  });
+}
+
+function toggleFictionalizeFields(){
+  el("fictionalizeFields").style.display = el("f_fictionalize").checked ? "grid" : "none";
+}
+
+/* ===================== DRAFT AUTOSAVE (per browser, convenience only) ===================== */
+var TEXT_FIELDS = ["f_dealerName","f_brandModel","f_phone","f_tier","f_address","f_fakeBrandModel","f_fakeDealer",
+  "a_name","a_gender","a_age","a_style","a_voice","a_sourceNote",
+  "g_duration","g_maxChunk","g_aspect","g_narration","g_music","g_textLang","g_captionStyle","g_footer","g_cta","g_style","g_endcard"];
+var saveTimer = null;
+function saveDraft(){
+  if(saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(function(){
+    try{
+      var d = { cats: state.selectedCats, dyn: dynFieldValues, fields: {},
+                fictionalize: el("f_fictionalize").checked, endcardOn: el("g_endcardOn").checked };
+      TEXT_FIELDS.forEach(function(id){ var e = el(id); if(e) d.fields[id] = e.value; });
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+    }catch(e){}
+  }, 400);
+}
+function restoreDraft(){
+  try{
+    var raw = localStorage.getItem(DRAFT_KEY);
+    if(!raw) return false;
+    var d = JSON.parse(raw);
+    if(!d || typeof d !== "object") return false;
+    TEXT_FIELDS.forEach(function(id){ var e = el(id); if(e && d.fields && typeof d.fields[id] === "string") e.value = d.fields[id]; });
+    if(typeof d.fictionalize === "boolean") el("f_fictionalize").checked = d.fictionalize;
+    if(typeof d.endcardOn === "boolean") el("g_endcardOn").checked = d.endcardOn;
+    if(Array.isArray(d.cats)) state.selectedCats = d.cats.filter(function(c){ return !!CAT_BY_ID[c]; });
+    if(d.dyn && typeof d.dyn === "object") dynFieldValues = d.dyn;
+    if(el("g_music").value) el("g_music").dataset.touched = "1";
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ===================== TIMING & CHUNKING =====================
+   Parts are an even split of the total duration, so no part can exceed the
+   model's per-call cap and there is never a runt tail clip at the end.
+============================================================== */
+function planScenes(beats, totalDuration, maxChunk){
+  var n = beats.length;
+  if(n === 0) return {parts:[], scenes:[]};
+  var parts = Math.max(1, Math.min(Math.ceil(totalDuration / maxChunk), n));
+  var partDuration = totalDuration / parts;
+
+  var base = Math.floor(n / parts), extra = n % parts;
+  var groups = [], idx = 0;
+  for(var p=0; p<parts; p++){
+    var count = base + (p < extra ? 1 : 0);
+    groups.push(beats.slice(idx, idx+count));
+    idx += count;
+  }
+
+  var scenes = [], clock = 0;
+  groups.forEach(function(group, gi){
+    var weights = group.map(function(b, i){
+      if(gi===0 && i===0) return 1.25;       // opening hook needs room
+      if(b.isEndCard) return 1.1;
+      return 1;
+    });
+    var sum = weights.reduce(function(a,b){ return a+b; }, 0);
+    var partStart = clock;
+    group.forEach(function(b, i){
+      var dur = (weights[i]/sum) * partDuration;
+      scenes.push({
+        beat: b, part: gi,
+        start: Math.round(clock*10)/10,
+        end: Math.round((clock+dur)*10)/10,
+        duration: Math.round(dur*10)/10,
+        partStart: Math.round(partStart*10)/10
+      });
+      clock += dur;
+    });
+  });
+  return {parts:parts, partDuration:Math.round(partDuration*10)/10, scenes:scenes};
+}
+
+function fmtTime(t){
+  var m = Math.floor(t/60), s = t - m*60;
+  var sStr = (Math.abs(s % 1) < 0.05) ? String(Math.round(s)) : s.toFixed(1);
+  return m>0 ? (m+":"+(s<10?"0":"")+sStr) : ("0:"+(s<10?"0":"")+sStr);
+}
+function wordBudget(seconds){ return Math.max(3, Math.round(seconds * WORDS_PER_SECOND)); }
+
+/* ===================== PROMPT ASSEMBLY ===================== */
+function gatherContext(){
+  var dealer = currentDealerObj();
+  var useFake = dealer.fictionalize;
+  var displayBrandModel = useFake ? (dealer.fakeBrandModel || "[Placeholder Brand + Model]") : (dealer.brandModel || "[Brand + Model]");
+  var displayDealer = useFake ? (dealer.fakeDealer || "[Placeholder Dealership]") : (dealer.dealerName || "[Dealership]");
+  var onScreenDealer = useFake ? (dealer.fakeDealer || dealer.dealerName || "[Dealership]") : (dealer.dealerName || "[Dealership]");
+  var footer = val("g_footer") || [onScreenDealer, dealer.address, dealer.phone].filter(Boolean).join(" | ");
+  return {
+    dealer: dealer, actor: currentActorObj(),
+    mode: NARRATION[el("g_narration").value] || NARRATION.presenter,
+    modeKey: el("g_narration").value,
+    totalDuration: Math.max(4, parseInt(val("g_duration"),10) || 27),
+    maxChunk: Math.max(4, parseInt(val("g_maxChunk"),10) || 10),
+    aspect: el("g_aspect").value,
+    music: val("g_music"),
+    textLang: el("g_textLang").value,
+    captionStyle: el("g_captionStyle").value,
+    visStyle: val("g_style"),
+    cta: val("g_cta") || "Book your test drive today",
+    endcardOn: el("g_endcardOn").checked,
+    endcard: val("g_endcard"),
+    footer: footer,
+    useFake: useFake,
+    displayBrandModel: displayBrandModel,
+    displayDealer: displayDealer,
+    dealerShort: useFake ? (dealer.fakeDealer || "[Dealership]") : (dealer.dealerName || "[Dealership]")
+  };
+}
+
+function buildBeats(ctx){
+  var beats = [];
+  state.selectedCats.forEach(function(id){
+    var cat = CAT_BY_ID[id];
+    (cat.beats(dynFieldValues[id] || {}, ctx) || []).forEach(function(b){
+      b.cat = cat.label; beats.push(b);
+    });
+  });
+  if(ctx.endcardOn){
+    var lines = ctx.endcard
+      ? ctx.endcard.split(/\r?\n|\s*\|\s*/).map(function(x){ return x.trim(); }).filter(Boolean)
+      : [ctx.displayDealer, ctx.cta, ctx.dealer.address, ctx.dealer.phone].filter(Boolean);
+    beats.push({
+      title:"End card", isEndCard:true,
+      shot:"Clean end card — flat background, no camera movement, logo lockup above a stacked contact block.",
+      shotAlt:"Clean end card — flat background, no camera movement, logo lockup above a stacked contact block.",
+      dialogue: ctx.mode.speaks ? "Closing voiceover line only: the dealership name and the call to action." : "No speech.",
+      cardLines: lines
+    });
+  }
+  return beats;
+}
+
+function collectStrings(scenes, ctx){
+  var out = [], seen = {};
+  function add(s){
+    s = String(s||"").trim();
+    if(!s || seen[s]) return;
+    seen[s] = 1; out.push(s);
+  }
+  scenes.forEach(function(sc){
+    if(sc.beat.card) add(sc.beat.card);
+    if(sc.beat.cardSub) add(sc.beat.cardSub);
+    (sc.beat.cardLines||[]).forEach(add);
+  });
+  add(ctx.footer);
+  return out;
+}
+
+function textLangLine(textLang){
+  if(textLang === "mixed") return "On-screen text is Hindi and English mixed, exactly as spelled in the list above (this is what the Galaxy Honda reference does: “₹ 2.45 लाख तक” above “Cash Discount”). Devanagari must render cleanly — if a Devanagari string cannot be rendered accurately, use its English equivalent rather than approximating the characters.";
+  if(textLang === "hindi") return "On-screen text is Devanagari-led with English only for numbers and technical terms. Devanagari must render cleanly and match the strings above character for character.";
+  return "All on-screen text is English only, even though the speech is Hindi/Hinglish.";
+}
+
+function buildPromptParts(){
+  if(state.selectedCats.length===0) return null;
+  var ctx = gatherContext();
+  var beats = buildBeats(ctx);
+  if(!beats.length) return null;
+  var plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk);
+  var totalParts = plan.parts;
+  var mode = ctx.mode;
+
+  var partsOut = [];
+  for(var p=0; p<totalParts; p++){
+    var scenes = plan.scenes.filter(function(s){ return s.part === p; });
+    if(!scenes.length) continue;
+    var isFirst = (p===0), isLast = (p===totalParts-1);
+    var partStart = scenes[0].start, partEnd = scenes[scenes.length-1].end;
+    var partDuration = Math.round((partEnd-partStart)*10)/10;
+    var partWordBudget = mode.speaks ? scenes.reduce(function(sum,s){ return sum + wordBudget(s.duration); }, 0) : 0;
+    var L = [];
+
+    if(totalParts>1) L.push("PART "+(p+1)+" OF "+totalParts+" — covers "+fmtTime(partStart)+"–"+fmtTime(partEnd)+" of the full "+ctx.totalDuration+"s video.", "");
+
+    if(isFirst){
+      L.push("Create a "+partDuration+"-second "+ctx.aspect+" photorealistic Indian automotive dealership video"+(ctx.dealer.dealerName?(" for "+ctx.dealer.dealerName):"")+".");
+      if(totalParts>1) L.push("This is the OPENING segment of a longer "+ctx.totalDuration+"-second video generated in "+totalParts+" parts, because one generation cannot hold the whole script without rushing the delivery. End on a natural cut, mid-motion — never an abrupt stop — so it can be extended.");
+      L.push("Video type: "+state.selectedCats.map(function(id){ return CAT_BY_ID[id].label; }).join(" + ")+".");
+    } else {
+      L.push("EXTEND the previously generated video by exactly "+partDuration+" more seconds. Continue seamlessly from the exact last frame — same subject, same car, same location, same lighting and camera language. Do not restart, reset, cut back to the beginning, or reintroduce the scene.");
+      L.push(isLast ? "This is the FINAL part — close cleanly on the last scene below."
+                    : "End on a natural cut, mid-motion, so it can be extended again in the next part.");
+    }
+
+    L.push("");
+    L.push("## FORMAT");
+    L.push("Narration mode: "+mode.label+".");
+    if(mode.onCameraPerson && ctx.modeKey==="presenter"){
+      L.push("A single presenter appears on camera and speaks to camera throughout.");
+      if(ctx.actor.name) L.push("Reference presenter: "+ctx.actor.name+" — same face, hairstyle, styling and identity in every shot. Do not morph the presenter's identity or change the outfit between scenes.");
+      if(ctx.actor.style) L.push("Presenter styling: "+ctx.actor.style+".");
+      if(isFirst && ctx.actor.voice) L.push("Delivery: "+ctx.actor.voice+".");
+    } else if(ctx.modeKey==="customer"){
+      L.push("A real customer speaks to camera — an ordinary person, not a professional presenter. Keep the delivery slightly unpolished: natural pauses, real expressions, no ad-voice cadence.");
+      if(ctx.actor.name) L.push("Reference person: "+ctx.actor.name+" — same face and identity in every shot.");
+      if(ctx.actor.style) L.push("Styling: "+ctx.actor.style+".");
+    } else if(ctx.modeKey==="voiceover"){
+      L.push("NO person appears on camera. Nobody is shown speaking, and no face is lip-syncing. The narration is an off-screen voiceover over car and showroom footage only.");
+    } else {
+      L.push("NO speech anywhere in this clip: no dialogue, no voiceover, no lip movement, no talking head. The story is carried by the footage, the on-screen text and the music alone.");
+    }
+    L.push("Keep the exact same car throughout — do not morph the vehicle or change its colour, badge, wheels or shape between shots.");
+
+    L.push("");
+    L.push("## BRANDING");
+    if(ctx.useFake){
+      L.push("Use fictional branding only: "+ctx.displayBrandModel+" — Dealership: "+ctx.displayDealer+".");
+      L.push("Do NOT render any real automotive manufacturer logo, wordmark or badge anywhere in this clip"+(ctx.dealer.dealerName?(", and do not use "+ctx.dealer.dealerName+"'s real branding"):"")+".");
+    } else {
+      L.push("Brand and model: "+ctx.displayBrandModel+". Dealership: "+ctx.displayDealer+".");
+    }
+
+    L.push("");
+    L.push("## AUDIO");
+    if(mode.speaks){
+      L.push("Spoken language: Hindi/Hinglish, following the Pronunciation & Delivery Rules at the end of this prompt.");
+      L.push("Dialogue budget for this clip: about "+partWordBudget+" words in total across "+scenes.length+" scene"+(scenes.length>1?"s":"")+". Do not exceed it. Speak at a natural, unhurried pace with real pauses — if a line will not fit its scene, shorten the line rather than speeding up the delivery.");
+      L.push("No subtitles and no captions burned over the speech.");
+    } else {
+      L.push("No spoken audio of any kind. Where a scene below describes something being said or told, convey it through the footage and the on-screen text instead — never through a talking mouth.");
+    }
+    L.push("Music: "+(ctx.music || "a neutral modern commercial track")+(mode.speaks ? ", mixed low so it sits under the voice." : ", carrying the full energy of the clip."));
+
+    var strings = collectStrings(scenes, ctx);
+    if(strings.length){
+      L.push("");
+      L.push("## ON-SCREEN TEXT — EXACT STRINGS");
+      L.push("Render these strings EXACTLY as written: same spelling, spacing, punctuation, case and symbols. Do not paraphrase, translate, abbreviate, re-spell or 'correct' them. Misspelled on-screen text is the single most common failure in this format.");
+      strings.forEach(function(s, i){ L.push((i+1)+'. "'+s+'"'); });
+      L.push(textLangLine(ctx.textLang));
+      L.push("Keep each card to one short headline plus at most one smaller sub-line. Never stack more than two text elements on screen at once.");
+      L.push("Copy tone: "+ctx.captionStyle+" ("+ctx.dealer.tier+" dealer).");
+    }
+
+    L.push("");
+    L.push("## VISUAL STYLE");
+    L.push(isFirst
+      ? (ctx.visStyle+". Camera: 24–35mm, smooth gimbal moves, medium and wide framing with macro detail inserts, subtle push-ins, hard commercial cuts on the beat. Graphics: clean rounded white cards with a small brand-accent icon, dark text, soft shadow, quick pop animation.")
+      : ("Maintain the exact same visual style, camera language, grading and graphic treatment as the previous clip: "+ctx.visStyle+"."));
+
+    L.push("");
+    L.push("---");
+    scenes.forEach(function(sc, i){
+      var localStart = Math.round((sc.start - partStart)*10)/10;
+      var localEnd = Math.round((sc.end - partStart)*10)/10;
+      L.push("### Scene "+(i+1)+" — "+fmtTime(localStart)+"–"+fmtTime(localEnd)+" ("+sc.duration+"s)"+(totalParts>1?(" — video time "+fmtTime(sc.start)+"–"+fmtTime(sc.end)):"")+" — "+sc.beat.title);
+      var shotText = (!mode.onCameraPerson && sc.beat.shotAlt) ? sc.beat.shotAlt : sc.beat.shot;
+      if(shotText) L.push("Shot: "+shotText);
+      if(mode.speaks && sc.beat.dialogue){
+        L.push("Spoken (Hindi/Hinglish), max ~"+wordBudget(sc.duration)+" words: "+sc.beat.dialogue);
+      } else if(sc.beat.dialogue){
+        L.push("Story beat, told visually with no speech: "+sc.beat.dialogue);
+      }
+      if(sc.beat.card){
+        L.push('On-screen card, headline: "'+sc.beat.card+'"');
+        if(sc.beat.cardSub) L.push('On-screen card, sub-line under it: "'+sc.beat.cardSub+'"');
+      }
+      if(sc.beat.cardLines && sc.beat.cardLines.length){
+        L.push("On-screen text, stacked and centred, one line per row:");
+        sc.beat.cardLines.forEach(function(line, li){ L.push('  Line '+(li+1)+': "'+line+'"'); });
+      }
+      if(sc.beat.note) L.push("Note: "+sc.beat.note);
+      L.push("---");
+    });
+
+    L.push("");
+    L.push("## PERSISTENT BRANDING (hold in every scene)");
+    L.push("Top-left: "+String(ctx.displayBrandModel).split(" ")[0]);
+    L.push("Top-right: "+ctx.displayDealer);
+    if(ctx.footer) L.push('Bottom footer bar, unchanged all the way through: "'+ctx.footer+'"');
+
+    L.push("");
+    L.push("## IMPORTANT");
+    var important = [];
+    if(ctx.useFake) important.push("No real automotive manufacturer logo, wordmark or badge anywhere in the video.");
+    important.push("Same car in every shot — no change of colour, badge, wheels or body shape.");
+    if(mode.onCameraPerson) important.push("Same person in every shot — no change of face, hair, outfit or build.");
+    if(mode.lipSync) important.push("Hindi lip-sync must match the spoken line precisely; do not speed up the delivery to fit the time.");
+    if(!mode.speaks) important.push("No lip movement, no talking head, no implied speech anywhere.");
+    important.push("No warped text, no garbled letters, no distorted vehicle geometry.");
+    important.push("Realistic human motion — natural walking, natural gestures, no floating or sliding.");
+    if(isFirst) important.push("The result must look like a professionally filmed Indian dealership reel, not an AI montage.");
+    if(!isFirst) important.push("Continue the previous clip exactly — same subject, same location, same grade.");
+    state.selectedCats.forEach(function(id){
+      if(isFirst) (CAT_BY_ID[id].avoid||[]).forEach(function(a){ important.push("Avoid: "+a); });
+    });
+    important.forEach(function(i){ L.push("* "+i); });
+
+    if(mode.speaks){
+      L.push("");
+      L.push("## PRONUNCIATION & DELIVERY RULES (apply to every spoken word in this clip)");
+      L.push(rulebookText(ctx.actor.gender));
+    }
+
+    partsOut.push({
+      partNum: p+1, totalParts: totalParts,
+      start: partStart, end: partEnd, duration: partDuration,
+      isFirst: isFirst, isLast: isLast, text: L.join("\n")
+    });
+  }
+  return partsOut;
+}
+
+/* ===================== VALIDATION ===================== */
+function runChecks(){
+  var checks = [];
+  if(state.selectedCats.length===0){
+    checks.push({level:"bad", text:"Pick at least one video category."});
+    return checks;
+  }
+  var ctx = gatherContext();
+  var beats = buildBeats(ctx);
+  var plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk);
+  var mode = ctx.mode;
+
+  // mandatory category fields
+  var missing = [];
+  state.selectedCats.forEach(function(id){
+    var cat = CAT_BY_ID[id], v = dynFieldValues[id] || {};
+    (cat.mandatory||[]).forEach(function(m){
+      if(!String(v[m.id]||"").trim()) missing.push(cat.label+" — "+m.label);
+    });
+  });
+  if(missing.length) checks.push({level:"bad", text:"Fill these in before generating — the prompt ships vague placeholder direction without them: "+missing.join("; ")+"."});
+
+  if(!ctx.dealer.dealerName) checks.push({level:"warn", text:"No dealer name — the footer and end card will be incomplete."});
+  if(ctx.useFake && (!ctx.dealer.fakeBrandModel || !ctx.dealer.fakeDealer))
+    checks.push({level:"warn", text:"Fictional branding is on but the placeholder names are empty, so the prompt will contain literal [Placeholder] text."});
+
+  var shownName = String(ctx.displayDealer||"").trim();
+  if(shownName && ctx.footer && shownName.indexOf("[")!==0 &&
+     ctx.footer.toLowerCase().indexOf(shownName.toLowerCase()) === -1){
+    checks.push({level:"warn", text:"The footer bar doesn't name “"+shownName+"”, which is the dealership shown on screen. The video would carry two different dealership identities in one frame."});
+  }
+
+  // pacing
+  if(mode.speaks){
+    var tooShort = plan.scenes.filter(function(s){ return !s.beat.isEndCard && s.duration < MIN_SPOKEN_SCENE; });
+    if(tooShort.length){
+      checks.push({level:"warn", text:tooShort.length+" of "+plan.scenes.length+" scenes are under "+MIN_SPOKEN_SCENE+"s, which is too short for a spoken line. Raise the duration to about "+Math.ceil(plan.scenes.length*2.6)+"s, or deselect a category."});
+    } else {
+      checks.push({level:"ok", text:plan.scenes.length+" scenes across "+ctx.totalDuration+"s — about "+(Math.round(ctx.totalDuration/plan.scenes.length*10)/10)+"s per scene, which holds a natural spoken line."});
+    }
+  }
+
+  // on-screen card load (the Premier Motors reference dropped a card when overloaded)
+  var cardMoments = plan.scenes.filter(function(s){ return !s.beat.isEndCard && (s.beat.card || (s.beat.cardLines||[]).length); }).length;
+  var cardCap = Math.max(2, Math.floor(ctx.totalDuration/5));
+  if(cardMoments > cardCap)
+    checks.push({level:"warn", text:cardMoments+" on-screen cards in "+ctx.totalDuration+"s. Models reliably render about "+cardCap+" at this length — in the Premier Motors reference the extra offer card was dropped entirely. Cut a card or lengthen the video."});
+  var longCards = collectStrings(plan.scenes, ctx).filter(function(c){ return c !== ctx.footer && c.length > 42; });
+  if(longCards.length)
+    checks.push({level:"warn", text:longCards.length+" on-screen string(s) run past 42 characters and are likely to render garbled. Shorten: “"+longCards[0].slice(0,50)+"…”."});
+  if(ctx.footer && ctx.footer.length > 70)
+    checks.push({level:"warn", text:"The footer bar is "+ctx.footer.length+" characters. Anything past about 70 renders unreliably in a small bar — trim a location or drop the brand name."});
+
+  if(plan.parts > 1)
+    checks.push({level:"ok", text:"Splits into "+plan.parts+" clips of "+plan.partDuration+"s, each under your "+ctx.maxChunk+"s cap."});
+
+  return checks;
+}
+
+function renderChecks(checks){
+  var panel = el("checksPanel");
+  panel.innerHTML = "";
+  if(!checks || !checks.length){ panel.style.display = "none"; return; }
+  panel.style.display = "flex";
+  checks.forEach(function(c){
+    var row = mk("div","check "+c.level);
+    row.appendChild(mk("div","icon", c.level==="ok" ? "✓" : "!"));
+    row.appendChild(mk("div","txt", c.text));
+    panel.appendChild(row);
+  });
+}
+
+/* ===================== ATTACH CHECKLIST (designer-facing, not in the prompt) ===================== */
+function renderAttachList(){
+  var card = el("attachCard"), list = el("attachList");
+  list.innerHTML = "";
+  var items = [];
+  var actor = currentActorObj();
+  var mode = NARRATION[el("g_narration").value] || NARRATION.presenter;
+  if(mode.onCameraPerson && (actor.photo || actor.name)){
+    items.push({thumb:actor.photo, title:(actor.name||"Presenter")+" — reference photo",
+      sub: actor.sourceNote || (actor.photo ? "Thumbnail saved here; attach the high-res original" : "No photo on file")});
+  }
+  state.dealerPhotos.forEach(function(p){ items.push({thumb:p.thumb, title:p.label||"Reference photo", sub:"Dealer photo set"}); });
+  if(state.logoDataUri) items.push({thumb:state.logoDataUri, title:"Dealer logo", sub:"For the end card / overlay, if your model accepts it"});
+  if(!items.length){ card.style.display="none"; return; }
+  card.style.display = "block";
+  items.forEach(function(it){
+    var row = mk("div","attach-item");
+    if(isSafeImageData(it.thumb)){
+      var img = document.createElement("img"); img.alt=""; img.src = it.thumb; row.appendChild(img);
+    }
+    var meta = mk("div","a-meta");
+    meta.appendChild(mk("b",null,it.title));
+    meta.appendChild(mk("span",null,it.sub));
+    row.appendChild(meta);
+    list.appendChild(row);
+  });
+}
+
+/* ===================== OUTPUT RENDER ===================== */
+function copyText(text){
+  var done = function(){
+    var toast = el("copyToast");
+    setText(toast, "Copied");
+    setTimeout(function(){ setText(toast, ""); }, 1800);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(function(){ fallbackCopy(text); done(); });
+  } else { fallbackCopy(text); done(); }
+}
+function fallbackCopy(text){
+  var ta = document.createElement("textarea");
+  ta.value = text; ta.style.position="fixed"; ta.style.left="-9999px";
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand("copy"); }catch(e){}
+  document.body.removeChild(ta);
+}
+
+function renderPromptOutput(parts){
+  var out = el("promptOutput");
+  out.innerHTML = "";
+  if(!parts || !parts.length){
+    var empty = mk("div","prompt-empty");
+    var big = mk("span","big","🎬"); empty.appendChild(big);
+    empty.appendChild(document.createTextNode("Pick your categories and fill in the dealer details, then hit Generate."));
+    out.appendChild(empty);
+    setText(el("previewMeta"), "");
+    return;
+  }
+  var totalWords = parts.reduce(function(sum,p){ return sum + p.text.trim().split(/\s+/).length; },0);
+  setText(el("previewMeta"), parts.length>1
+    ? (parts.length+" parts · "+totalWords+" words total")
+    : (totalWords+" words · "+parts[0].text.length+" characters"));
+
+  if(parts.length>1){
+    out.appendChild(mk("div","multi-part-banner",
+      "Split into "+parts.length+" prompts to stay under your "+val("g_maxChunk")+"s-per-generation cap. Generate Part 1 first, then paste each next part as an “extend the video” step, in order."));
+  }
+  var wrap = mk("div","parts-wrap");
+  parts.forEach(function(p){
+    var card = mk("div","part-card");
+    var head = mk("div","part-head");
+    var left = document.createElement("div");
+    left.appendChild(mk("span","p-name", parts.length>1 ? ("Part "+p.partNum+" of "+p.totalParts) : "Prompt"));
+    left.appendChild(mk("span","p-range", fmtTime(p.start)+"–"+fmtTime(p.end)+" ("+p.duration+"s)"));
+    if(parts.length>1) left.appendChild(mk("span","p-instruction", p.isFirst ? "Generate" : "Extend +"+p.duration+"s"));
+    head.appendChild(left);
+    var btn = mk("button","btn small","Copy"); btn.type="button";
+    btn.addEventListener("click", function(){ copyText(p.text); });
+    head.appendChild(btn);
+    card.appendChild(head);
+    card.appendChild(mk("div","prompt-body", p.text));
+    wrap.appendChild(card);
+  });
+  out.appendChild(wrap);
+}
+
+/* ===================== EVENTS ===================== */
+document.addEventListener("DOMContentLoaded", function(){
+  restoreDraft();
+  renderCategoryGrid();
+  renderDynamicFields();
+  toggleFictionalizeFields();
+  updateNarrationUI();
+  suggestMusic();
+  renderAttachList();
+
+  el("g_narration").addEventListener("change", function(){ updateNarrationUI(); renderAttachList(); saveDraft(); });
+  el("g_music").addEventListener("input", function(){ el("g_music").dataset.touched = "1"; saveDraft(); });
+  el("f_fictionalize").addEventListener("change", function(){ toggleFictionalizeFields(); saveDraft(); });
+  el("g_endcardOn").addEventListener("change", saveDraft);
+  TEXT_FIELDS.forEach(function(id){
+    var e = el(id);
+    if(e && id !== "g_music") e.addEventListener("input", saveDraft);
+    if(e && e.tagName === "SELECT") e.addEventListener("change", saveDraft);
+  });
+  el("f_dealerName").addEventListener("blur", loadGenerationsForCurrentDealer);
+
+  el("logoInput").addEventListener("change", function(e){
+    var file = e.target.files[0]; if(!file) return;
+    readAndCompress(file, 240, 0.7, function(uri){
+      if(!uri) return;
+      state.logoDataUri = uri;
+      var prev = el("logoPreview"); prev.src = uri; prev.style.display = "block";
+      setText(el("logoLabel"), "Logo loaded");
+      renderAttachList();
+    });
+  });
+
+  el("actorPhotoInput").addEventListener("change", function(e){
+    var file = e.target.files[0]; if(!file) return;
+    readAndCompress(file, 320, 0.72, function(uri){
+      if(!uri) return;
+      state.actorPhotoDataUri = uri;
+      var prev = el("actorPhotoPreview"); prev.src = uri; prev.style.display = "block";
+      setText(el("actorPhotoLabel"), "Reference photo loaded");
+      renderAttachList();
+    });
+  });
+
+  el("dealerPhotoInput").addEventListener("change", function(e){
+    var file = e.target.files[0]; if(!file) return;
+    var label = val("photoLabelInput") || "Photo";
+    readAndCompress(file, 240, 0.65, function(uri){
+      if(!uri) return;
+      state.dealerPhotos.push({label:label, thumb:uri});
+      el("photoLabelInput").value = "";
+      renderDealerPhotoGrid(); renderAttachList(); saveDraft();
+    });
+  });
+
+  el("actorSaveBtn").addEventListener("click", function(){
+    var a = currentActorObj();
+    if(!a.name){ showNotice("Give the actor a name or label before saving.", true); return; }
+    if(!state.db){ showNotice("Shared library isn't connected in this view, so the actor can't be saved.", true); return; }
+    var ref = state.selectedActorId ? state.db.collection("actors").doc(state.selectedActorId) : state.db.collection("actors").doc();
+    ref.set(a).then(function(){
+      state.selectedActorId = ref.id;
+      showNotice("Saved “"+a.name+"” to the shared actor library.");
+    }).catch(function(e){ dbError("save the actor", e); });
+  });
+  el("actorClearBtn").addEventListener("click", clearActorForm);
+
+  el("dealerLoadBtn").addEventListener("click", function(){
+    var id = el("dealerLoadSelect").value;
+    if(id) loadDealerById(id);
+  });
+  el("dealerNewBtn").addEventListener("click", clearDealerForm);
+  el("dealerSaveBtn").addEventListener("click", function(){
+    var d = currentDealerObj();
+    if(!d.dealerName){ showNotice("Enter a dealer name before saving.", true); return; }
+    if(!state.db){ showNotice("Shared library isn't connected in this view, so the dealer profile can't be saved.", true); return; }
+    var bytes = approxDocBytes(d);
+    if(bytes > 250000){
+      showNotice("This dealer profile is "+Math.round(bytes/1024)+" KB, over the 256 KB per-record limit. Remove a photo or two and save again.", true);
+      return;
+    }
+    var ref = state.currentDealerDocId ? state.db.collection("dealers").doc(state.currentDealerDocId) : state.db.collection("dealers").doc();
+    ref.set(d).then(function(){
+      state.currentDealerDocId = ref.id;
+      showNotice("Saved “"+d.dealerName+"” to the shared dealer library.");
+      loadGenerationsForCurrentDealer();
+    }).catch(function(e){ dbError("save the dealer profile", e); });
+  });
+
+  el("generateBtn").addEventListener("click", function(){
+    var checks = runChecks();
+    renderChecks(checks);
+    state.lastChecks = checks;
+    if(checks.some(function(c){ return c.level==="bad"; })){
+      renderPromptOutput(null);
+      el("copyBtn").disabled = true; el("saveGenBtn").disabled = true;
+      return;
+    }
+    var parts = buildPromptParts();
+    if(!parts || !parts.length){ renderPromptOutput(null); return; }
+    state.lastPromptParts = parts;
+    state.lastPrompt = parts.map(function(p){return p.text;}).join("\n\n\n===== NEXT PART =====\n\n\n");
+    renderPromptOutput(parts);
+    renderAttachList();
+    el("copyBtn").disabled = false;
+    el("saveGenBtn").disabled = false;
+  });
+
+  el("copyBtn").addEventListener("click", function(){
+    if(state.lastPrompt) copyText(state.lastPrompt);
+  });
+
+  el("saveGenBtn").addEventListener("click", function(){
+    if(!state.lastPromptParts.length) return;
+    if(!state.db){ showNotice("Shared library isn't connected in this view, so this prompt can't be saved.", true); return; }
+    var now = new Date();
+    var doc = {
+      dealerName: val("f_dealerName") || "Unnamed dealer",
+      categories: state.selectedCats.map(function(id){ return CAT_BY_ID[id].label; }).join(" + "),
+      narration: el("g_narration").value,
+      parts: state.lastPromptParts,
+      promptText: state.lastPrompt,
+      createdAt: now.toISOString(),
+      createdAtLabel: now.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})
+    };
+    if(approxDocBytes(doc) > 250000){
+      showNotice("This prompt set is too large to save (over 256 KB). Copy it out instead.", true);
+      return;
+    }
+    state.db.collection("generations").add(doc)
+      .then(function(){ showNotice("Saved to the shared prompt library."); loadGenerationsForCurrentDealer(); })
+      .catch(function(e){ dbError("save the prompt", e); });
+  });
+
+  initDb();
+});
+
+function updateNarrationUI(){
+  var mode = NARRATION[el("g_narration").value] || NARRATION.presenter;
+  setText(el("narrationHint"), mode.hint);
+  el("actorCard").style.display = mode.onCameraPerson ? "" : "none";
+}
+
+})();
+</script>

@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Reference images (dealer photos, scraped car-model sets, logos) and generated
+// clips. Single-user v1: no public client access; the Cloud Run backend uses the
+// Admin SDK. Tighten to the owner UID when Auth is added.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

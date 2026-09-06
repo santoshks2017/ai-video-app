@@ -1,0 +1,66 @@
+import { useMemo } from 'react';
+import {
+  buildPrompt,
+  runChecks,
+  estimateCost,
+  isPromptOnly,
+  type PromptPart,
+} from '@ava/shared';
+import { useBrief } from './state/briefStore.js';
+import { BriefForm } from './components/BriefForm.js';
+import { Storyboard } from './components/Storyboard.js';
+import { OutputPanel } from './components/OutputPanel.js';
+
+export default function App() {
+  const brief = useBrief((s) => s.brief);
+  const sceneEdits = useBrief((s) => s.sceneEdits);
+
+  const promptOnly = isPromptOnly(brief.categories);
+
+  const built = useMemo(() => buildPrompt(brief, { sceneOverrides: sceneEdits }), [brief, sceneEdits]);
+
+  const preflight = useMemo(() => runChecks(brief), [brief]);
+  const cost = useMemo(
+    () => (promptOnly ? null : estimateCost(brief)),
+    [brief, promptOnly],
+  );
+
+  const parts: PromptPart[] = built?.parts ?? [];
+
+  return (
+    <div className="app">
+      <div className="topbar">
+        <div className="brand">
+          <div className="mark">AV</div>
+          <div>
+            <h1>AI Video App</h1>
+            <div className="sub">CarDekho dealer ad-slot videos &middot; brief → storyboard → pre-flight → prompt</div>
+          </div>
+        </div>
+        <div>
+          {brief.categories.length > 0 && (
+            <span className={`pill ${promptOnly ? 'prompt-only' : 'automated'}`}>
+              {promptOnly ? 'Prompt-only (presenter)' : 'Automated (Omni Flash)'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="left-col">
+          <BriefForm />
+          <Storyboard scenePlan={built?.scenePlan ?? null} sceneEdits={sceneEdits} />
+        </div>
+        <div className="right-col">
+          <OutputPanel parts={parts} preflight={preflight} cost={cost} promptOnly={promptOnly} />
+        </div>
+      </div>
+
+      <div className="foot-note">
+        v1 single-user tool. The 5 automated categories call Gemini Omni Flash with a server-side key; the 4
+        presenter categories stop at the master prompt for manual use in Lumina. Pronunciation &amp; delivery
+        rules are injected into every prompt that contains speech.
+      </div>
+    </div>
+  );
+}

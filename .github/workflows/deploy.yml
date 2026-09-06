@@ -1,0 +1,79 @@
+name: deploy
+
+# Push to main → build, then deploy the Cloud Run API and the Firebase-hosted
+# frontend (HANDOFF-BRIEF-ai-video-app.md §3). Auth via Workload Identity
+# Federation — no long-lived service-account JSON in GitHub secrets.
+#
+# Required repo configuration (set once, see docs/HANDOFF-BRIEF-ai-video-app.md):
+#   vars:    GCP_PROJECT_ID, GCP_REGION, WIF_PROVIDER, DEPLOY_SERVICE_ACCOUNT, FIREBASE_PROJECT_ID
+#   secrets: (none needed for WIF; GOOGLE_API_KEY is set on the Cloud Run service, not here)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @ava/shared
+      - run: npm test --workspace @ava/shared
+      - run: npm run typecheck
+      - run: npm run build --workspace @ava/web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+
+  deploy:
+    needs: build-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy API (Cloud Run)
+        run: |
+          gcloud run deploy ava-api \
+            --source . \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --dockerfile apps/api/Dockerfile \
+            --allow-unauthenticated \
+            --set-secrets "GOOGLE_API_KEY=GOOGLE_API_KEY:latest" \
+            --quiet
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace @ava/shared && npm run build --workspace @ava/web
+
+      - name: Deploy frontend (Firebase Hosting)
+        run: npx --yes firebase-tools@13 deploy --only hosting,firestore:rules,storage \
+          --project "${{ vars.FIREBASE_PROJECT_ID }}" --non-interactive

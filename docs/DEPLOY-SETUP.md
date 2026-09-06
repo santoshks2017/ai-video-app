@@ -21,19 +21,24 @@ Active account: `santoshks2017@gmail.com`. Region: `asia-south1`.
 | 12 | Runtime SA | `85831607354-compute@developer.gserviceaccount.com` granted `datastore.user` + `storage.objectAdmin` (Admin SDK from Cloud Run writes job records + clips) and `secretmanager.secretAccessor` on `GOOGLE_API_KEY` |
 | 13 | Cloud Run sizing | deploy sets `--timeout 3600 --memory 1Gi --cpu 1 --concurrency 4 --max-instances 3` — generation is minutes-long per clip |
 
-## Add the real Omni Flash key
+## The Omni Flash key
 
-The secret exists with a placeholder value. Add the real key as a new version
-(run locally — the key is entered by you, never stored in the repo):
+Real key is in Secret Manager as **version 5** (enabled). Cloud Run is pinned to
+`GOOGLE_API_KEY:5` — NOT `:latest`, because `:latest` resolves to the highest
+version *number* even when that version is destroyed, and versions 1–4 + 6 were
+destroyed during setup.
 
+The deploy workflow reads the version from the repo variable
+`GOOGLE_API_KEY_VERSION` (currently `5`).
+
+**To rotate the key:**
 ```bash
-printf '%s' 'YOUR_REAL_GOOGLE_API_KEY' | gcloud secrets versions add GOOGLE_API_KEY \
-  --project ai-video-app-cd --data-file=-
+printf '%s' 'NEW_KEY' | gcloud secrets versions add GOOGLE_API_KEY --project ai-video-app-cd --data-file=-
+# note the new version number it prints, then:
+gh variable set GOOGLE_API_KEY_VERSION --repo santoshks2017/ai-video-app --body "<new number>"
+gh workflow run deploy.yml --repo santoshks2017/ai-video-app
 ```
-
-Cloud Run picks up `:latest` on the next deploy. Until then, `/api/generate`
-returns a clear 503 (`omni-flash-not-configured`), which the UI handles — the
-whole generation path is stubbed anyway pending the Phase 1 spikes.
+Disable the old version once the new revision is serving.
 
 ## Deploy
 

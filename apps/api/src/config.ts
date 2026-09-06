@@ -16,7 +16,7 @@ export function loadConfig(): Config {
   return {
     port: Number(process.env.PORT ?? 8080),
     googleApiKey: process.env.GOOGLE_API_KEY || undefined,
-    omniFlashModel: process.env.OMNI_FLASH_MODEL ?? 'gemini-omni-flash',
+    omniFlashModel: process.env.OMNI_FLASH_MODEL ?? 'gemini-omni-1.1-flash',
     usdPerSecond: Number(process.env.USD_PER_SECOND ?? 0.1),
     allowOrigin: process.env.ALLOW_ORIGIN ?? '*',
   };

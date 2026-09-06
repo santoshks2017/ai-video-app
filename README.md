@@ -50,5 +50,7 @@ npm run dev:api                           # http://localhost:8080  (needs GOOGLE
   confirmation gate, prompt-only path for presenter categories.
 - **Stubbed, pending Phase 1 spikes:** the Omni Flash API call (P0.1/P0.7), the
   cardekho.com scraper (P0.2), the post-generation video preview / frame timeline (P0.10).
-- **Not yet configured:** Firebase project id (`.firebaserc`), the WIF deploy vars
-  in GitHub (`.github/workflows/deploy.yml`).
+- **Configured:** GitHub repo `santoshks2017/ai-video-app`; GCP + Firebase project
+  `ai-video-app-cd` (`.firebaserc`).
+- **Pending (see [`docs/DEPLOY-SETUP.md`](docs/DEPLOY-SETUP.md)):** billing link (Blaze),
+  the deploy service account + WIF, GitHub Actions vars, first deploy.

@@ -1,6 +1,8 @@
 # Progress
 
-**Status:** Build started. Repo + monorepo scaffold + Phase 1 no-cost UI pushed to `santoshks2017/ai-video-app` (branch `main`). Firebase project `ai-video-app-cd` created and wired; paused before linking billing.
+**Status:** Live. Phase 1 no-cost app deployed and reachable. Push-to-`main` → GitHub Actions → Cloud Run (`ava-api`) + Firebase Hosting is green end to end.
+- Frontend: https://ai-video-app-cd.web.app
+- API: https://ava-api-ofnw2ufkwa-el.a.run.app (also `/api/**` via the Hosting rewrite)
 **Last updated:** 2026-09-06
 
 ## Done this session
@@ -14,7 +16,7 @@
 - `docs/DEPLOY-SETUP.md`: exact remaining deploy commands.
 
 ## Next steps
-- Deploy wiring (docs/DEPLOY-SETUP.md): link billing to the open ICICI Amaz Pay account (`gcloud billing projects link ai-video-app-cd --billing-account=013E75-A90ADE-1F7B1B`), enable APIs, create `GOOGLE_API_KEY` secret, deploy service account + WIF pool/provider, set the 5 GitHub Actions vars, first deploy.
+- Add the real Omni Flash key: `printf '%s' 'KEY' | gcloud secrets versions add GOOGLE_API_KEY --project ai-video-app-cd --data-file=-` (secret currently holds a placeholder version). Run locally — key never touches the repo.
 - Phase 1 spikes (`spikes/`): Omni Flash context continuity across extend calls; cardekho.com scrapability against the 12-model list. Both need a real `GOOGLE_API_KEY` / network run.
 - Then implement `apps/api/src/omniFlash.ts` (P0.1/P0.7) and `jobs/scraper` (P0.2) for one category (Showroom Walkaround), including one real paid generation.
 - Phase 2: P0.10 video preview / frame timeline / per-scene re-generate; extend to the other 4 automated categories.

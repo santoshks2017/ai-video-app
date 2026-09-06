@@ -1,9 +1,9 @@
 # Progress
 
-**Status:** Live, and the real video generation is implemented (was stubbed — Santosh pushed back that only the prompt generator had been built). Push-to-`main` → Cloud Run + Firebase Hosting green.
+**Status:** Working end to end. First real video generation succeeded 2026-09-07 — an 8s single-part Showroom Walkaround (dealer "Test Motors"), clip played back with the frame timeline. Omni Flash Interactions API response parsing in `omniFlash.ts` held against the live API.
 - Frontend: https://ai-video-app-cd.web.app
-- API: https://ava-api-ofnw2ufkwa-el.a.run.app (also `/api/**` via the Hosting rewrite)
-- Blocking to actually run a generation: the `GOOGLE_API_KEY` secret still holds a placeholder — Santosh must add the real key (see below). Key was shared in chat 2026-09-07; rotate after first use.
+- API: https://ava-api-85831607354.asia-south1.run.app (also `/api/**` via the Hosting rewrite)
+- Real key is Secret Manager version 5; Cloud Run pinned to `GOOGLE_API_KEY:5` (`:latest` was stuck on destroyed v6). Repo var `GOOGLE_API_KEY_VERSION=5`. Key was pasted in chat 2026-09-07 — still worth rotating.
 **Last updated:** 2026-09-07
 
 ## Done (video-generation session, 2026-09-07)
@@ -24,9 +24,9 @@
 - `docs/DEPLOY-SETUP.md`: exact remaining deploy commands.
 
 ## Next steps
-- **Santosh:** add the real Omni Flash key — `printf '%s' 'KEY' | gcloud secrets versions add GOOGLE_API_KEY --project ai-video-app-cd --data-file=-` — then redeploy (push or `gh workflow run deploy.yml`). Rotate the key shared in chat afterwards.
-- First real generation: one Showroom Walkaround, short (≤10s, single part) to validate the create path, then a ~20s one to validate extend. Check whether Omni Flash's `previous_interaction_id` actually carries visual continuity (the first spike, now answerable with real calls).
-- Verify the response-parsing assumptions in `omniFlash.ts` against a real Interactions API payload — `findVideo()` walks for a video part but the exact shape (base64 vs `files/` uri, `steps[]` vs `output_video`) is from docs, not observed. Adjust if needed.
-- P0.2: implement `jobs/scraper` against cardekho.com (second spike) and wire `/api/scrape` to a Cloud Run job execution.
-- Reference-image grounding: add attachment upload (bytes → Storage → signed/proxied URL) so `reference_to_video` actually has inputs.
-- Then: scene-level (not just part-level) re-generate; extend to the other 4 automated categories; P1 items.
+- Test a multi-part video (~24s, maxChunk 8 → 3 parts) to exercise the `extend` path and see whether `previous_interaction_id` actually carries visual continuity (dealer, car, presenter, style) across clips. This is the first Phase 1 spike, now runnable for real.
+- Judge first-time-right quality on the create path — did the 8s clip match the storyboard intent? Feeds the >90% target and any prompt-assembly tuning.
+- Rotate the Omni Flash key (pasted in chat): add a new secret version, set `GOOGLE_API_KEY_VERSION`, redeploy, disable v5. Steps in docs/DEPLOY-SETUP.md.
+- P0.2: implement `jobs/scraper` against cardekho.com (second spike) + wire `/api/scrape` to a Cloud Run job execution.
+- Reference-image grounding: attachment upload (bytes → Storage → proxied URL) so `reference_to_video` has real inputs.
+- Then: scene-level (not just part-level) re-generate; the other 4 automated categories; P1 items.

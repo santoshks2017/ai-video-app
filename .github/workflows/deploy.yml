@@ -62,9 +62,9 @@ jobs:
             --source . \
             --project "${{ vars.GCP_PROJECT_ID }}" \
             --region "${{ vars.GCP_REGION }}" \
-            --dockerfile apps/api/Dockerfile \
             --allow-unauthenticated \
             --set-secrets "GOOGLE_API_KEY=GOOGLE_API_KEY:latest" \
+            --set-env-vars "ALLOW_ORIGIN=https://${{ vars.FIREBASE_PROJECT_ID }}.web.app" \
             --quiet
 
       - uses: actions/setup-node@v4
@@ -74,6 +74,9 @@ jobs:
       - run: npm ci
       - run: npm run build --workspace @ava/shared && npm run build --workspace @ava/web
 
-      - name: Deploy frontend (Firebase Hosting)
-        run: npx --yes firebase-tools@13 deploy --only hosting,firestore:rules,storage \
-          --project "${{ vars.FIREBASE_PROJECT_ID }}" --non-interactive
+      - name: Deploy frontend + rules (Firebase)
+        run: |
+          npx --yes firebase-tools@13 deploy \
+            --only hosting,firestore:rules,storage \
+            --project "${{ vars.FIREBASE_PROJECT_ID }}" \
+            --non-interactive

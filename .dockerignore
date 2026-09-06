@@ -1,0 +1,14 @@
+# Keep workspace package.json files (npm ci needs every declared workspace dir),
+# but drop the heavy / irrelevant stuff from the build context.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+*.key.json
+service-account*.json
+.git
+.github
+legacy
+docs
+spikes
+OKF Bundle

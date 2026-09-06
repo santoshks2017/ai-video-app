@@ -1,13 +1,14 @@
-# Cloud Run image for @ava/api. Built from the repo root (monorepo context).
+# Cloud Run image for @ava/api. This is the API's Dockerfile; it lives at the
+# repo root so `gcloud run deploy --source .` finds it with the monorepo as the
+# build context (the API imports @ava/shared from packages/shared).
+# The scraper job has its own image at jobs/scraper/Dockerfile.
+
 FROM node:22-slim AS build
 WORKDIR /repo
-COPY package.json package-lock.json* tsconfig.base.json ./
-COPY packages/shared/package.json packages/shared/tsconfig.json packages/shared/
-COPY apps/api/package.json apps/api/tsconfig.json apps/api/
-RUN npm install --workspaces --include-workspace-root
-COPY packages/shared/src packages/shared/src
-COPY apps/api/src apps/api/src
-RUN npm run build --workspace @ava/shared && npm run build --workspace @ava/api
+COPY . .
+RUN npm ci
+RUN npm run build --workspace @ava/shared \
+ && npm run build --workspace @ava/api
 
 FROM node:22-slim AS runtime
 ENV NODE_ENV=production

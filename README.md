@@ -26,9 +26,9 @@ money is spent. Target: ≥90% first-time-right.
 
 ```
 packages/shared   TypeScript: categories, rulebook, planScenes, runChecks, buildPrompt, cost estimate
-apps/web          Vite + React — brief intake, storyboard, pre-flight, prompt output → Firebase Hosting
-apps/api          Fastify — P0.1 Omni Flash call, P0.2 scrape trigger → Cloud Run  (STUBBED)
-jobs/scraper      Cloud Run job — cardekho.com car-model reference scraper          (STUBBED)
+apps/web          Vite + React — brief, storyboard, pre-flight, prompt, generate + preview → Firebase Hosting
+apps/api          Fastify — /api/generate (Omni Flash create→extend), job store, clip streaming → Cloud Run
+jobs/scraper      Cloud Run job — cardekho.com car-model reference scraper          (STUBBED, P0.2)
 spikes/           The two Phase 1 empirical spikes (Omni Flash continuity, scrapability)
 legacy/           The prior prompt-only Claude Artifact tool, for reference
 ```
@@ -43,14 +43,20 @@ npm run dev:web                           # http://localhost:5173
 npm run dev:api                           # http://localhost:8080  (needs GOOGLE_API_KEY for real calls)
 ```
 
-## Build status (this scaffold)
+## Build status
 
 - **Live:** brief intake (all 9 categories), editable storyboard, blocking pre-flight
   gate, master-prompt assembly with rulebook injection, cost estimate + Rs 500
   confirmation gate, prompt-only path for presenter categories.
-- **Stubbed, pending Phase 1 spikes:** the Omni Flash API call (P0.1/P0.7), the
-  cardekho.com scraper (P0.2), the post-generation video preview / frame timeline (P0.10).
-- **Configured:** GitHub repo `santoshks2017/ai-video-app`; GCP + Firebase project
-  `ai-video-app-cd` (`.firebaserc`).
-- **Pending (see [`docs/DEPLOY-SETUP.md`](docs/DEPLOY-SETUP.md)):** billing link (Blaze),
-  the deploy service account + WIF, GitHub Actions vars, first deploy.
+- **Live — real generation (P0.1 / P0.7 / P0.10):** `Generate video` runs the parts
+  as a create-then-extend chain on **Gemini Omni Flash** (`gemini-omni-1.1-flash`,
+  Interactions API, `previous_interaction_id` for continuity). Clips are stored in
+  Cloud Storage, job state in Firestore, and shown back with a per-part player and a
+  frame timeline that maps each storyboard scene to its clip.
+  Needs the real `GOOGLE_API_KEY` secret version (see [`docs/DEPLOY-SETUP.md`](docs/DEPLOY-SETUP.md)).
+- **Stubbed:** the cardekho.com car-model scraper (P0.2) — `jobs/scraper` + `/api/scrape`.
+- **Not wired yet:** reference-image grounding needs attachments to carry real
+  uploaded bytes/URLs (the code path exists but is inert until upload lands);
+  scene-level (vs part-level) re-generate.
+- **Deployed:** `santoshks2017/ai-video-app` → GCP/Firebase `ai-video-app-cd`,
+  push-to-`main` auto-deploys (Cloud Run `ava-api` + Firebase Hosting).

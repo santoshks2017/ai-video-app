@@ -1,50 +1,163 @@
 /**
- * Gemini Omni Flash client wrapper (PRD P0.1 / P0.7).
+ * Gemini Omni Flash client (PRD P0.1 / P0.7).
  *
- * STUB — not wired to the real API yet. Phase 1 opens with a 15-minute empirical
- * spike (see spikes/) to confirm whether the conversational-edit context carries
- * attachment/reference grounding across sequential extend calls. Do not finalise
- * the chunking contract here until that spike has run.
+ * Omni Flash is a video-generation + conversational-editing model exposed through
+ * the Interactions API (NOT generateContent):
+ *   POST https://generativelanguage.googleapis.com/v1beta/interactions
+ * Multi-turn continuity — which the PRD's create-then-extend chunking depends on —
+ * is `previous_interaction_id`: the model carries the prior clip and its
+ * references forward without re-supplying them.
+ *
+ * Docs: https://ai.google.dev/gemini-api/docs/omni
+ * Model: gemini-omni-1.1-flash (3–10s per clip, 24fps, 360p/720p/1080p/4K, 16:9 or 9:16).
+ *
+ * Response shapes vary between SDK-normalised and raw REST, so the video is
+ * located tolerantly (steps[].content[], output_video, response.*).
  */
 
-import type { PromptPart } from '@ava/shared';
+const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-export interface OmniFlashClip {
-  partNum: number;
-  /** URL / storage path of the generated clip once real. */
-  uri: string;
-  seconds: number;
+export interface OmniRef {
+  /** Publicly fetchable URL (e.g. a Storage signed URL) or a data: URI. */
+  uri?: string;
+  /** Raw base64 (no data: prefix). */
+  data?: string;
+  mimeType: string;
+  kind: 'image' | 'video';
 }
 
-export interface OmniFlashInput {
-  parts: PromptPart[];
-  /** Reference image URIs (dealer photos, car-model set) to ground the generation. */
-  referenceImages: string[];
-  aspect: string;
+export interface GenerateClipInput {
+  prompt: string;
+  aspect: '9:16' | '1:1' | '16:9';
+  resolution: '360p' | '720p' | '1080p' | '4k';
+  references?: OmniRef[];
+  /** Present for every part after the first — the create call's interaction id. */
+  previousInteractionId?: string;
+  /** 'text_to_video' | 'reference_to_video' for part 1; 'extend' after. */
+  task: 'text_to_video' | 'reference_to_video' | 'extend';
 }
 
-export class OmniFlashNotConfiguredError extends Error {
-  code = 'omni-flash-not-configured';
-  constructor() {
-    super('GOOGLE_API_KEY is not set on the server — cannot call Gemini Omni Flash.');
+export interface GeneratedClip {
+  interactionId: string;
+  mimeType: string;
+  /** base64 (delivery=base64) — mutually exclusive with fileUri. */
+  base64?: string;
+  /** files/{id} resource, resolved + downloaded by the caller (delivery=uri). */
+  fileId?: string;
+}
+
+export class OmniFlashError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public status = 502,
+  ) {
+    super(message);
   }
 }
 
-export class OmniFlashNotImplementedError extends Error {
-  code = 'omni-flash-not-implemented';
-  constructor() {
-    super(
-      'Omni Flash integration is stubbed in this build. Run the Phase 1 continuity spike, then implement generate().',
+function headers(apiKey: string): Record<string, string> {
+  return { 'content-type': 'application/json', 'x-goog-api-key': apiKey };
+}
+
+function buildInput(prompt: string, refs: OmniRef[] | undefined): unknown {
+  if (!refs || refs.length === 0) return prompt;
+  return [
+    { type: 'text', data: prompt },
+    ...refs.map((r) => ({
+      type: r.kind,
+      ...(r.uri ? { uri: r.uri } : { data: r.data, mime_type: r.mimeType }),
+    })),
+  ];
+}
+
+/** Walk an arbitrary response object for the first video part. */
+function findVideo(obj: unknown): { mimeType: string; data?: string; fileId?: string } | null {
+  const seen = new Set<unknown>();
+  const stack: unknown[] = [obj];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object' || seen.has(node)) continue;
+    seen.add(node);
+    const rec = node as Record<string, unknown>;
+
+    const mime = String(rec.mime_type ?? rec.mimeType ?? '');
+    const looksVideo = mime.startsWith('video/') || rec.type === 'video';
+    if (looksVideo) {
+      const data = typeof rec.data === 'string' ? rec.data : undefined;
+      const uri = typeof rec.uri === 'string' ? rec.uri : undefined;
+      const fileId = uri ? uri.split('/').filter(Boolean).slice(-1)[0]?.replace(/:.*$/, '') : undefined;
+      if (data || fileId) return { mimeType: mime || 'video/mp4', data, fileId };
+    }
+    for (const v of Object.values(rec)) {
+      if (v && typeof v === 'object') stack.push(v);
+    }
+  }
+  return null;
+}
+
+export async function generateClip(input: GenerateClipInput, apiKey: string): Promise<GeneratedClip> {
+  if (!apiKey) throw new OmniFlashError('omni-flash-not-configured', 'GOOGLE_API_KEY is not set on the server.', 503);
+
+  const body: Record<string, unknown> = {
+    model: process.env.OMNI_FLASH_MODEL || 'gemini-omni-1.1-flash',
+    input: buildInput(input.prompt, input.references),
+    response_format: {
+      type: 'video',
+      aspect_ratio: input.aspect === '1:1' ? '16:9' : input.aspect,
+      resolution: input.resolution,
+      delivery: 'uri',
+    },
+    generation_config: { video_config: { task: input.task } },
+  };
+  if (input.previousInteractionId) body.previous_interaction_id = input.previousInteractionId;
+
+  const res = await fetch(`${BASE}/interactions`, {
+    method: 'POST',
+    headers: headers(apiKey),
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = (json.error ?? {}) as Record<string, unknown>;
+    throw new OmniFlashError(
+      String(err.status ?? 'omni-flash-error'),
+      String(err.message ?? `Interactions API returned ${res.status}`),
+      res.status === 429 ? 429 : 502,
     );
   }
+
+  const status = String(json.status ?? '');
+  if (status && status !== 'completed' && status !== 'succeeded') {
+    throw new OmniFlashError('omni-flash-incomplete', `Interaction status: ${status}`);
+  }
+
+  const video = findVideo(json);
+  const interactionId = String(json.id ?? json.interaction_id ?? '');
+  if (!video || !interactionId) {
+    throw new OmniFlashError('omni-flash-no-video', 'No video found in the Interactions API response.');
+  }
+  return {
+    interactionId,
+    mimeType: video.mimeType,
+    base64: video.data,
+    fileId: video.fileId,
+  };
 }
 
-export async function generate(
-  _input: OmniFlashInput,
-  apiKey: string | undefined,
-): Promise<OmniFlashClip[]> {
-  if (!apiKey) throw new OmniFlashNotConfiguredError();
-  // TODO(phase-1): sequential create → extend calls, one per part, carrying the
-  // prior clip forward per Omni Flash's conversational continuity model.
-  throw new OmniFlashNotImplementedError();
+/** For delivery=uri: wait until the generated file is ACTIVE, then return its bytes. */
+export async function downloadFile(fileId: string, apiKey: string): Promise<{ bytes: Buffer; mimeType: string }> {
+  const id = fileId.replace(/^files\//, '');
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const meta = await fetch(`${BASE}/files/${id}`, { headers: headers(apiKey) });
+    const mj = (await meta.json().catch(() => ({}))) as Record<string, unknown>;
+    const state = String(mj.state ?? '');
+    if (state === 'ACTIVE' || state === '') break;
+    if (state === 'FAILED') throw new OmniFlashError('omni-flash-file-failed', 'Generated file processing failed.');
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  const dl = await fetch(`${BASE}/files/${id}:download?alt=media`, { headers: headers(apiKey) });
+  if (!dl.ok) throw new OmniFlashError('omni-flash-download', `File download returned ${dl.status}`);
+  const buf = Buffer.from(await dl.arrayBuffer());
+  return { bytes: buf, mimeType: dl.headers.get('content-type') ?? 'video/mp4' };
 }

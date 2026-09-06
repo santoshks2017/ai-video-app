@@ -10,6 +10,7 @@ import { useBrief } from './state/briefStore.js';
 import { BriefForm } from './components/BriefForm.js';
 import { Storyboard } from './components/Storyboard.js';
 import { OutputPanel } from './components/OutputPanel.js';
+import { GenerationPanel } from './components/GenerationPanel.js';
 
 export default function App() {
   const brief = useBrief((s) => s.brief);
@@ -53,6 +54,16 @@ export default function App() {
         </div>
         <div className="right-col">
           <OutputPanel parts={parts} preflight={preflight} cost={cost} promptOnly={promptOnly} />
+          {!promptOnly && parts.length > 0 && (
+            <GenerationPanel
+              brief={brief}
+              parts={parts}
+              scenePlan={built?.scenePlan ?? null}
+              canGenerate={preflight.canGenerate}
+              needsCostConfirm={!!cost?.needsConfirmation}
+              costInr={cost?.inr ?? 0}
+            />
+          )}
         </div>
       </div>
 

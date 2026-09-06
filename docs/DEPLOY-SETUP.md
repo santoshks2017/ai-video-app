@@ -18,6 +18,8 @@ Active account: `santoshks2017@gmail.com`. Region: `asia-south1`.
 | 9 | GitHub Actions repo variables | `GCP_PROJECT_ID`, `GCP_REGION`, `FIREBASE_PROJECT_ID`, `DEPLOY_SERVICE_ACCOUNT`, `WIF_PROVIDER` |
 | 10 | Firestore | Native database created in asia-south1 |
 | 11 | Storage | Firebase default bucket `ai-video-app-cd.firebasestorage.app` (asia-south1) |
+| 12 | Runtime SA | `85831607354-compute@developer.gserviceaccount.com` granted `datastore.user` + `storage.objectAdmin` (Admin SDK from Cloud Run writes job records + clips) and `secretmanager.secretAccessor` on `GOOGLE_API_KEY` |
+| 13 | Cloud Run sizing | deploy sets `--timeout 3600 --memory 1Gi --cpu 1 --concurrency 4 --max-instances 3` — generation is minutes-long per clip |
 
 ## Add the real Omni Flash key
 

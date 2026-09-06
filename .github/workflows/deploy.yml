@@ -63,6 +63,11 @@ jobs:
             --project "${{ vars.GCP_PROJECT_ID }}" \
             --region "${{ vars.GCP_REGION }}" \
             --allow-unauthenticated \
+            --timeout 3600 \
+            --memory 1Gi \
+            --cpu 1 \
+            --concurrency 4 \
+            --max-instances 3 \
             --set-secrets "GOOGLE_API_KEY=GOOGLE_API_KEY:latest" \
             --set-env-vars "ALLOW_ORIGIN=https://${{ vars.FIREBASE_PROJECT_ID }}.web.app" \
             --quiet

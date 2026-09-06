@@ -19,7 +19,6 @@ export function OutputPanel({
   promptOnly: boolean;
 }) {
   const [toast, setToast] = useState('');
-  const [costConfirmed, setCostConfirmed] = useState(false);
 
   const copy = async (text: string, label: string) => {
     try {
@@ -30,10 +29,6 @@ export function OutputPanel({
       setToast('Copy failed — select manually');
     }
   };
-
-  const hasBad = preflight.checks.some((c) => c.level === 'bad');
-  const canProceed = preflight.canGenerate && parts.length > 0;
-  const generateBlockedByCost = !!cost?.needsConfirmation && !costConfirmed;
 
   return (
     <div className="card">
@@ -72,16 +67,6 @@ export function OutputPanel({
               ⚠ {cost.clipCount} sequential calls — a long multi-part video. Consider a shorter cut.
             </div>
           )}
-          {cost.needsConfirmation && (
-            <label className="check-row" style={{ marginTop: 6 }}>
-              <input
-                type="checkbox"
-                checked={costConfirmed}
-                onChange={(e) => setCostConfirmed(e.target.checked)}
-              />
-              <span>Over ₹500 — confirm this spend before generating.</span>
-            </label>
-          )}
         </div>
       )}
 
@@ -93,31 +78,7 @@ export function OutputPanel({
         >
           Copy {parts.length > 1 ? 'all parts' : 'prompt'}
         </button>
-
-        {!promptOnly && (
-          <button
-            className="btn primary"
-            disabled={!canProceed || generateBlockedByCost}
-            title={
-              hasBad
-                ? 'Resolve the blocking checks first'
-                : generateBlockedByCost
-                  ? 'Confirm the cost first'
-                  : 'Backend not wired yet in this build'
-            }
-            onClick={() => setToast('Generation backend not wired yet — copy the prompt into Lumina for now')}
-          >
-            Generate video
-          </button>
-        )}
       </div>
-
-      {!promptOnly && (
-        <div className="hint" style={{ margin: '0 16px 12px' }}>
-          The <code>Generate video</code> path (Omni Flash API call, P0.1) is stubbed in this build. Pre-flight,
-          cost gate and prompt assembly are live. Prompt-only presenter categories are fully functional today.
-        </div>
-      )}
 
       {parts.length === 0 ? (
         <div className="prompt-empty">

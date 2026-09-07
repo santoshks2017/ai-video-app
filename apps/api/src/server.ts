@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
-import { isPromptOnly, estimateCost, type Brief, type PromptPart } from '@ava/shared';
+import { isPromptOnly, estimateCost, overlayCopy, type Brief, type PromptPart } from '@ava/shared';
 import { loadConfig } from './config.js';
 import { generateClip, downloadFile, OmniFlashError, type OmniRef } from './omniFlash.js';
 import {
@@ -15,7 +15,7 @@ import {
   type JobClip,
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
-import { concatClips, lastFrame } from './concat.js';
+import { composeFinal, lastFrame, type BrandOverlay } from './post.js';
 import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './auth.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
 import { syncCarModel } from './carSync.js';
@@ -307,10 +307,21 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   // Ground the model with any uploaded / scraped reference images (P0.4 / P0.2):
   // read the stored bytes and pass them inline as base64.
   const references: OmniRef[] = [];
+  let dealerLogo: Buffer | undefined;
+  let brandLogo: Buffer | undefined;
   for (const a of brief.attachments ?? []) {
     if (!a.storagePath) continue;
     const obj = await readObject(a.storagePath).catch(() => null);
     if (!obj) continue;
+    // Logos are overlay assets, not things the model should try to draw.
+    if (a.kind === 'logo') {
+      dealerLogo = obj.bytes;
+      continue;
+    }
+    if (a.kind === 'brand-logo') {
+      brandLogo = obj.bytes;
+      continue;
+    }
     references.push({
       data: obj.bytes.toString('base64'),
       mimeType: obj.contentType || 'image/jpeg',
@@ -378,13 +389,19 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       prevBytes = bytes;
     }
 
-    let finalStoragePath: string;
-    if (segmentBytes.length <= 1) {
-      finalStoragePath = clips[0]!.storagePath;
-    } else {
-      const finalBytes = await concatClips(segmentBytes);
-      finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
-    }
+    // Post-production: crossfade the segments, append a real end card, and
+    // overlay the footer bar + logos. Everything that must be legible is drawn
+    // here rather than generated.
+    const copy = overlayCopy(brief);
+    const overlay: BrandOverlay = {
+      footerText: copy.footerText,
+      dealerLogo,
+      brandLogo,
+      endCard: brief.endCardOn && copy.endCardLines.length ? { lines: copy.endCardLines, seconds: 3 } : undefined,
+      transition: 0.5,
+    };
+    const finalBytes = await composeFinal(segmentBytes, overlay);
+    const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 
     await updateJob(jobId, { status: 'done', clips, finalStoragePath });
     return {

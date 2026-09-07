@@ -108,10 +108,20 @@ test('offer prompt still carries the full rulebook', () => {
   assert.match(res.parts[0]!.text, /PRONUNCIATION & DELIVERY RULES/);
 });
 
-test('footer / on-screen identity mismatch is flagged', () => {
-  const b = base({ footer: 'Some Other Motors | Model Town | 98765 43210' });
-  const r = runChecks(b);
-  assert.ok(r.checks.some((c) => c.code === 'footer-identity-mismatch'));
+test('the model is told to leave branding furniture out of the frame', () => {
+  // Footer, corner logos and the end card are composited in post, so the prompt
+  // must not ask the model to draw them.
+  const res = buildPrompt(base())!;
+  const text = res.parts.map((p) => p.text).join('\n');
+  assert.match(text, /CLEAN FRAME/);
+  assert.match(text, /no bottom footer bar/);
+  assert.doesNotMatch(text, /PERSISTENT BRANDING/);
+});
+
+test('no end-card beat is generated — the outro is post-production', () => {
+  const b = base({ endCardOn: true, endCard: 'Jasper Tata | Book now' });
+  const ctx = buildContext(b);
+  assert.equal(buildBeats(ctx).some((x) => x.isEndCard), false);
 });
 
 test('model-specific with no reference set blocks an automated generation (P0.2 fallback)', () => {

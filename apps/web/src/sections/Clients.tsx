@@ -209,17 +209,35 @@ export function ClientsSection() {
             </div>
           )}
 
-          <Field label="Logo">
-            <div className="thumbs">
-              {draft.logo && <Thumb img={draft.logo} onRemove={() => set({ logo: undefined })} />}
-              <ImageUpload
-                label={`${draft.name || 'Client'} — logo`}
-                kind="logo"
-                buttonText={draft.logo ? 'Replace logo' : 'Upload logo'}
-                onUploaded={(img) => set({ logo: img })}
-              />
-            </div>
-          </Field>
+          <div className="row2">
+            <Field
+              label="Dealership logo"
+              hint="Overlaid top-right on every video. Use a transparent PNG."
+            >
+              <div className="thumbs">
+                {draft.logo && <Thumb img={draft.logo} onRemove={() => set({ logo: undefined })} />}
+                <ImageUpload
+                  label={`${draft.name || 'Client'} — dealership logo`}
+                  kind="logo"
+                  buttonText={draft.logo ? 'Replace' : 'Upload'}
+                  onUploaded={(img) => set({ logo: img })}
+                />
+              </div>
+            </Field>
+            <Field label="Brand logo" hint="Overlaid top-left. Transparent PNG.">
+              <div className="thumbs">
+                {draft.brandLogo && (
+                  <Thumb img={draft.brandLogo} onRemove={() => set({ brandLogo: undefined })} />
+                )}
+                <ImageUpload
+                  label={`${draft.brand || 'Brand'} — brand logo`}
+                  kind="brand-logo"
+                  buttonText={draft.brandLogo ? 'Replace' : 'Upload'}
+                  onUploaded={(img) => set({ brandLogo: img })}
+                />
+              </div>
+            </Field>
+          </div>
 
           <Field label="Showroom photos" hint="Used as visual references so generations match the real showroom.">
             <div className="thumbs">

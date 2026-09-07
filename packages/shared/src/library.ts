@@ -86,7 +86,10 @@ export interface ClientProfile {
   address?: string;
   phone?: string;
   tier: 'Metro Premium' | 'Regional/Volume' | 'Hyperlocal';
+  /** Dealership logo — overlaid top-right. Transparent PNG works best. */
   logo?: StoredImage;
+  /** Manufacturer logo — overlaid top-left. Transparent PNG works best. */
+  brandLogo?: StoredImage;
   /** Showroom / delivery / team photos. */
   photos: StoredImage[];
   /** Default fictionalised branding for this client. */

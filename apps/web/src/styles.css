@@ -882,3 +882,37 @@ code {
 .key-state.set { background: var(--good-wash); color: var(--good); }
 .key-state.unset { background: var(--bad-wash); color: var(--bad); }
 .caps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+
+/* ============ progressive disclosure ============ */
+.collapse {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.collapse > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 11px 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  user-select: none;
+}
+.collapse > summary::-webkit-details-marker { display: none; }
+.collapse > summary::before {
+  content: '▸';
+  color: var(--ink-faint);
+  font-size: 11px;
+  transition: transform 0.12s;
+}
+.collapse[open] > summary::before { transform: rotate(90deg); }
+.collapse > summary:hover { background: var(--surface); }
+.collapse-title { font-size: 13px; font-weight: 700; }
+.collapse-hint { font-size: 11.5px; color: var(--ink-faint); }
+.collapse-body { padding: 4px 14px 14px; background: var(--surface); border-top: 1px solid var(--line); }
+/* A card nested in a disclosure flattens — no double chrome. */
+.collapse-body > .card { border: none; box-shadow: none; margin: 0; border-radius: 0; }
+.collapse-body > .card > .head { background: transparent; padding-left: 0; padding-right: 0; }
+.collapse-body > .card > .body { padding-left: 0; padding-right: 0; }

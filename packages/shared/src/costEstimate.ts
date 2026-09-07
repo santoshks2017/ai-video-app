@@ -28,7 +28,7 @@ export function estimateCost(brief: Brief, opts: CostEstimateOptions = {}): Cost
 
   const ctx = buildContext(brief);
   const beats = buildBeats(ctx);
-  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk);
+  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks });
 
   // Each part is one create-or-extend API call. Billed on generated seconds.
   const clipCount = Math.max(1, plan.parts);

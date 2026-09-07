@@ -12,8 +12,11 @@ RUN npm run build --workspace @ava/shared \
 
 FROM node:22-slim AS runtime
 ENV NODE_ENV=production
-# ffmpeg: stitch multi-run generations into one final MP4.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+# ffmpeg stitches the segments; the fonts are what sharp/librsvg use to
+# rasterise the footer bar and end card (Noto covers Devanagari).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg fonts-dejavu-core fonts-noto-core fontconfig \
+ && fc-cache -f \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /repo
 COPY --from=build /repo/node_modules ./node_modules

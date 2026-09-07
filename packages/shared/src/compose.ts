@@ -161,6 +161,7 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
     }
   }
   if (client?.logo) attachments.push(toDealerPhoto(client.logo, 'logo'));
+  if (client?.brandLogo) attachments.push(toDealerPhoto(client.brandLogo, 'brand-logo'));
   for (const img of client?.photos ?? []) attachments.push(toDealerPhoto(img, 'dealer'));
   for (const img of project.extraRefs) attachments.push(toDealerPhoto(img, 'dealer'));
   b.attachments = attachments;
@@ -179,4 +180,25 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
 /** Which use cases a project can pick without contradiction (all 9 today). */
 export function projectUseCases(project: Project): CategoryId[] {
   return project.useCases;
+}
+
+/**
+ * Copy for the post-production overlays. The footer bar and end card are
+ * composited by the API, not generated, so this is the single place their text
+ * is decided.
+ */
+export function overlayCopy(brief: Brief): { footerText: string; endCardLines: string[] } {
+  const d = brief.dealer;
+  const shown = d.fictionalize ? d.fakeDealer || d.dealerName : d.dealerName;
+  const footerText =
+    brief.footer.trim() || [shown, d.address, d.phone].map((x) => (x ?? '').trim()).filter(Boolean).join('  |  ');
+
+  const endCardLines = brief.endCard.trim()
+    ? brief.endCard
+        .split(/\r?\n|\s*\|\s*/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+    : [shown, brief.cta, d.address, d.phone].map((x) => (x ?? '').trim()).filter(Boolean);
+
+  return { footerText, endCardLines };
 }

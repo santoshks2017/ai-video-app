@@ -14,7 +14,7 @@ import {
   type ProjectVideoSpec,
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Panel, ImageUpload, Thumb, Confirm, Banner } from '../components/ui.js';
+import { Field, Panel, ImageUpload, Thumb, Confirm, Banner, Collapse } from '../components/ui.js';
 import { isApiError } from '../lib/client.js';
 import { Storyboard } from '../components/Storyboard.js';
 import { OutputPanel } from '../components/OutputPanel.js';
@@ -217,6 +217,12 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             title="2. Use case"
             step={promptOnly ? 'Prompt-only — no video generation' : 'Composable — pick 1 or more'}
           >
+            {project.useCases.length >= 3 && (
+              <Banner kind="warn">
+                {project.useCases.length} use cases in one video. Their beats interleave, so the story gets
+                disjointed — two is usually the most that still reads as one ad.
+              </Banner>
+            )}
             {promptOnly && (
               <Banner kind="warn">
                 Presenter-led use cases can't be generated automatically — picking one makes the whole project
@@ -236,25 +242,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             </div>
           </Panel>
 
-          <Panel title="3. Video specs" step="Sets the whole prompt">
-            <div className="row2">
-              <Field label="Narration mode" hint={NARRATION[project.spec.narration].hint}>
-                <select
-                  value={project.spec.narration}
-                  onChange={(e) => setSpec({ narration: e.target.value as ProjectVideoSpec['narration'] })}
-                >
-                  {Object.values(NARRATION).map((m) => (
-                    <option key={m.key} value={m.key}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Music / audio bed">
-                <input value={project.spec.music} onChange={(e) => setSpec({ music: e.target.value })} />
-              </Field>
-            </div>
-            <div className="row2">
+          <Panel title="3. Video" step="The essentials — everything else has a sensible default">
+            <div className="row3">
               <Field label="Duration (seconds)">
                 <input
                   type="number"
@@ -274,8 +263,6 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   <option value="16:9">Horizontal 16:9</option>
                 </select>
               </Field>
-            </div>
-            <div className="row2">
               <Field
                 label="Model"
                 hint={
@@ -299,75 +286,124 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     ))}
                 </select>
               </Field>
-              <Field label="Max seconds per clip" hint={activeModel ? `This model caps at ${activeModel.maxClipSec}s.` : 'Longer videos are split and stitched.'}>
-                <input
-                  type="number"
-                  min={activeModel?.minClipSec ?? 3}
-                  max={activeModel?.maxClipSec ?? 30}
-                  value={project.spec.maxChunkSec}
-                  onChange={(e) =>
-                    setSpec({
-                      maxChunkSec: Math.min(
-                        Number(e.target.value),
-                        activeModel?.maxClipSec ?? Number(e.target.value),
-                      ),
-                    })
-                  }
-                />
-              </Field>
             </div>
-            <div className="row3">
-              <Field label="Resolution" hint="Omni Flash is 720p in v1.">
-                <select
-                  value={project.spec.resolution}
-                  onChange={(e) => setSpec({ resolution: e.target.value as ProjectVideoSpec['resolution'] })}
+            <div className="hint" style={{ marginTop: -4 }}>
+              {formatFitSummary(fit)}. {fit.notes.join(' ')}
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <Collapse title="Narration &amp; audio" hint={NARRATION[project.spec.narration].label}>
+                <div className="row2">
+                  <Field label="Narration mode" hint={NARRATION[project.spec.narration].hint}>
+                    <select
+                      value={project.spec.narration}
+                      onChange={(e) => setSpec({ narration: e.target.value as ProjectVideoSpec['narration'] })}
+                    >
+                      {Object.values(NARRATION).map((m) => (
+                        <option key={m.key} value={m.key}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Music / audio bed">
+                    <input value={project.spec.music} onChange={(e) => setSpec({ music: e.target.value })} />
+                  </Field>
+                </div>
+              </Collapse>
+
+              <Collapse title="On-screen text &amp; end card">
+                <div className="row2">
+                  <Field label="On-screen text">
+                    <select
+                      value={project.spec.textLang}
+                      onChange={(e) => setSpec({ textLang: e.target.value as ProjectVideoSpec['textLang'] })}
+                    >
+                      <option value="english">English only</option>
+                      <option value="mixed">Hindi + English</option>
+                      <option value="hindi">Devanagari-led</option>
+                    </select>
+                  </Field>
+                  <Field label="Copy tone">
+                    <select
+                      value={project.spec.captionStyle}
+                      onChange={(e) =>
+                        setSpec({ captionStyle: e.target.value as ProjectVideoSpec['captionStyle'] })
+                      }
+                    >
+                      <option value="Long Narrative">Long Narrative</option>
+                      <option value="Short Punchy">Short Punchy</option>
+                      <option value="Structured">Structured minimal</option>
+                    </select>
+                  </Field>
+                </div>
+                <Field label="Primary CTA">
+                  <input value={project.spec.cta} onChange={(e) => setSpec({ cta: e.target.value })} />
+                </Field>
+                <Field
+                  label="Footer bar"
+                  hint="Overlaid after generation, so it is always legible. Blank → the client's name, address and phone."
                 >
-                  <option value="720p">720p</option>
-                  <option value="480p">480p</option>
-                </select>
-              </Field>
-              <Field label="On-screen text">
-                <select
-                  value={project.spec.textLang}
-                  onChange={(e) => setSpec({ textLang: e.target.value as ProjectVideoSpec['textLang'] })}
-                >
-                  <option value="english">English only</option>
-                  <option value="mixed">Hindi + English</option>
-                  <option value="hindi">Devanagari-led</option>
-                </select>
-              </Field>
-              <Field label="Social formats" hint={fit.notes.join(' ')}>
-                <input readOnly value={formatFitSummary(fit)} />
-              </Field>
+                  <input value={project.spec.footer} onChange={(e) => setSpec({ footer: e.target.value })} />
+                </Field>
+                <div className="check-row">
+                  <input
+                    type="checkbox"
+                    id="pe_endcard"
+                    checked={project.spec.endCardOn}
+                    onChange={(e) => setSpec({ endCardOn: e.target.checked })}
+                  />
+                  <label htmlFor="pe_endcard">End on a dealer details + CTA card</label>
+                </div>
+                {project.spec.endCardOn && (
+                  <Field label="End card content" hint="One line per row, or separate with |. Composited, not generated.">
+                    <textarea value={project.spec.endCard} onChange={(e) => setSpec({ endCard: e.target.value })} />
+                  </Field>
+                )}
+              </Collapse>
+
+              <Collapse title="Advanced" hint="Look, resolution, clip length">
+                <Field label="Visual style">
+                  <input
+                    value={project.spec.visualStyle}
+                    onChange={(e) => setSpec({ visualStyle: e.target.value })}
+                  />
+                </Field>
+                <div className="row2">
+                  <Field label="Resolution">
+                    <select
+                      value={project.spec.resolution}
+                      onChange={(e) => setSpec({ resolution: e.target.value as ProjectVideoSpec['resolution'] })}
+                    >
+                      <option value="720p">720p</option>
+                      <option value="480p">480p</option>
+                    </select>
+                  </Field>
+                  <Field
+                    label="Max seconds per clip"
+                    hint={activeModel ? `This model caps at ${activeModel.maxClipSec}s.` : undefined}
+                  >
+                    <input
+                      type="number"
+                      min={activeModel?.minClipSec ?? 3}
+                      max={activeModel?.maxClipSec ?? 30}
+                      value={project.spec.maxChunkSec}
+                      onChange={(e) =>
+                        setSpec({
+                          maxChunkSec: Math.min(
+                            Number(e.target.value),
+                            activeModel?.maxClipSec ?? Number(e.target.value),
+                          ),
+                        })
+                      }
+                    />
+                  </Field>
+                </div>
+              </Collapse>
             </div>
-            <div className="row2">
-              <Field label="Primary CTA">
-                <input value={project.spec.cta} onChange={(e) => setSpec({ cta: e.target.value })} />
-              </Field>
-              <Field label="Footer bar" hint="Blank → derived from the client's name, address and phone.">
-                <input value={project.spec.footer} onChange={(e) => setSpec({ footer: e.target.value })} />
-              </Field>
-            </div>
-            <Field label="Visual style">
-              <input value={project.spec.visualStyle} onChange={(e) => setSpec({ visualStyle: e.target.value })} />
-            </Field>
-            <div className="check-row">
-              <input
-                type="checkbox"
-                id="pe_endcard"
-                checked={project.spec.endCardOn}
-                onChange={(e) => setSpec({ endCardOn: e.target.checked })}
-              />
-              <label htmlFor="pe_endcard">Include a closing end card</label>
-            </div>
-            {project.spec.endCardOn && (
-              <Field label="End card content" hint="One line per row, or separate with |. Rendered as text only.">
-                <textarea value={project.spec.endCard} onChange={(e) => setSpec({ endCard: e.target.value })} />
-              </Field>
-            )}
           </Panel>
 
-          <Panel title="4. Extra references" step="This project only">
+          <Panel title="4. Reference images" step="Pulled in automatically from the client and car">
             <div className="section-desc">
               The client's photos and the car's image set are pulled in automatically. Add anything extra this
               particular video needs.
@@ -455,15 +491,24 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             </Panel>
           )}
 
-          <Storyboard
-            scenePlan={built?.scenePlan ?? null}
-            sceneEdits={project.sceneEdits}
-            narration={project.spec.narration}
-            onEditScene={(key, patch) =>
-              set({ sceneEdits: { ...project.sceneEdits, [key]: { ...project.sceneEdits[key], ...patch } } })
-            }
-            onClearEdits={() => set({ sceneEdits: {} })}
-          />
+          {built?.scenePlan && built.scenePlan.scenes.length > 0 && (
+            <Collapse
+              title="Storyboard"
+              hint={`${built.scenePlan.scenes.length} scenes · ${built.scenePlan.parts} segment${
+                built.scenePlan.parts > 1 ? 's' : ''
+              } · edit any scene's script or shot`}
+            >
+              <Storyboard
+                scenePlan={built.scenePlan}
+                sceneEdits={project.sceneEdits}
+                narration={project.spec.narration}
+                onEditScene={(key, patch) =>
+                  set({ sceneEdits: { ...project.sceneEdits, [key]: { ...project.sceneEdits[key], ...patch } } })
+                }
+                onClearEdits={() => set({ sceneEdits: {} })}
+              />
+            </Collapse>
+          )}
         </div>
 
         <div className="right-col">

@@ -10,7 +10,7 @@
  */
 
 import type { Brief, Check } from './types.js';
-import { MIN_SPOKEN_SCENE, LONG_STRING_CHARS, LONG_FOOTER_CHARS, cardCap } from './constants.js';
+import { LONG_STRING_CHARS, cardCap } from './constants.js';
 import { buildContext } from './context.js';
 import { buildBeats, collectStrings } from './buildBeats.js';
 import { planScenes } from './planScenes.js';
@@ -35,7 +35,7 @@ export function runChecks(brief: Brief): PreflightResult {
   const promptOnly = isPromptOnly(brief.categories);
   const ctx = buildContext(brief);
   const beats = buildBeats(ctx);
-  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk);
+  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks });
   const mode = ctx.mode;
 
   // Mandatory category fields — blocking.
@@ -76,20 +76,9 @@ export function runChecks(brief: Brief): PreflightResult {
     });
   }
 
-  // Footer / on-screen identity mismatch (Premier Motors defect).
-  const shownName = String(ctx.displayDealer ?? '').trim();
-  if (
-    shownName &&
-    ctx.footer &&
-    !shownName.startsWith('[') &&
-    ctx.footer.toLowerCase().indexOf(shownName.toLowerCase()) === -1
-  ) {
-    checks.push({
-      level: 'warn',
-      code: 'footer-identity-mismatch',
-      text: `The footer bar doesn't name "${shownName}", which is the dealership shown on screen. The video would carry two different dealership identities in one frame.`,
-    });
-  }
+  // The old footer/on-screen identity mismatch check is gone: the footer bar is
+  // composited in post from the client record, so it can no longer disagree with
+  // the branding shown on screen.
 
   // Car-model reference (P0.2): model-specific brief with no car-model image in scope.
   if (brief.modelSpecific) {
@@ -125,26 +114,24 @@ export function runChecks(brief: Brief): PreflightResult {
     });
   }
 
-  // Pacing.
-  if (mode.speaks) {
-    const tooShort = plan.scenes.filter((s) => !s.beat.isEndCard && s.duration < MIN_SPOKEN_SCENE);
-    if (tooShort.length) {
-      checks.push({
-        level: 'warn',
-        code: 'scenes-too-short',
-        text: `${tooShort.length} of ${plan.scenes.length} scenes are under ${MIN_SPOKEN_SCENE}s, which is too short for a spoken line. Raise the duration to about ${Math.ceil(
-          plan.scenes.length * 2.6,
-        )}s, or deselect a category.`,
-      });
-    } else {
-      checks.push({
-        level: 'ok',
-        code: 'pacing-ok',
-        text: `${plan.scenes.length} scenes across ${ctx.totalDuration}s — about ${
-          Math.round((ctx.totalDuration / plan.scenes.length) * 10) / 10
-        }s per scene, which holds a natural spoken line.`,
-      });
-    }
+  // Pacing. The planner now fits the scene count to the duration, so a rushed
+  // read is prevented rather than warned about — but say what it left out.
+  if (plan.scenes.length) {
+    const per = Math.round((ctx.totalDuration / plan.scenes.length) * 10) / 10;
+    checks.push({
+      level: 'ok',
+      code: 'pacing-ok',
+      text: `${plan.scenes.length} scenes across ${ctx.totalDuration}s — about ${per}s each${
+        mode.speaks ? ', which holds a natural spoken line' : ''
+      }.`,
+    });
+  }
+  if (plan.droppedBeats > 0) {
+    checks.push({
+      level: 'warn',
+      code: 'beats-trimmed',
+      text: `${plan.droppedBeats} beat${plan.droppedBeats > 1 ? 's were' : ' was'} left out so the rest have room at ${ctx.totalDuration}s. Lengthen the video or pick fewer use cases to keep them all.`,
+    });
   }
 
   // On-screen card load (Premier Motors reference dropped a card when overloaded).
@@ -160,22 +147,12 @@ export function runChecks(brief: Brief): PreflightResult {
     });
   }
 
-  const longCards = collectStrings(plan.scenes, ctx.footer).filter(
-    (c) => c !== ctx.footer && c.length > LONG_STRING_CHARS,
-  );
+  const longCards = collectStrings(plan.scenes).filter((c) => c.length > LONG_STRING_CHARS);
   if (longCards.length) {
     checks.push({
       level: 'warn',
       code: 'long-onscreen-string',
       text: `${longCards.length} on-screen string(s) run past ${LONG_STRING_CHARS} characters and are likely to render garbled. Shorten: "${longCards[0]!.slice(0, 50)}…".`,
-    });
-  }
-
-  if (ctx.footer && ctx.footer.length > LONG_FOOTER_CHARS) {
-    checks.push({
-      level: 'warn',
-      code: 'long-footer',
-      text: `The footer bar is ${ctx.footer.length} characters. Anything past about ${LONG_FOOTER_CHARS} renders unreliably in a small bar — trim a location or drop the brand name.`,
     });
   }
 

@@ -126,7 +126,7 @@ export interface DealerPhoto {
   refId?: string;
   /** Cloud Storage path of the uploaded bytes; read at generate time to ground the model. */
   storagePath?: string;
-  kind: 'dealer' | 'car-model' | 'logo';
+  kind: 'dealer' | 'car-model' | 'logo' | 'brand-logo';
 }
 
 export interface Dealer {
@@ -189,6 +189,8 @@ export interface ScenePlan {
   parts: number;
   partDuration: number;
   scenes: Scene[];
+  /** Beats left out so the surviving scenes have room to breathe. */
+  droppedBeats: number;
 }
 
 export interface PromptPart {

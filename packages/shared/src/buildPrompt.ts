@@ -14,6 +14,15 @@ import { planScenes, fmtTime } from './planScenes.js';
 import { CATEGORY_BY_ID } from './categories.js';
 import { rulebookText } from './rulebook.js';
 
+/**
+ * The dealer footer, the corner logos and the end card are composited in post
+ * (apps/api/src/post.ts), where text is guaranteed legible. The model must
+ * therefore leave that furniture out — anything it draws would sit underneath
+ * our overlay and show through at the edges.
+ */
+const CLEAN_FRAME =
+  'Leave the frame CLEAN of any branding furniture: no bottom footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, no lower third, no channel bug, no subtitles and no end card. Those are added afterwards in post. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so overlays can sit there.';
+
 export function wordBudget(seconds: number): number {
   return Math.max(3, Math.round(seconds * WORDS_PER_SECOND));
 }
@@ -53,7 +62,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
   if (!beats.length) return null;
   const overrides = opts.sceneOverrides ?? {};
 
-  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk);
+  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks });
   const totalParts = plan.parts;
   const mode = ctx.mode;
   const actor = brief.actor;
@@ -187,7 +196,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       }`,
     );
 
-    const strings = collectStrings(scenes, ctx.footer);
+    const strings = collectStrings(scenes);
     if (strings.length) {
       L.push('');
       L.push('## ON-SCREEN TEXT — EXACT STRINGS');
@@ -251,10 +260,8 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     });
 
     L.push('');
-    L.push('## PERSISTENT BRANDING (hold in every scene)');
-    L.push(`Top-left: ${String(ctx.displayBrandModel).split(' ')[0]}`);
-    L.push(`Top-right: ${ctx.displayDealer}`);
-    if (ctx.footer) L.push(`Bottom footer bar, unchanged all the way through: "${ctx.footer}"`);
+    L.push('## CLEAN FRAME — NO BRANDING FURNITURE');
+    L.push(CLEAN_FRAME);
 
     L.push('');
     L.push('## IMPORTANT');
@@ -327,7 +334,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push('No spoken audio; carry the message through footage and on-screen text.');
     }
     C.push(`Music: ${ctx.music || 'a neutral modern commercial track'}.`);
-    if (ctx.footer) C.push(`Hold the bottom footer bar unchanged: "${ctx.footer}". Top-right: ${ctx.displayDealer}.`);
+    C.push(CLEAN_FRAME);
     const contDirection = (brief.extraDirection ?? []).filter((x) => x.trim());
     if (contDirection.length) {
       C.push('');
@@ -352,7 +359,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       if (sc.beat.card) C.push(`  On-screen card: "${sc.beat.card}"${sc.beat.cardSub ? ` / "${sc.beat.cardSub}"` : ''}`);
       (sc.beat.cardLines ?? []).forEach((line) => C.push(`  On-screen line: "${line}"`));
     });
-    const contStrings = collectStrings(scenes, '');
+    const contStrings = collectStrings(scenes);
     C.push('');
     C.push('## ON-SCREEN TEXT — EXACT STRINGS (do not render anything else as text)');
     if (contStrings.length) {
@@ -365,11 +372,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     } else {
       C.push('No on-screen text cards in this segment. Only the persistent corner logos and the footer bar.');
     }
-    C.push(
-      `The persistent overlays are ONLY: top-left "${String(ctx.displayBrandModel).split(' ')[0]}", top-right "${ctx.displayDealer}"${
-        ctx.footer ? `, and the bottom footer bar "${ctx.footer}"` : ''
-      }. No other words, names or labels anywhere.`,
-    );
+    C.push(CLEAN_FRAME);
     if (mode.speaks) C.push('Same Hindi/Hinglish pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
     if (isLast) C.push('This is the final segment — end cleanly on the last scene.');
 

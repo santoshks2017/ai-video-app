@@ -168,3 +168,26 @@ export function Confirm({ onConfirm, children }: { onConfirm: () => void; childr
     </span>
   );
 }
+
+/** Progressive disclosure — keeps the primary path short. */
+export function Collapse({
+  title,
+  hint,
+  open = false,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  open?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details className="collapse" open={open}>
+      <summary>
+        <span className="collapse-title">{title}</span>
+        {hint && <span className="collapse-hint">{hint}</span>}
+      </summary>
+      <div className="collapse-body">{children}</div>
+    </details>
+  );
+}

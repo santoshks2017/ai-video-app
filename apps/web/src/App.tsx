@@ -15,6 +15,8 @@ import { GenerationPanel } from './components/GenerationPanel.js';
 export default function App() {
   const brief = useBrief((s) => s.brief);
   const sceneEdits = useBrief((s) => s.sceneEdits);
+  const prefillAll = useBrief((s) => s.prefillAll);
+  const resetBrief = useBrief((s) => s.reset);
 
   const promptOnly = isPromptOnly(brief.categories);
 
@@ -38,7 +40,27 @@ export default function App() {
             <div className="sub">CarDekho dealer ad-slot videos &middot; brief → storyboard → pre-flight → prompt</div>
           </div>
         </div>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            className="btn small"
+            type="button"
+            disabled={brief.categories.length === 0}
+            title={
+              brief.categories.length === 0
+                ? 'Pick at least one category first'
+                : 'Fill every section with sample data for the selected categor' +
+                  (brief.categories.length > 1 ? 'ies' : 'y') +
+                  ' (overwrites current values)'
+            }
+            onClick={prefillAll}
+          >
+            Prefill sample data
+          </button>
+          {brief.categories.length > 0 && (
+            <button className="btn ghost small" type="button" onClick={resetBrief} title="Clear the whole brief">
+              Reset
+            </button>
+          )}
           {brief.categories.length > 0 && (
             <span className={`pill ${promptOnly ? 'prompt-only' : 'automated'}`}>
               {promptOnly ? 'Prompt-only (presenter)' : 'Automated (Omni Flash)'}

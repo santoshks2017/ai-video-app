@@ -73,3 +73,19 @@ export const SAMPLE_ACTOR = {
 } as const;
 
 export const SAMPLE_CAR_MODEL = 'Hyundai Creta';
+
+/** Non-category brief fields for the top-level "Prefill sample data" button. */
+export const SAMPLE_BASICS = {
+  narration: 'presenter',
+  durationSec: 27,
+  maxChunkSec: 10,
+  aspect: '9:16',
+  resolution: '720p',
+  textLang: 'english',
+  captionStyle: 'Long Narrative',
+  visualStyle:
+    'Bright premium modern showroom, glossy floors, realistic reflections, energetic dealership-ad feel',
+  cta: 'Book your test drive today',
+  footer: 'Sterling Hyundai | MG Road | 98765 43210',
+  endCard: 'Sterling Hyundai | Book your Creta test drive today | MG Road | 98765 43210',
+} as const;

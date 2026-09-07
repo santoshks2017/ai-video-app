@@ -6,6 +6,7 @@ import {
   SAMPLE_DEALER,
   SAMPLE_ACTOR,
   SAMPLE_CAR_MODEL,
+  SAMPLE_BASICS,
   CATEGORY_BY_ID,
   type Brief,
   type CategoryId,
@@ -21,6 +22,8 @@ interface BriefState {
   setFieldValue: (cat: CategoryId, field: string, value: string) => void;
   /** Fill this category's fields with sample data + backfill any blank shared essentials. */
   prefillCategory: (cat: CategoryId) => void;
+  /** Fill every section with sample data (all selected categories + all shared fields). Overwrites. */
+  prefillAll: () => void;
   addAttachment: (a: DealerPhoto) => void;
   removeAttachment: (filename: string) => void;
   reset: () => void;
@@ -94,6 +97,48 @@ export const useBrief = create<BriefState>()(
             attachments: get().brief.attachments.filter((x) => x.filename !== filename),
           },
         }),
+      prefillAll: () => {
+        const b = get().brief;
+        if (b.categories.length === 0) return;
+        const fieldValues = { ...b.fieldValues };
+        for (const id of b.categories) fieldValues[id] = { ...SAMPLE_FIELDS[id] };
+        setState({
+          brief: {
+            ...b,
+            narration: SAMPLE_BASICS.narration,
+            durationSec: SAMPLE_BASICS.durationSec,
+            maxChunkSec: SAMPLE_BASICS.maxChunkSec,
+            aspect: SAMPLE_BASICS.aspect,
+            resolution: SAMPLE_BASICS.resolution,
+            textLang: SAMPLE_BASICS.textLang,
+            captionStyle: SAMPLE_BASICS.captionStyle,
+            visualStyle: SAMPLE_BASICS.visualStyle,
+            cta: SAMPLE_BASICS.cta,
+            footer: SAMPLE_BASICS.footer,
+            endCardOn: true,
+            endCard: SAMPLE_BASICS.endCard,
+            music: CATEGORY_BY_ID[b.categories[0]!].music,
+            carModel: b.modelSpecific ? SAMPLE_CAR_MODEL : b.carModel,
+            dealer: {
+              ...b.dealer,
+              dealerName: SAMPLE_DEALER.dealerName,
+              brandModel: SAMPLE_DEALER.brandModel,
+              phone: SAMPLE_DEALER.phone,
+              address: SAMPLE_DEALER.address,
+              fakeBrandModel: SAMPLE_DEALER.fakeBrandModel,
+              fakeDealer: SAMPLE_DEALER.fakeDealer,
+            },
+            actor: {
+              ...b.actor,
+              name: SAMPLE_ACTOR.name,
+              age: SAMPLE_ACTOR.age,
+              style: SAMPLE_ACTOR.style,
+              voice: SAMPLE_ACTOR.voice,
+            },
+            fieldValues,
+          },
+        });
+      },
       reset: () => setState({ brief: emptyBrief(), sceneEdits: {} }),
       editScene: (key, patch) =>
         setState({ sceneEdits: { ...get().sceneEdits, [key]: { ...get().sceneEdits[key], ...patch } } }),

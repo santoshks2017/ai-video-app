@@ -10,7 +10,7 @@
  * jobs/scraper (still a stub).
  */
 
-import { putRef } from './store.js';
+import { putRef, ensureFirebase } from './store.js';
 import { getFirestore } from 'firebase-admin/firestore';
 
 export type Angle = 'front' | 'side' | 'rear' | 'interior';
@@ -141,11 +141,13 @@ export async function scrapeModel(input: string): Promise<ScrapeModelResult> {
     angles.length >= 4 ? 'ok' : angles.length >= 2 ? 'partial' : 'needs-manual-upload';
 
   const result: ScrapeModelResult = { brand, model, slug, key, images: picked, angles, status, scrapedAt };
+  ensureFirebase();
   await getFirestore().collection('carModels').doc(key).set(result).catch(() => {});
   return result;
 }
 
 export async function getCarModel(key: string): Promise<ScrapeModelResult | null> {
+  ensureFirebase();
   const snap = await getFirestore().collection('carModels').doc(key).get();
   return snap.exists ? (snap.data() as ScrapeModelResult) : null;
 }

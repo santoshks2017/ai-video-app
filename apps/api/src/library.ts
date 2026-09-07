@@ -6,6 +6,7 @@
 
 import { getFirestore } from 'firebase-admin/firestore';
 import { randomUUID } from 'node:crypto';
+import { ensureFirebase } from './store.js';
 
 export type Collection = 'actors' | 'cars' | 'clients' | 'instructions' | 'projects';
 
@@ -16,6 +17,7 @@ interface Timestamped {
 }
 
 function col(name: Collection) {
+  ensureFirebase();
   return getFirestore().collection(name);
 }
 

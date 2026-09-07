@@ -12,13 +12,14 @@ const PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCP_PROJECT ?? '
 const BUCKET = process.env.STORAGE_BUCKET ?? `${PROJECT}.firebasestorage.app`;
 
 let ready = false;
-function ensure(): void {
+export function ensureFirebase(): void {
   if (ready) return;
   if (!getApps().length) {
     initializeApp({ credential: applicationDefault(), projectId: PROJECT, storageBucket: BUCKET });
   }
   ready = true;
 }
+const ensure = ensureFirebase;
 
 export interface JobClip {
   partNum: number;

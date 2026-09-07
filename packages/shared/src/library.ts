@@ -166,6 +166,9 @@ export interface Project {
   /** Most recent generation job. */
   lastJobId?: string;
   lastFinalUrl?: string;
+  /** Running totals across every generation ever run for this project. */
+  generationCount?: number;
+  totalCostInr?: number;
   createdAt: number;
   updatedAt: number;
 }

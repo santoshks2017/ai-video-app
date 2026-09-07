@@ -11,11 +11,12 @@ import {
   streamClip,
   putRef,
   readObject,
+  listJobsForProject,
   type JobRecord,
   type JobClip,
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
-import { composeFinal, lastFrame, selfTest, type BrandOverlay } from './post.js';
+import { composeFinal, lastFrame, posterFrame, selfTest, type BrandOverlay } from './post.js';
 import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './auth.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
 import { syncCarModel } from './carSync.js';
@@ -191,6 +192,9 @@ interface GenerateBody {
   confirmedCostInr?: number;
   /** VideoModelProfile id. Falls back to the default model, then the deploy key. */
   modelId?: string;
+  /** Files this generation under a project so it shows in that project's history. */
+  projectId?: string;
+  projectName?: string;
 }
 
 interface ResolvedModel {
@@ -293,6 +297,10 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   }));
   const record: JobRecord = {
     jobId,
+    projectId: req.body?.projectId,
+    projectName: req.body?.projectName,
+    label: `${cost.totalSeconds}s · ${brief.categories.length} use case${brief.categories.length === 1 ? '' : 's'}`,
+    modelName: resolved.label,
     status: 'running',
     createdAt: now,
     updatedAt: now,
@@ -302,6 +310,8 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     resolution: RES,
     totalSeconds: cost.totalSeconds,
     costInr: cost.inr,
+    costUsd: cost.usd,
+    usdPerSecond: resolved.usdPerSecond,
     clips,
   };
   await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
@@ -405,7 +415,33 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     const finalBytes = await composeFinal(segmentBytes, overlay);
     const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 
-    await updateJob(jobId, { status: 'done', clips, finalStoragePath });
+    // Thumbnail for the project's generation history.
+    let posterPath: string | undefined;
+    const poster = await posterFrame(finalBytes).catch(() => null);
+    if (poster) {
+      const put = await putRef(`poster-${jobId}.jpg`, 'image/jpeg', poster).catch(() => null);
+      posterPath = put?.storagePath;
+    }
+
+    await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath });
+
+    // Roll the spend up onto the project so the list can show it without
+    // reading every job.
+    if (req.body?.projectId) {
+      const proj = await getOne<{ generationCount?: number; totalCostInr?: number }>(
+        'projects',
+        req.body.projectId,
+      );
+      if (proj) {
+        await patch('projects', req.body.projectId, {
+          generationCount: (proj.generationCount ?? 0) + 1,
+          totalCostInr: (proj.totalCostInr ?? 0) + cost.inr,
+          lastJobId: jobId,
+          lastFinalUrl: `/api/clips/${jobId}/final`,
+          status: 'generated',
+        }).catch(() => {});
+      }
+    }
     return {
       jobId,
       status: 'done',
@@ -450,13 +486,41 @@ app.get<{ Params: { jobId: string } }>('/api/generate/:jobId', async (req, reply
   };
 });
 
+/** Every generation ever made for a project — nothing is overwritten. */
+app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req) => {
+  const jobs = await listJobsForProject(req.params.id);
+  return {
+    items: jobs.map((j) => ({
+      jobId: j.jobId,
+      label: j.label,
+      modelName: j.modelName,
+      status: j.status,
+      createdAt: j.createdAt,
+      totalSeconds: j.totalSeconds,
+      costInr: j.costInr,
+      costUsd: j.costUsd,
+      usdPerSecond: j.usdPerSecond,
+      aspect: j.aspect,
+      resolution: j.resolution,
+      segments: j.clips?.length ?? 0,
+      dealerName: j.dealerName,
+      categories: j.categories,
+      error: j.error,
+      finalUrl: j.finalStoragePath ? `/api/clips/${j.jobId}/final` : null,
+      posterUrl: j.posterPath ? `/api/clips/${j.jobId}/poster` : null,
+    })),
+  };
+});
+
 app.get<{ Params: { jobId: string; part: string } }>('/api/clips/:jobId/:part', async (req, reply) => {
   const job = await getJob(req.params.jobId);
   if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such job' });
   const storagePath =
     req.params.part === 'final'
       ? job.finalStoragePath
-      : job.clips.find((c) => String(c.partNum) === req.params.part)?.storagePath;
+      : req.params.part === 'poster'
+        ? job.posterPath
+        : job.clips.find((c) => String(c.partNum) === req.params.part)?.storagePath;
   if (!storagePath) return reply.code(404).send({ code: 'not-found', message: 'No such clip' });
   const s = await streamClip(storagePath);
   if (!s) return reply.code(404).send({ code: 'not-found', message: 'Clip missing from storage' });

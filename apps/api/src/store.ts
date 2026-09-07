@@ -35,6 +35,14 @@ export interface JobClip {
 
 export interface JobRecord {
   jobId: string;
+  /** Which project this generation belongs to — the key to project history. */
+  projectId?: string;
+  projectName?: string;
+  /** Human label for the history list, e.g. "27s · Product Feature". */
+  label?: string;
+  modelName?: string;
+  /** Frame grabbed from the finished video, for the history thumbnail. */
+  posterPath?: string;
   status: 'running' | 'done' | 'failed';
   createdAt: number;
   updatedAt: number;
@@ -44,6 +52,8 @@ export interface JobRecord {
   resolution: string;
   totalSeconds: number;
   costInr: number;
+  costUsd?: number;
+  usdPerSecond?: number;
   clips: JobClip[];
   /** The single finished video (a run's cumulative clip, or the ffmpeg-stitched result). */
   finalStoragePath?: string;
@@ -127,4 +137,19 @@ export async function readObject(
   const [meta] = await file.getMetadata();
   const [bytes] = await file.download();
   return { bytes, contentType: String(meta.contentType ?? 'application/octet-stream') };
+}
+
+/** Every generation for a project, newest first. */
+export async function listJobsForProject(projectId: string, limit = 50): Promise<JobRecord[]> {
+  ensureFirebase();
+  // Filter only — sorting in memory avoids needing a composite index for what is
+  // a handful of rows per project.
+  const snap = await getFirestore()
+    .collection('generations')
+    .where('projectId', '==', projectId)
+    .limit(limit)
+    .get();
+  return snap.docs
+    .map((d) => d.data() as JobRecord)
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }

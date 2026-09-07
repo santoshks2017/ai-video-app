@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
-import { fmtTime, type Brief, type PromptPart, type ScenePlan } from '@ava/shared';
-import { api, isApiError, errorClips, type ClipView, type GenerateResult } from '../lib/api.js';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { fmtTime, formatInr, type Brief, type PromptPart, type ScenePlan } from '@ava/shared';
+import {
+  api,
+  isApiError,
+  errorClips,
+  type ClipView,
+  type GenerateResult,
+  type GenerationHistoryItem,
+} from '../lib/api.js';
 
 /**
  * PRD P0.1 + P0.10 — runs the real generation and shows the ONE finished video
@@ -16,6 +23,7 @@ export function GenerationPanel({
   costInr,
   modelId,
   modelLabel,
+  project,
   onGenerated,
 }: {
   brief: Brief;
@@ -27,6 +35,8 @@ export function GenerationPanel({
   /** Which registered model to generate with. */
   modelId?: string;
   modelLabel?: string;
+  /** Files each run under this project so its history survives regeneration. */
+  project?: { id: string; name: string };
   /** Lets the caller record the finished job against a project. */
   onGenerated?: (jobId: string, finalUrl: string | null) => void;
 }) {
@@ -35,42 +45,48 @@ export function GenerationPanel({
   const [error, setError] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [history, setHistory] = useState<GenerationHistoryItem[]>([]);
+  const [viewing, setViewing] = useState<string | null>(null);
 
-  // Recover an in-flight/finished job across reloads.
+  const loadHistory = useCallback(async () => {
+    if (!project?.id) return;
+    setHistory(await api.history(project.id));
+  }, [project?.id]);
+
   useEffect(() => {
-    const saved = localStorage.getItem('ava.lastJob');
-    if (!saved) return;
-    api.job(saved).then((r) => {
-      if (!isApiError(r)) {
-        setResult(r);
-        setStatus(r.status === 'done' ? 'done' : r.status === 'failed' ? 'error' : 'running');
-      }
-    });
-  }, []);
+    void loadHistory();
+  }, [loadHistory]);
 
   const run = async () => {
     setStatus('running');
     setError('');
     setResult(null);
-    const r = await api.generate(brief, parts, needsCostConfirm ? costInr : undefined, modelId);
+    const r = await api.generate(brief, parts, needsCostConfirm ? costInr : undefined, modelId, project);
     if (isApiError(r)) {
       setStatus('error');
       setError(`${r.code}: ${r.message}`);
-      if (r.jobId) localStorage.setItem('ava.lastJob', r.jobId);
       const partial = errorClips(r);
+      void loadHistory();
       if (partial.length) setResult({ jobId: r.jobId ?? '', status: 'failed', clips: partial });
       return;
     }
-    localStorage.setItem('ava.lastJob', r.jobId);
     setResult(r);
+    setViewing(null);
     setStatus(r.status === 'done' ? 'done' : 'running');
     onGenerated?.(r.jobId, r.finalUrl ?? null);
+    void loadHistory();
   };
 
   const clips: ClipView[] = result?.clips ?? [];
   const doneClips = clips.filter((c) => c.status === 'done' && c.url);
+  const viewingItem = viewing ? history.find((h) => h.jobId === viewing) : undefined;
   const finalSrc =
-    result?.finalUrl ?? (doneClips.find((c) => c.isFinal) ?? doneClips.at(-1))?.url ?? null;
+    viewingItem?.finalUrl ??
+    result?.finalUrl ??
+    (doneClips.find((c) => c.isFinal) ?? doneClips.at(-1))?.url ??
+    // Nothing generated this session — fall back to the newest saved run.
+    history.find((h) => h.finalUrl)?.finalUrl ??
+    null;
   const totalDuration = scenePlan?.scenes.at(-1)?.end ?? 0;
 
   const seekTo = (t: number) => {
@@ -188,6 +204,64 @@ export function GenerationPanel({
               Rendering…
             </div>
           )
+        )}
+
+        {history.length > 0 && (
+          <div className="history">
+            <div className="history-head">
+              <span>
+                History — {history.length} generation{history.length > 1 ? 's' : ''}
+              </span>
+              <span className="history-total">
+                {formatInr(history.reduce((sum, h) => sum + (h.costInr ?? 0), 0))} total
+              </span>
+            </div>
+            {history.map((h) => {
+              const on = (viewing ?? result?.jobId ?? history.find((x) => x.finalUrl)?.jobId) === h.jobId;
+              return (
+                <button
+                  key={h.jobId}
+                  type="button"
+                  className={`hist-row${on ? ' on' : ''}`}
+                  disabled={!h.finalUrl}
+                  onClick={() => setViewing(h.jobId)}
+                >
+                  {h.posterUrl ? (
+                    <img src={h.posterUrl} alt="" />
+                  ) : (
+                    <span className={`hist-ph s-${h.status}`}>{h.status === 'failed' ? '!' : '…'}</span>
+                  )}
+                  <span className="hist-meta">
+                    <b>
+                      {new Date(h.createdAt).toLocaleString(undefined, {
+                        day: 'numeric',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                      {h.status !== 'done' && <span className={`badge s-${h.status}`}>{h.status}</span>}
+                    </b>
+                    <span>
+                      {[
+                        h.totalSeconds ? `${h.totalSeconds}s` : null,
+                        h.aspect,
+                        h.resolution,
+                        h.segments ? `${h.segments} segment${h.segments > 1 ? 's' : ''}` : null,
+                        h.modelName,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                    {h.error && <span className="hist-err">{h.error}</span>}
+                  </span>
+                  <span className="hist-cost">
+                    {h.costInr != null ? formatInr(h.costInr) : '—'}
+                    {h.usdPerSecond ? <em>${h.usdPerSecond}/s</em> : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         )}
 
         {status === 'idle' && !result && (

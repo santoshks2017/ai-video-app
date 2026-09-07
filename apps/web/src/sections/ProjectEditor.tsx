@@ -557,6 +557,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               costInr={cost?.inr ?? 0}
               modelId={project.spec.modelId ?? activeModel?.id}
               modelLabel={activeModel?.name}
+              project={{ id: project.id, name: project.name }}
               onGenerated={(jobId, finalUrl) =>
                 set({ status: 'generated', lastJobId: jobId, lastFinalUrl: finalUrl ?? undefined })
               }

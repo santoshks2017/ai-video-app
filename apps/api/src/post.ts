@@ -243,6 +243,22 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
   }
 }
 
+/** Grab a representative frame for the history thumbnail. */
+export async function posterFrame(clip: Buffer, atSeconds = 1.5): Promise<Buffer | null> {
+  const dir = await mkdtemp(join(tmpdir(), 'ava-poster-'));
+  try {
+    const inF = join(dir, 'in.mp4');
+    const outF = join(dir, 'out.jpg');
+    await writeFile(inF, clip);
+    await run('ffmpeg', ['-y', '-v', 'error', '-ss', String(atSeconds), '-i', inF, '-vframes', '1', '-q:v', '4', outF]);
+    return await readFile(outF);
+  } catch {
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 /** Grab the last frame of a clip as a JPEG — seeds the next segment's first frame. */
 export async function lastFrame(clip: Buffer): Promise<Buffer | null> {
   const dir = await mkdtemp(join(tmpdir(), 'ava-frame-'));

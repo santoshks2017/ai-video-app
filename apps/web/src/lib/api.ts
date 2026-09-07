@@ -20,6 +20,26 @@ export interface ClipView {
   url: string | null;
 }
 
+export interface GenerationHistoryItem {
+  jobId: string;
+  label?: string;
+  modelName?: string;
+  status: 'running' | 'done' | 'failed';
+  createdAt: number;
+  totalSeconds?: number;
+  costInr?: number;
+  costUsd?: number;
+  usdPerSecond?: number;
+  aspect?: string;
+  resolution?: string;
+  segments?: number;
+  dealerName?: string;
+  categories?: string[];
+  error?: string;
+  finalUrl: string | null;
+  posterUrl: string | null;
+}
+
 export interface GenerateResult {
   jobId: string;
   status: 'running' | 'done' | 'failed';
@@ -51,10 +71,23 @@ function hydrate(r: GenerateResult): GenerateResult {
 export const api = {
   health: () => fetch(`${BASE}/api/health`).then((r) => r.json()).catch(() => null),
 
-  async generate(brief: Brief, parts: PromptPart[], confirmedCostInr?: number, modelId?: string) {
+  async generate(
+    brief: Brief,
+    parts: PromptPart[],
+    confirmedCostInr?: number,
+    modelId?: string,
+    project?: { id: string; name: string },
+  ) {
     const r = await req<GenerateResult>('/api/generate', {
       method: 'POST',
-      body: JSON.stringify({ brief, parts, confirmedCostInr, modelId }),
+      body: JSON.stringify({
+        brief,
+        parts,
+        confirmedCostInr,
+        modelId,
+        projectId: project?.id,
+        projectName: project?.name,
+      }),
     });
     if (isApiError(r)) {
       r.clips = errorClips(r).map((c) => ({ ...c, url: absolute(c.url) }));
@@ -62,6 +95,17 @@ export const api = {
       return r;
     }
     return hydrate(r);
+  },
+
+  /** Every generation for a project, newest first — nothing is overwritten. */
+  async history(projectId: string): Promise<GenerationHistoryItem[]> {
+    const r = await req<{ items: GenerationHistoryItem[] }>(`/api/projects/${projectId}/generations`);
+    if (isApiError(r)) return [];
+    return (r.items ?? []).map((i) => ({
+      ...i,
+      finalUrl: absolute(i.finalUrl),
+      posterUrl: absolute(i.posterUrl),
+    }));
   },
 
   async job(jobId: string) {

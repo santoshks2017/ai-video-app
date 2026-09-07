@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CATEGORIES, emptyProject, type CategoryId, type Project } from '@ava/shared';
+import { CATEGORIES, emptyProject, formatInr, type CategoryId, type Project } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, Empty } from '../components/ui.js';
 import { isApiError } from '../lib/client.js';
@@ -49,6 +49,8 @@ export function ProjectsSection() {
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }, [projects, q, clientId, actorId, useCase, clients, actors, cars]);
 
+  const totalSpend = projects.reduce((sum, p) => sum + (p.totalCostInr ?? 0), 0);
+
   const create = async () => {
     setCreating(true);
     const p = { ...emptyProject(), name: 'Untitled project' };
@@ -62,7 +64,9 @@ export function ProjectsSection() {
   return (
     <Panel
       title="Projects"
-      step={`${filtered.length} of ${projects.length}`}
+      step={`${filtered.length} of ${projects.length}${
+        totalSpend ? ` · ${formatInr(totalSpend)} spent` : ''
+      }`}
       actions={
         <button className="btn small primary" type="button" disabled={creating} onClick={create}>
           {creating ? 'Creating…' : 'New project'}
@@ -135,6 +139,15 @@ export function ProjectsSection() {
               <div className="proj-foot">
                 {p.spec.durationSec}s · {p.spec.aspect} · updated{' '}
                 {new Date(p.updatedAt).toLocaleDateString()}
+                {!!p.generationCount && (
+                  <>
+                    {' · '}
+                    <b>
+                      {p.generationCount} video{p.generationCount > 1 ? 's' : ''} ·{' '}
+                      {formatInr(p.totalCostInr ?? 0)}
+                    </b>
+                  </>
+                )}
               </div>
             </button>
           ))}

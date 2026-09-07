@@ -952,3 +952,14 @@ code {
 .hist-err { color: var(--bad) !important; }
 .hist-cost { font-size: 12.5px; font-weight: 700; text-align: right; flex: none; }
 .hist-cost em { display: block; font-style: normal; font-size: 10px; font-weight: 500; color: var(--ink-faint); }
+.footer-preview {
+  margin-top: 6px;
+  background: #0f1e33;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: center;
+  padding: 9px 10px;
+  border-radius: 6px;
+  line-height: 1.35;
+}

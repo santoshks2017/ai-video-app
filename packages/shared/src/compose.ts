@@ -115,7 +115,8 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   b.captionStyle = s.captionStyle;
   b.visualStyle = s.visualStyle;
   b.cta = s.cta;
-  b.footer = s.footer;
+  // The footer strip is a client property; the project no longer sets it.
+  b.footer = client?.footerText?.trim() ?? '';
   b.endCardOn = s.endCardOn;
   b.endCard = s.endCard;
   b.fieldValues = project.fieldValues;
@@ -198,7 +199,7 @@ export function overlayCopy(brief: Brief): { footerText: string; endCardLines: s
   // address in full instead.
   const footerText =
     brief.footer.trim() ||
-    [shown, d.city || shortAddress(d.address), d.phone].map((x) => (x ?? '').trim()).filter(Boolean).join('  ·  ');
+    defaultFooterText({ displayName: shown, city: d.city, address: d.address, phone: d.phone });
 
   const endCardLines = brief.endCard.trim()
     ? brief.endCard
@@ -210,14 +211,6 @@ export function overlayCopy(brief: Brief): { footerText: string; endCardLines: s
   return { footerText, endCardLines };
 }
 
-/** Last meaningful part of a postal address — usually the locality. */
-function shortAddress(address?: string): string {
-  const parts = (address ?? '')
-    .split(',')
-    .map((x) => x.trim())
-    .filter((x) => x && !/^\d{5,6}$/.test(x) && !/^india$/i.test(x));
-  return parts.length > 1 ? parts[parts.length - 1]! : (parts[0] ?? '');
-}
 
 /**
  * Guess a short trading name from a full listing name.
@@ -246,4 +239,25 @@ export function suggestDisplayName(fullName: string): string {
     if (pick) return pick;
   }
   return strip(raw) || raw;
+}
+
+/** The short contact strip suggested for a client: name · city · phone. */
+export function defaultFooterText(c: {
+  displayName?: string;
+  name?: string;
+  city?: string;
+  address?: string;
+  phone?: string;
+}): string {
+  const shown = (c.displayName?.trim() || c.name?.trim()) ?? '';
+  const place = c.city?.trim() || lastAddressPart(c.address);
+  return [shown, place, c.phone?.trim()].filter(Boolean).join('  ·  ');
+}
+
+function lastAddressPart(address?: string): string {
+  const parts = (address ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => x && !/^\d{5,6}$/.test(x) && !/^india$/i.test(x));
+  return parts.length > 1 ? parts[parts.length - 1]! : (parts[0] ?? '');
 }

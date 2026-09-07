@@ -9,6 +9,7 @@ import {
   composeBrief,
   formatFit,
   formatFitSummary,
+  defaultFooterText,
   type CategoryId,
   type Project,
   type ProjectVideoSpec,
@@ -52,6 +53,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const setSpec = (p: Partial<ProjectVideoSpec>) => project && set({ spec: { ...project.spec, ...p } });
 
   const client = clients.find((c) => c.id === project?.clientId) ?? null;
+  const footerPreview = client ? client.footerText?.trim() || defaultFooterText(client) : '';
   const actor = actors.find((a) => a.id === project?.actorId) ?? null;
   const car = cars.find((c) => c.id === project?.carId) ?? null;
 
@@ -340,11 +342,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 <Field label="Primary CTA">
                   <input value={project.spec.cta} onChange={(e) => setSpec({ cta: e.target.value })} />
                 </Field>
-                <Field
-                  label="Footer bar"
-                  hint="Overlaid after generation, so it is always legible. Blank → the client's name, address and phone."
-                >
-                  <input value={project.spec.footer} onChange={(e) => setSpec({ footer: e.target.value })} />
+                <Field label="Footer strip" hint="Set once per client, in the Clients section.">
+                  <input readOnly value={client ? footerPreview : 'Select a client to set the footer'} />
                 </Field>
                 <div className="check-row">
                   <input

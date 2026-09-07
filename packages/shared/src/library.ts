@@ -103,6 +103,12 @@ export interface ClientProfile {
   fictionalize: boolean;
   fakeBrandModel?: string;
   fakeDealer?: string;
+  /**
+   * The contact strip burned across the bottom of every video for this client.
+   * Saved here rather than per project so it stays consistent — and it is
+   * composited in post, so it is always legible.
+   */
+  footerText?: string;
   /** Google Business Profile import. */
   gmbUrl?: string;
   gmbPlaceId?: string;

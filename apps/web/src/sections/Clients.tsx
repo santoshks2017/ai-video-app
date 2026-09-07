@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { suggestDisplayName, type ClientProfile, type StoredImage } from '@ava/shared';
+import {
+  suggestDisplayName,
+  defaultFooterText,
+  type ClientProfile,
+  type StoredImage,
+} from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, PickList, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
 import { isApiError, post, abs } from '../lib/client.js';
@@ -200,6 +205,29 @@ export function ClientsSection() {
           <Field label="Address">
             <input value={draft.address ?? ''} onChange={(e) => set({ address: e.target.value })} placeholder="MG Road" />
           </Field>
+          <Field
+            label="Footer strip"
+            hint="Burned across the bottom of every video for this client. Overlaid after generation, so it is always legible — keep it short."
+          >
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={draft.footerText ?? ''}
+                onChange={(e) => set({ footerText: e.target.value })}
+                placeholder={defaultFooterText(draft)}
+              />
+              {defaultFooterText(draft) && defaultFooterText(draft) !== draft.footerText && (
+                <button
+                  className="btn small"
+                  type="button"
+                  onClick={() => set({ footerText: defaultFooterText(draft) })}
+                >
+                  Suggest
+                </button>
+              )}
+            </div>
+            <div className="footer-preview">{draft.footerText?.trim() || defaultFooterText(draft) || '—'}</div>
+          </Field>
+
           <Field label="Dealer tier" hint="Sets the copy tone on generated cards.">
             <select value={draft.tier} onChange={(e) => set({ tier: e.target.value as ClientProfile['tier'] })}>
               <option value="Metro Premium">Metro Premium (long, narrative)</option>

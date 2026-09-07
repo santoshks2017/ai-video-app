@@ -54,9 +54,14 @@ npm run dev:api                           # http://localhost:8080  (needs GOOGLE
   Cloud Storage, job state in Firestore, and shown back with a per-part player and a
   frame timeline that maps each storyboard scene to its clip.
   Needs the real `GOOGLE_API_KEY` secret version (see [`docs/DEPLOY-SETUP.md`](docs/DEPLOY-SETUP.md)).
-- **Stubbed:** the cardekho.com car-model scraper (P0.2) — `jobs/scraper` + `/api/scrape`.
-- **Not wired yet:** reference-image grounding needs attachments to carry real
-  uploaded bytes/URLs (the code path exists but is inert until upload lands);
-  scene-level (vs part-level) re-generate.
+- **Live — reference images (P0.4):** upload dealer photos / logo / car-model shots
+  in the brief; on an automated generation they're passed to Omni Flash as visual
+  references (base64), so it uses the real showroom / car.
+- **Live — car-model scraper (P0.2):** "Fetch reference images from CarDekho"
+  pulls a current front/side/rear/interior set from cardekho.com (`/api/scrape`,
+  runs inline; `apps/api/src/scraper.ts`). Falls back to manual upload when a
+  model returns too few angles.
+- **Not wired yet:** scene-level (vs part-level) re-generate; `jobs/scraper` as a
+  scheduled batch refresh (P2.4) still a stub.
 - **Deployed:** `santoshks2017/ai-video-app` → GCP/Firebase `ai-video-app-cd`,
   push-to-`main` auto-deploys (Cloud Run `ava-api` + Firebase Hosting).

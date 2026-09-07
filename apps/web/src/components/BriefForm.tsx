@@ -1,14 +1,14 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
   CATEGORIES,
   NARRATION,
   formatFit,
   formatFitSummary,
-  filenameFromLabel,
   type CategoryId,
   type DealerPhoto,
 } from '@ava/shared';
 import { useBrief } from '../state/briefStore.js';
+import { api, isApiError } from '../lib/api.js';
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -141,16 +141,19 @@ export function BriefForm() {
           <label htmlFor="modelSpecific">Model-specific — references a particular car model</label>
         </div>
         {brief.modelSpecific && (
-          <Field
-            label="Car model"
-            hint="Triggers the CarDekho reference-image set. If none exists yet, pre-flight will ask for a manual front/side/rear/interior upload."
-          >
-            <input
-              value={brief.carModel ?? ''}
-              onChange={(e) => set({ carModel: e.target.value })}
-              placeholder="e.g. Hyundai Creta"
-            />
-          </Field>
+          <>
+            <Field
+              label="Car model"
+              hint="Fetches a current reference-image set from CarDekho so the model isn't left to invent an outdated design."
+            >
+              <input
+                value={brief.carModel ?? ''}
+                onChange={(e) => set({ carModel: e.target.value })}
+                placeholder="e.g. Hyundai Creta"
+              />
+            </Field>
+            <CarModelFetch model={brief.carModel ?? ''} onAdd={addAttachment} />
+          </>
         )}
       </Card>
 
@@ -362,24 +365,26 @@ function AttachmentsCard({
   onRemove: (filename: string) => void;
 }) {
   return (
-    <Card n={5} title="Reference images" step="Cited by filename in the prompt">
+    <Card n={5} title="Reference images" step="Grounded into the generation">
       <div className="section-desc">
-        Every reference image needs a short label. The master prompt refers to each by its filename (P0.4) —
-        upload the actual files to Storage once the backend is wired; for now this registers the label + filename
-        the prompt will cite.
+        Upload dealer photos, a logo, or car-model shots. Each needs a short label. On an automated generation
+        the uploaded images are passed to Omni Flash as visual references (P0.4) so it uses the real showroom /
+        car instead of inventing one. For prompt-only categories they're cited by filename in the master prompt.
       </div>
       <AttachmentAdder onAdd={onAdd} />
       {attachments.length === 0 ? (
-        <div className="hint">No reference images registered.</div>
+        <div className="hint">No reference images uploaded.</div>
       ) : (
         attachments.map((a) => (
           <div className="attach-item" key={a.filename}>
+            {a.src && <img src={a.src} alt={a.label} />}
             <div className="a-meta" style={{ flex: 1 }}>
               <b>
                 <code>{a.filename}</code>
               </b>
               <span>
                 {a.label} · {a.kind}
+                {a.storagePath ? '' : ' · not uploaded'}
               </span>
             </div>
             <button className="btn ghost small" onClick={() => onRemove(a.filename)}>
@@ -395,32 +400,88 @@ function AttachmentsCard({
 function AttachmentAdder({ onAdd }: { onAdd: (a: DealerPhoto) => void }) {
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState<DealerPhoto['kind']>('dealer');
-  const add = () => {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
     const l = label.trim();
-    if (!l) return;
-    onAdd({ label: l, kind, filename: filenameFromLabel(l, kind) });
+    if (!l) {
+      setErr('Add a label first.');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    const r = await api.uploadRef(file, l, kind);
+    setBusy(false);
+    if (isApiError(r)) {
+      setErr(`${r.code}: ${r.message}`);
+      return;
+    }
+    onAdd(r);
     setLabel('');
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div className="row3" style={{ alignItems: 'end' }}>
+        <Field label="Label (what it shows)">
+          <input
+            value={label}
+            placeholder="e.g. Showroom front exterior"
+            onChange={(e) => setLabel(e.target.value)}
+          />
+        </Field>
+        <Field label="Kind">
+          <select value={kind} onChange={(e) => setKind(e.target.value as DealerPhoto['kind'])}>
+            <option value="dealer">Dealer photo</option>
+            <option value="car-model">Car model</option>
+            <option value="logo">Logo</option>
+          </select>
+        </Field>
+        <button className="btn small" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {busy ? 'Uploading…' : 'Upload image'}
+        </button>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => pick(e.target.files?.[0])}
+      />
+      {err && <div className="hint" style={{ color: 'var(--bad)' }}>{err}</div>}
+    </div>
+  );
+}
+
+function CarModelFetch({ model, onAdd }: { model: string; onAdd: (a: DealerPhoto) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const go = async () => {
+    if (!model.trim()) {
+      setMsg('Enter a car model first.');
+      return;
+    }
+    setBusy(true);
+    setMsg('');
+    const r = await api.scrapeCarModel(model.trim());
+    setBusy(false);
+    if (isApiError(r)) {
+      setMsg(r.message);
+      return;
+    }
+    r.forEach(onAdd);
+    setMsg(`Added ${r.length} reference image${r.length > 1 ? 's' : ''} (${[...new Set(r.map((x) => x.label.split('— ')[1]))].join(', ')}).`);
   };
   return (
-    <div className="row3" style={{ alignItems: 'end', marginBottom: 10 }}>
-      <Field label="Label (what it shows)">
-        <input
-          value={label}
-          placeholder="e.g. Showroom front exterior"
-          onChange={(e) => setLabel(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && add()}
-        />
-      </Field>
-      <Field label="Kind">
-        <select value={kind} onChange={(e) => setKind(e.target.value as DealerPhoto['kind'])}>
-          <option value="dealer">Dealer photo</option>
-          <option value="car-model">Car model</option>
-          <option value="logo">Logo</option>
-        </select>
-      </Field>
-      <button className="btn small" onClick={add}>
-        Add reference
+    <div style={{ marginTop: -4, marginBottom: 8 }}>
+      <button className="btn small" disabled={busy} onClick={go}>
+        {busy ? 'Fetching from CarDekho…' : 'Fetch reference images from CarDekho'}
       </button>
+      {msg && <div className="hint">{msg}</div>}
     </div>
   );
 }

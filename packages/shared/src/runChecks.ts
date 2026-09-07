@@ -93,7 +93,9 @@ export function runChecks(brief: Brief): PreflightResult {
 
   // Car-model reference (P0.2): model-specific brief with no car-model image in scope.
   if (brief.modelSpecific) {
-    const hasCarModelRef = (brief.attachments ?? []).some((a) => a.kind === 'car-model');
+    const hasCarModelRef = (brief.attachments ?? []).some(
+      (a) => a.kind === 'car-model' && (a.storagePath || a.refId),
+    );
     if (!brief.carModel?.trim()) {
       checks.push({
         level: 'bad',

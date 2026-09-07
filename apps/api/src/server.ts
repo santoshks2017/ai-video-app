@@ -3,7 +3,18 @@ import Fastify from 'fastify';
 import { isPromptOnly, estimateCost, type Brief, type PromptPart } from '@ava/shared';
 import { loadConfig } from './config.js';
 import { generateClip, downloadFile, OmniFlashError, type OmniRef } from './omniFlash.js';
-import { saveJob, updateJob, getJob, uploadClip, streamClip, type JobRecord, type JobClip } from './store.js';
+import {
+  saveJob,
+  updateJob,
+  getJob,
+  uploadClip,
+  streamClip,
+  putRef,
+  readObject,
+  type JobRecord,
+  type JobClip,
+} from './store.js';
+import { scrapeModel, getCarModel } from './scraper.js';
 
 const config = loadConfig();
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
@@ -87,10 +98,19 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   };
   await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
 
-  // References: only usable once attachments carry a fetchable URL. Inert today.
-  const references: OmniRef[] = (brief.attachments ?? [])
-    .filter((a) => (a as { url?: string }).url)
-    .map((a) => ({ uri: (a as { url?: string }).url, mimeType: 'image/jpeg', kind: 'image' as const }));
+  // Ground the model with any uploaded / scraped reference images (P0.4 / P0.2):
+  // read the stored bytes and pass them inline as base64.
+  const references: OmniRef[] = [];
+  for (const a of brief.attachments ?? []) {
+    if (!a.storagePath) continue;
+    const obj = await readObject(a.storagePath).catch(() => null);
+    if (!obj) continue;
+    references.push({
+      data: obj.bytes.toString('base64'),
+      mimeType: obj.contentType || 'image/jpeg',
+      kind: 'image',
+    });
+  }
 
   let previousInteractionId: string | undefined;
   try {
@@ -174,16 +194,78 @@ function clipsForClient(jobId: string, clips: JobClip[]) {
   }));
 }
 
-/** P0.2 — car-model reference scraper trigger. Still delegated to jobs/scraper. */
-app.post<{ Body: { models: string[] } }>('/api/scrape', async (req, reply) => {
-  const models = req.body?.models ?? [];
-  if (!models.length) return reply.code(400).send({ code: 'bad-request', message: 'models[] required' });
-  return reply.code(501).send({
-    code: 'scraper-not-implemented',
-    message: 'Trigger jobs/scraper as a Cloud Run job execution — not yet wired from the API.',
-    models,
-  });
+/**
+ * P0.4 — upload a labelled reference image. Bytes go to Cloud Storage; the
+ * brief carries the storagePath, which /api/generate reads back to ground the
+ * model. Body: { filename, contentType, label, kind, dataBase64 }.
+ */
+app.post<{
+  Body: { filename?: string; contentType?: string; label?: string; kind?: string; dataBase64?: string };
+}>('/api/refs', async (req, reply) => {
+  const b = req.body ?? {};
+  if (!b.dataBase64 || !b.label?.trim()) {
+    return reply.code(400).send({ code: 'bad-request', message: 'dataBase64 and label are required' });
+  }
+  const bytes = Buffer.from(b.dataBase64.replace(/^data:[^,]+,/, ''), 'base64');
+  if (bytes.length > 8 * 1024 * 1024) {
+    return reply.code(413).send({ code: 'too-large', message: 'Reference image exceeds 8MB.' });
+  }
+  const { refId, storagePath } = await putRef(
+    b.filename || 'ref.jpg',
+    b.contentType || 'image/jpeg',
+    bytes,
+  );
+  return {
+    refId,
+    storagePath,
+    filename: b.filename || `${refId}.jpg`,
+    label: b.label.trim(),
+    kind: b.kind || 'dealer',
+  };
 });
+
+app.get<{ Params: { refId: string; name: string } }>('/api/refs/:refId/:name', async (req, reply) => {
+  const obj = await readObject(`refs/${req.params.refId}/${req.params.name}`);
+  if (!obj) return reply.code(404).send({ code: 'not-found', message: 'No such reference image' });
+  reply.header('content-type', obj.contentType);
+  reply.header('cache-control', 'public, max-age=86400');
+  return reply.send(obj.bytes);
+});
+
+/**
+ * P0.2 — scrape a current reference-image set for named car models from
+ * cardekho.com and store them, so a model-specific brief isn't left to invent
+ * an outdated design. Runs inline (small list); returns per-model results.
+ */
+app.post<{ Body: { models: string[] } }>('/api/scrape', async (req, reply) => {
+  const models = (req.body?.models ?? []).filter((m) => m && m.trim()).slice(0, 3);
+  if (!models.length) return reply.code(400).send({ code: 'bad-request', message: 'models[] required' });
+  const results: unknown[] = [];
+  for (const m of models) {
+    try {
+      results.push(withRefUrls(await scrapeModel(m)));
+    } catch (e) {
+      results.push({ input: m, status: 'failed', error: (e as Error).message });
+    }
+  }
+  return { results };
+});
+
+app.get<{ Params: { key: string } }>('/api/car-models/:key', async (req, reply) => {
+  const doc = await getCarModel(req.params.key);
+  if (!doc) return reply.code(404).send({ code: 'not-found', message: 'Not scraped yet' });
+  return withRefUrls(doc);
+});
+
+function withRefUrls<T extends { images: { storagePath: string }[] }>(doc: T) {
+  return {
+    ...doc,
+    images: doc.images.map((im) => ({
+      ...im,
+      url: `/api/refs/${im.storagePath.split('/').slice(1).join('/')}`,
+    })),
+  };
+}
 
 app
   .listen({ port: config.port, host: '0.0.0.0' })

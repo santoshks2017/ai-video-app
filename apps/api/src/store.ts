@@ -95,3 +95,33 @@ export async function streamClip(
     size: Number(meta.size ?? 0),
   };
 }
+
+/* ---- reference images (P0.4 / P0.2): uploaded or scraped, grounded into the model ---- */
+
+export async function putRef(
+  filename: string,
+  contentType: string,
+  bytes: Buffer,
+): Promise<{ refId: string; storagePath: string }> {
+  ensure();
+  const refId = crypto.randomUUID();
+  const safe = filename.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'ref.jpg';
+  const storagePath = `refs/${refId}/${safe}`;
+  await getStorage()
+    .bucket(BUCKET)
+    .file(storagePath)
+    .save(bytes, { contentType: contentType || 'image/jpeg', resumable: false });
+  return { refId, storagePath };
+}
+
+export async function readObject(
+  storagePath: string,
+): Promise<{ bytes: Buffer; contentType: string } | null> {
+  ensure();
+  const file = getStorage().bucket(BUCKET).file(storagePath);
+  const [exists] = await file.exists();
+  if (!exists) return null;
+  const [meta] = await file.getMetadata();
+  const [bytes] = await file.download();
+  return { bytes, contentType: String(meta.contentType ?? 'application/octet-stream') };
+}

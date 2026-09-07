@@ -1,9 +1,11 @@
 /**
- * Car-model reference scraper (PRD P0.2) — Cloud Run job.
+ * Car-model reference scraper (PRD P0.2) — Cloud Run JOB (batch / cron variant).
  *
- * STUB. Phase 1 opens with a scrapability spike against the exact 12-model list
- * in models.json to confirm image URLs are directly extractable (not behind JS
- * rendering that would need a headless browser). Only then implement scrapeModel().
+ * The working implementation now lives in `apps/api/src/scraper.ts` and runs
+ * inline from `POST /api/scrape` (spike done 2026-09-07: cardekho.com serves
+ * image URLs in the initial HTML, no headless browser needed). This job is the
+ * place for a scheduled full-list refresh (P2.4) and is still a stub — port the
+ * logic from apps/api/src/scraper.ts when that's needed.
  *
  * Contract when real:
  *  - for each model, fetch >= 4 distinct angle shots (front/side/rear/interior)

@@ -120,8 +120,12 @@ export interface DealerPhoto {
   label: string;
   /** Stable filename the master prompt cites (P0.4). */
   filename: string;
-  /** Storage path or data URI. */
+  /** data: URI or blob URL for local preview only. */
   src?: string;
+  /** Server ref id once uploaded (POST /api/refs). */
+  refId?: string;
+  /** Cloud Storage path of the uploaded bytes; read at generate time to ground the model. */
+  storagePath?: string;
   kind: 'dealer' | 'car-model' | 'logo';
 }
 

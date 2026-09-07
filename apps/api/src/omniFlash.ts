@@ -126,13 +126,25 @@ export async function generateClip(input: GenerateClipInput, apiKey: string): Pr
     };
   }
 
-  const res = await fetch(`${BASE}/interactions`, {
-    method: 'POST',
-    headers: headers(apiKey),
-    body: JSON.stringify(body),
-  });
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) {
+  let json: Record<string, unknown> = {};
+  let ok = false;
+  // Omni Flash (preview) rate-limits tightly — retry 429 / 5xx with backoff.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(`${BASE}/interactions`, {
+      method: 'POST',
+      headers: headers(apiKey),
+      body: JSON.stringify(body),
+    });
+    json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (res.ok) {
+      ok = true;
+      break;
+    }
+    const retryable = res.status === 429 || res.status >= 500;
+    if (retryable && attempt < 3) {
+      await new Promise((r) => setTimeout(r, (attempt + 1) * 15000));
+      continue;
+    }
     const err = (json.error ?? {}) as Record<string, unknown>;
     throw new OmniFlashError(
       String(err.status ?? 'omni-flash-error'),
@@ -140,6 +152,7 @@ export async function generateClip(input: GenerateClipInput, apiKey: string): Pr
       res.status === 429 ? 429 : 502,
     );
   }
+  if (!ok) throw new OmniFlashError('omni-flash-error', 'Interactions API kept failing after retries.');
 
   const status = String(json.status ?? '');
   if (status && status !== 'completed' && status !== 'succeeded') {

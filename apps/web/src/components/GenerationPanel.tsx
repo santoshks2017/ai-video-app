@@ -59,7 +59,8 @@ export function GenerationPanel({
 
   const clips: ClipView[] = result?.clips ?? [];
   const doneClips = clips.filter((c) => c.status === 'done' && c.url);
-  const finalClip = doneClips.find((c) => c.isFinal) ?? doneClips.at(-1) ?? null;
+  const finalSrc =
+    result?.finalUrl ?? (doneClips.find((c) => c.isFinal) ?? doneClips.at(-1))?.url ?? null;
   const totalDuration = scenePlan?.scenes.at(-1)?.end ?? 0;
 
   const seekTo = (t: number) => {
@@ -111,12 +112,12 @@ export function GenerationPanel({
           </div>
         )}
 
-        {finalClip?.url ? (
+        {finalSrc ? (
           <>
             <video
               ref={videoRef}
               className="clip-video"
-              src={finalClip.url}
+              src={finalSrc}
               controls
               playsInline
               style={{ marginTop: 10 }}
@@ -182,7 +183,7 @@ export function GenerationPanel({
         {status === 'idle' && !result && (
           <div className="hint" style={{ marginTop: 8 }}>
             {parts.length > 1
-              ? `Generates in ${parts.length} segments — part 1 fresh, the rest as extend calls that continue the same video. You get one final clip.`
+              ? `~${totalDuration}s video: generated in ${parts.length} segments (extend where possible, ffmpeg-stitched otherwise) and returned as one clip.`
               : 'Generates one clip and shows it here with a scene timeline.'}
           </div>
         )}

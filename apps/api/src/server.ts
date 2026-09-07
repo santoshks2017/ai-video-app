@@ -15,6 +15,7 @@ import {
   type JobClip,
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
+import { concatClips, lastFrame } from './concat.js';
 
 const config = loadConfig();
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
@@ -112,54 +113,104 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     });
   }
 
-  let previousInteractionId: string | undefined;
+  // Omni Flash `extend` only accepts a source video up to ~10s, so a long video
+  // is built as one-or-more "runs": each run is a create + at most one cumulative
+  // extend (~18–20s), then a fresh create for the next run. Runs are stitched
+  // with ffmpeg. The last frame of a finished run is fed to the next fresh
+  // create so the cut still looks like the same presenter / car / setting.
+  const EXTEND_MAX_SOURCE = 10.5;
+
+  async function pull(clip: Awaited<ReturnType<typeof generateClip>>): Promise<Buffer> {
+    if (clip.base64) return Buffer.from(clip.base64, 'base64');
+    if (clip.fileId) return (await downloadFile(clip.fileId, config.googleApiKey!)).bytes;
+    throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
+  }
+
   try {
+    let runInteractionId: string | undefined;
+    let runClipDuration = Infinity;
+    let runFinalBytes: Buffer | null = null;
+    const runFinals: Buffer[] = [];
+
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]!;
-      const isFirst = i === 0;
+      const canExtend = i > 0 && !!runInteractionId && runClipDuration <= EXTEND_MAX_SOURCE;
+
+      let refs = i === 0 ? references.slice() : [];
+      if (!canExtend && i > 0 && runFinalBytes) {
+        // Starting a new run after a cut — anchor it to the previous run's last frame.
+        const frame = await lastFrame(runFinalBytes);
+        if (frame) refs = [{ data: frame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' }, ...refs];
+        runFinals.push(runFinalBytes);
+      }
+
       const clip = await generateClip(
         {
-          // Part 1: full standalone prompt. Parts 2+: the compact continuation
-          // instruction on top of previous_interaction_id context.
-          prompt: isFirst ? part.text : part.continuationText || part.text,
+          prompt: canExtend ? part.continuationText || part.text : part.text,
           aspect: brief.aspect,
           resolution: RES,
-          references: isFirst && references.length ? references : undefined,
-          previousInteractionId: isFirst ? undefined : previousInteractionId,
-          task: isFirst ? (references.length ? 'reference_to_video' : 'text_to_video') : 'extend',
+          references: canExtend ? undefined : refs.length ? refs : undefined,
+          previousInteractionId: canExtend ? runInteractionId : undefined,
+          task: canExtend ? 'extend' : refs.length ? 'reference_to_video' : 'text_to_video',
         },
         config.googleApiKey,
       );
-      previousInteractionId = clip.interactionId;
 
-      let bytes: Buffer;
-      let mime = clip.mimeType;
-      if (clip.base64) {
-        bytes = Buffer.from(clip.base64, 'base64');
-      } else if (clip.fileId) {
-        const dl = await downloadFile(clip.fileId, config.googleApiKey);
-        bytes = dl.bytes;
-        mime = dl.mimeType;
-      } else {
-        throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
-      }
-
-      const storagePath = await uploadClip(jobId, part.partNum, bytes, mime);
+      const bytes = await pull(clip);
+      const storagePath = await uploadClip(jobId, part.partNum, bytes, clip.mimeType);
       clips[i] = { ...clips[i]!, interactionId: clip.interactionId, storagePath, status: 'done' };
       await updateJob(jobId, { clips });
+
+      if (canExtend) {
+        // Cumulative — this replaces the run's kept clip.
+        runFinalBytes = bytes;
+        runClipDuration = part.end; // cumulative length so far
+      } else {
+        runInteractionId = clip.interactionId;
+        runFinalBytes = bytes;
+        runClipDuration = part.duration;
+      }
+    }
+    if (runFinalBytes) runFinals.push(runFinalBytes);
+
+    let finalStoragePath: string;
+    if (runFinals.length <= 1) {
+      finalStoragePath = [...clips].reverse().find((c) => c.status === 'done')!.storagePath;
+    } else {
+      const finalBytes = await concatClips(runFinals);
+      finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
     }
 
-    await updateJob(jobId, { status: 'done', clips });
-    return { jobId, status: 'done', cost, clips: clipsForClient(jobId, clips) };
+    await updateJob(jobId, { status: 'done', clips, finalStoragePath });
+    return {
+      jobId,
+      status: 'done',
+      cost,
+      finalUrl: `/api/clips/${jobId}/final`,
+      clips: clipsForClient(jobId, clips),
+    };
   } catch (err) {
     const e = err as OmniFlashError;
     const failedIdx = clips.findIndex((c) => c.status === 'pending');
     if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
     await updateJob(jobId, { status: 'failed', error: e.message, clips }).catch(() => {});
+    // Salvage: if at least one run finished, stitch what we have so the user
+    // still gets a (shorter) video plus the error.
+    let finalUrl: string | undefined;
+    try {
+      const done = clips.filter((c) => c.status === 'done' && c.storagePath);
+      if (done.length) {
+        await updateJob(jobId, { finalStoragePath: done[done.length - 1]!.storagePath }).catch(() => {});
+        finalUrl = `/api/clips/${jobId}/final`;
+      }
+    } catch {
+      /* ignore */
+    }
     return reply.code(e instanceof OmniFlashError ? e.status : 502).send({
       code: e.code ?? 'generate-failed',
       message: e.message,
       jobId,
+      finalUrl,
       clips: clipsForClient(jobId, clips),
     });
   }
@@ -168,14 +219,22 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
 app.get<{ Params: { jobId: string } }>('/api/generate/:jobId', async (req, reply) => {
   const job = await getJob(req.params.jobId);
   if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such job' });
-  return { ...job, clips: clipsForClient(job.jobId, job.clips) };
+  return {
+    ...job,
+    finalUrl: job.finalStoragePath ? `/api/clips/${job.jobId}/final` : undefined,
+    clips: clipsForClient(job.jobId, job.clips),
+  };
 });
 
 app.get<{ Params: { jobId: string; part: string } }>('/api/clips/:jobId/:part', async (req, reply) => {
   const job = await getJob(req.params.jobId);
-  const clip = job?.clips.find((c) => String(c.partNum) === req.params.part);
-  if (!clip || !clip.storagePath) return reply.code(404).send({ code: 'not-found', message: 'No such clip' });
-  const s = await streamClip(clip.storagePath);
+  if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such job' });
+  const storagePath =
+    req.params.part === 'final'
+      ? job.finalStoragePath
+      : job.clips.find((c) => String(c.partNum) === req.params.part)?.storagePath;
+  if (!storagePath) return reply.code(404).send({ code: 'not-found', message: 'No such clip' });
+  const s = await streamClip(storagePath);
   if (!s) return reply.code(404).send({ code: 'not-found', message: 'Clip missing from storage' });
   reply.header('content-type', s.contentType);
   reply.header('accept-ranges', 'bytes');

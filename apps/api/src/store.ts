@@ -44,6 +44,8 @@ export interface JobRecord {
   totalSeconds: number;
   costInr: number;
   clips: JobClip[];
+  /** The single finished video (a run's cumulative clip, or the ffmpeg-stitched result). */
+  finalStoragePath?: string;
   error?: string;
 }
 

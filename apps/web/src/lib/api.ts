@@ -24,6 +24,8 @@ export interface ClipView {
 export interface GenerateResult {
   jobId: string;
   status: 'running' | 'done' | 'failed';
+  /** The one finished video (stitched if it needed multiple runs). */
+  finalUrl?: string | null;
   clips: ClipView[];
   cost?: { inr: number; usd: number };
 }
@@ -34,6 +36,7 @@ export interface ApiError {
   code: string;
   message: string;
   jobId?: string;
+  finalUrl?: string | null;
   clips?: ClipView[];
 }
 
@@ -59,6 +62,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T | ApiError> {
         code: String(json.code ?? 'error'),
         message: String(json.message ?? res.statusText),
         jobId: json.jobId as string | undefined,
+        finalUrl: json.finalUrl as string | undefined,
         clips: json.clips as ClipView[] | undefined,
       };
     }
@@ -69,7 +73,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T | ApiError> {
 }
 
 function hydrate(r: GenerateResult): GenerateResult {
-  return { ...r, clips: r.clips.map((c) => ({ ...c, url: absolute(c.url) })) };
+  return {
+    ...r,
+    finalUrl: absolute(r.finalUrl ?? null),
+    clips: r.clips.map((c) => ({ ...c, url: absolute(c.url) })),
+  };
 }
 
 export const api = {
@@ -82,6 +90,7 @@ export const api = {
     });
     if (isApiError(r)) {
       if (r.clips) r.clips = r.clips.map((c) => ({ ...c, url: absolute(c.url) }));
+      if (r.finalUrl) r.finalUrl = absolute(r.finalUrl);
       return r;
     }
     return hydrate(r);

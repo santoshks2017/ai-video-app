@@ -61,12 +61,13 @@ function headers(apiKey: string): Record<string, string> {
 
 function buildInput(prompt: string, refs: OmniRef[] | undefined): unknown {
   if (!refs || refs.length === 0) return prompt;
+  // Docs: image items first, then the text item. Text item uses `text`, not `data`.
   return [
-    { type: 'text', data: prompt },
     ...refs.map((r) => ({
       type: r.kind,
       ...(r.uri ? { uri: r.uri } : { data: r.data, mime_type: r.mimeType }),
     })),
+    { type: 'text', text: prompt },
   ];
 }
 

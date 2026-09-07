@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { fmtTime, type Brief, type PromptPart, type ScenePlan } from '@ava/shared';
-import { api, isApiError, type ClipView, type GenerateResult } from '../lib/api.js';
+import { api, isApiError, errorClips, type ClipView, type GenerateResult } from '../lib/api.js';
 
 /**
  * PRD P0.1 + P0.10 — runs the real generation and shows the ONE finished video
@@ -14,6 +14,7 @@ export function GenerationPanel({
   canGenerate,
   needsCostConfirm,
   costInr,
+  onGenerated,
 }: {
   brief: Brief;
   parts: PromptPart[];
@@ -21,6 +22,8 @@ export function GenerationPanel({
   canGenerate: boolean;
   needsCostConfirm: boolean;
   costInr: number;
+  /** Lets the caller record the finished job against a project. */
+  onGenerated?: (jobId: string, finalUrl: string | null) => void;
 }) {
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<GenerateResult | null>(null);
@@ -49,12 +52,14 @@ export function GenerationPanel({
       setStatus('error');
       setError(`${r.code}: ${r.message}`);
       if (r.jobId) localStorage.setItem('ava.lastJob', r.jobId);
-      if (r.clips?.length) setResult({ jobId: r.jobId ?? '', status: 'failed', clips: r.clips });
+      const partial = errorClips(r);
+      if (partial.length) setResult({ jobId: r.jobId ?? '', status: 'failed', clips: partial });
       return;
     }
     localStorage.setItem('ava.lastJob', r.jobId);
     setResult(r);
     setStatus(r.status === 'done' ? 'done' : 'running');
+    onGenerated?.(r.jobId, r.finalUrl ?? null);
   };
 
   const clips: ClipView[] = result?.clips ?? [];

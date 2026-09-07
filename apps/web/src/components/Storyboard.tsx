@@ -5,7 +5,7 @@ import {
   narrationMode,
   type ScenePlan,
 } from '@ava/shared';
-import { useBrief } from '../state/briefStore.js';
+import type { NarrationKey } from '@ava/shared';
 
 /**
  * Editable storyboard (PRD P0.5): scene-by-scene table with timing, roll type,
@@ -15,14 +15,19 @@ import { useBrief } from '../state/briefStore.js';
 export function Storyboard({
   scenePlan,
   sceneEdits,
+  narration,
+  onEditScene,
+  onClearEdits,
 }: {
   scenePlan: ScenePlan | null;
   sceneEdits: Record<string, { dialogue?: string; shot?: string }>;
+  narration: NarrationKey;
+  onEditScene: (key: string, patch: { dialogue?: string; shot?: string }) => void;
+  onClearEdits: () => void;
 }) {
-  const brief = useBrief((s) => s.brief);
-  const editScene = useBrief((s) => s.editScene);
-  const clearSceneEdits = useBrief((s) => s.clearSceneEdits);
-  const mode = narrationMode(brief.narration);
+  const mode = narrationMode(narration);
+  const editScene = onEditScene;
+  const clearSceneEdits = onClearEdits;
 
   if (!scenePlan || scenePlan.scenes.length === 0) {
     return null;

@@ -1,0 +1,438 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CATEGORIES,
+  NARRATION,
+  buildPrompt,
+  runChecks,
+  estimateCost,
+  isPromptOnly,
+  composeBrief,
+  formatFit,
+  formatFitSummary,
+  type CategoryId,
+  type Project,
+  type ProjectVideoSpec,
+} from '@ava/shared';
+import { useApp, api } from '../state/appStore.js';
+import { Field, Panel, ImageUpload, Thumb, Confirm, Banner } from '../components/ui.js';
+import { isApiError } from '../lib/client.js';
+import { Storyboard } from '../components/Storyboard.js';
+import { OutputPanel } from '../components/OutputPanel.js';
+import { GenerationPanel } from '../components/GenerationPanel.js';
+
+export function ProjectEditor({ projectId }: { projectId: string }) {
+  const { projects, clients, actors, cars, instructions, refresh, go } = useApp();
+  const stored = projects.find((p) => p.id === projectId);
+  const [project, setProject] = useState<Project | null>(stored ?? null);
+  const [savedAt, setSavedAt] = useState<number>(0);
+  const dirty = useRef(false);
+
+  useEffect(() => {
+    if (stored && !project) setProject(stored);
+  }, [stored, project]);
+
+  // Autosave a moment after edits settle.
+  useEffect(() => {
+    if (!project || !dirty.current) return;
+    const t = setTimeout(async () => {
+      const r = await api.projects.save(project);
+      dirty.current = false;
+      if (!isApiError(r)) {
+        setSavedAt(Date.now());
+        await refresh();
+      }
+    }, 900);
+    return () => clearTimeout(t);
+  }, [project, refresh]);
+
+  const set = (p: Partial<Project>) => {
+    dirty.current = true;
+    setProject((cur) => (cur ? { ...cur, ...p, updatedAt: Date.now() } : cur));
+  };
+  const setSpec = (p: Partial<ProjectVideoSpec>) => project && set({ spec: { ...project.spec, ...p } });
+
+  const client = clients.find((c) => c.id === project?.clientId) ?? null;
+  const actor = actors.find((a) => a.id === project?.actorId) ?? null;
+  const car = cars.find((c) => c.id === project?.carId) ?? null;
+
+  const brief = useMemo(
+    () => (project ? composeBrief(project, { client, actor, car, instructions }) : null),
+    [project, client, actor, car, instructions],
+  );
+
+  const built = useMemo(
+    () => (brief ? buildPrompt(brief, { sceneOverrides: project?.sceneEdits ?? {} }) : null),
+    [brief, project?.sceneEdits],
+  );
+  const preflight = useMemo(() => (brief ? runChecks(brief) : null), [brief]);
+  const promptOnly = project ? isPromptOnly(project.useCases) : false;
+  const cost = useMemo(
+    () => (brief && !promptOnly ? estimateCost(brief) : null),
+    [brief, promptOnly],
+  );
+
+  if (!project) return <Panel title="Project"><div className="hint">Loading…</div></Panel>;
+
+  const fit = formatFit(project.spec.durationSec, project.spec.aspect);
+  const parts = built?.parts ?? [];
+  const selectedCar = car;
+  const variants = selectedCar?.variants ?? [];
+  const colours = selectedCar?.colours ?? [];
+
+  const toggleUseCase = (id: CategoryId) =>
+    set({
+      useCases: project.useCases.includes(id)
+        ? project.useCases.filter((u) => u !== id)
+        : [...project.useCases, id],
+    });
+
+  const setField = (cat: CategoryId, field: string, value: string) =>
+    set({
+      fieldValues: { ...project.fieldValues, [cat]: { ...(project.fieldValues[cat] ?? {}), [field]: value } },
+    });
+
+  return (
+    <>
+      <div className="crumbs">
+        <button className="btn ghost small" type="button" onClick={() => go('projects', null)}>
+          ← All projects
+        </button>
+        <span className="hint">
+          {savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : 'Changes save automatically'}
+        </span>
+        <Confirm
+          onConfirm={async () => {
+            await api.projects.remove(project.id);
+            await refresh();
+            go('projects', null);
+          }}
+        >
+          Delete project
+        </Confirm>
+      </div>
+
+      <div className="grid">
+        <div className="left-col">
+          <Panel title="1. Project" step="Name, brief and tags">
+            <Field label="Project name">
+              <input
+                value={project.name}
+                onChange={(e) => set({ name: e.target.value })}
+                placeholder="e.g. Sterling Hyundai — Creta feature reel"
+              />
+            </Field>
+            <Field
+              label="Your brief / prompt"
+              hint="Free-text steer. Added to the master prompt on top of the structured brief."
+            >
+              <textarea
+                value={project.prompt ?? ''}
+                onChange={(e) => set({ prompt: e.target.value })}
+                placeholder="e.g. Lead on safety, keep it warm and family-first. Show the delivery bay at the end."
+              />
+            </Field>
+            <div className="row3">
+              <Field label="Client">
+                <select value={project.clientId ?? ''} onChange={(e) => set({ clientId: e.target.value || undefined })}>
+                  <option value="">— none —</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Actor">
+                <select value={project.actorId ?? ''} onChange={(e) => set({ actorId: e.target.value || undefined })}>
+                  <option value="">— none —</option>
+                  {actors.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Car">
+                <select
+                  value={project.carId ?? ''}
+                  onChange={(e) =>
+                    set({ carId: e.target.value || undefined, carVariant: undefined, carColour: undefined })
+                  }
+                >
+                  <option value="">— none —</option>
+                  {cars.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.brand} {c.model}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            {selectedCar && (
+              <div className="row2">
+                <Field label="Variant">
+                  <select
+                    value={project.carVariant ?? ''}
+                    onChange={(e) => set({ carVariant: e.target.value || undefined })}
+                  >
+                    <option value="">Any variant</option>
+                    {variants.map((v) => (
+                      <option key={v.name} value={v.name}>
+                        {v.name}
+                        {v.price ? ` — ₹${v.price}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Colour">
+                  <select
+                    value={project.carColour ?? ''}
+                    onChange={(e) => set({ carColour: e.target.value || undefined })}
+                  >
+                    <option value="">Any colour</option>
+                    {colours.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            )}
+          </Panel>
+
+          <Panel title="2. Use case" step="Composable — pick 1 or more">
+            <div className="cat-grid">
+              {CATEGORIES.map((c) => {
+                const on = project.useCases.includes(c.id);
+                return (
+                  <div key={c.id} className={`cat${on ? ' on' : ''}`} onClick={() => toggleUseCase(c.id)}>
+                    <span className="m">{c.mode === 'automated' ? 'Automated' : 'Prompt-only'}</span>
+                    <span className="n">{c.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Panel>
+
+          <Panel title="3. Video specs" step="Sets the whole prompt">
+            <div className="row2">
+              <Field label="Narration mode" hint={NARRATION[project.spec.narration].hint}>
+                <select
+                  value={project.spec.narration}
+                  onChange={(e) => setSpec({ narration: e.target.value as ProjectVideoSpec['narration'] })}
+                >
+                  {Object.values(NARRATION).map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Music / audio bed">
+                <input value={project.spec.music} onChange={(e) => setSpec({ music: e.target.value })} />
+              </Field>
+            </div>
+            <div className="row3">
+              <Field label="Duration (seconds)">
+                <input
+                  type="number"
+                  min={6}
+                  max={120}
+                  value={project.spec.durationSec}
+                  onChange={(e) => setSpec({ durationSec: Number(e.target.value) })}
+                />
+              </Field>
+              <Field label="Max seconds per clip" hint="Omni Flash: 3–10s. Longer videos are stitched.">
+                <input
+                  type="number"
+                  min={3}
+                  max={30}
+                  value={project.spec.maxChunkSec}
+                  onChange={(e) => setSpec({ maxChunkSec: Number(e.target.value) })}
+                />
+              </Field>
+              <Field label="Aspect ratio">
+                <select
+                  value={project.spec.aspect}
+                  onChange={(e) => setSpec({ aspect: e.target.value as ProjectVideoSpec['aspect'] })}
+                >
+                  <option value="9:16">Vertical 9:16</option>
+                  <option value="1:1">Square 1:1</option>
+                  <option value="16:9">Horizontal 16:9</option>
+                </select>
+              </Field>
+            </div>
+            <div className="row3">
+              <Field label="Resolution" hint="Omni Flash is 720p in v1.">
+                <select
+                  value={project.spec.resolution}
+                  onChange={(e) => setSpec({ resolution: e.target.value as ProjectVideoSpec['resolution'] })}
+                >
+                  <option value="720p">720p</option>
+                  <option value="480p">480p</option>
+                </select>
+              </Field>
+              <Field label="On-screen text">
+                <select
+                  value={project.spec.textLang}
+                  onChange={(e) => setSpec({ textLang: e.target.value as ProjectVideoSpec['textLang'] })}
+                >
+                  <option value="english">English only</option>
+                  <option value="mixed">Hindi + English</option>
+                  <option value="hindi">Devanagari-led</option>
+                </select>
+              </Field>
+              <Field label="Social formats" hint={fit.notes.join(' ')}>
+                <input readOnly value={formatFitSummary(fit)} />
+              </Field>
+            </div>
+            <div className="row2">
+              <Field label="Primary CTA">
+                <input value={project.spec.cta} onChange={(e) => setSpec({ cta: e.target.value })} />
+              </Field>
+              <Field label="Footer bar" hint="Blank → derived from the client's name, address and phone.">
+                <input value={project.spec.footer} onChange={(e) => setSpec({ footer: e.target.value })} />
+              </Field>
+            </div>
+            <Field label="Visual style">
+              <input value={project.spec.visualStyle} onChange={(e) => setSpec({ visualStyle: e.target.value })} />
+            </Field>
+            <div className="check-row">
+              <input
+                type="checkbox"
+                id="pe_endcard"
+                checked={project.spec.endCardOn}
+                onChange={(e) => setSpec({ endCardOn: e.target.checked })}
+              />
+              <label htmlFor="pe_endcard">Include a closing end card</label>
+            </div>
+            {project.spec.endCardOn && (
+              <Field label="End card content" hint="One line per row, or separate with |. Rendered as text only.">
+                <textarea value={project.spec.endCard} onChange={(e) => setSpec({ endCard: e.target.value })} />
+              </Field>
+            )}
+          </Panel>
+
+          <Panel title="4. Extra references" step="This project only">
+            <div className="section-desc">
+              The client's photos and the car's image set are pulled in automatically. Add anything extra this
+              particular video needs.
+            </div>
+            <div className="thumbs">
+              {project.extraRefs.map((r) => (
+                <Thumb
+                  key={r.refId}
+                  img={r}
+                  onRemove={() => set({ extraRefs: project.extraRefs.filter((x) => x.refId !== r.refId) })}
+                />
+              ))}
+              <ImageUpload
+                label={`${project.name || 'Project'} — reference`}
+                onUploaded={(img) => set({ extraRefs: [...project.extraRefs, img] })}
+                buttonText="Add reference"
+              />
+            </div>
+            {brief && brief.attachments.length > 0 && (
+              <div className="hint" style={{ marginTop: 8 }}>
+                {brief.attachments.length} reference image{brief.attachments.length === 1 ? '' : 's'} in scope
+                (car + client + extras).
+              </div>
+            )}
+          </Panel>
+
+          {project.useCases.length > 0 && (
+            <Panel title="5. Use-case details" step="Shown for selected use cases">
+              {project.useCases.map((id) => {
+                const cat = CATEGORIES.find((c) => c.id === id)!;
+                const values = project.fieldValues[id] ?? {};
+                const mandatory = new Set(cat.mandatory.map((m) => m.id));
+                return (
+                  <div key={id} style={{ marginBottom: 14 }}>
+                    <h3 style={{ marginBottom: 6 }}>{cat.label}</h3>
+                    <div className="hint" style={{ marginBottom: 10 }}>
+                      {cat.purpose}
+                    </div>
+                    {cat.fields.map((f) => {
+                      if (f.showIf && !values[f.showIf]) return null;
+                      const label = `${f.label}${mandatory.has(f.id) ? ' *' : ''}`;
+                      if (f.type === 'checkbox') {
+                        return (
+                          <div className="check-row" key={f.id}>
+                            <input
+                              type="checkbox"
+                              id={`${id}_${f.id}`}
+                              checked={!!values[f.id]}
+                              onChange={(e) => setField(id, f.id, e.target.checked ? 'yes' : '')}
+                            />
+                            <label htmlFor={`${id}_${f.id}`}>{f.label}</label>
+                          </div>
+                        );
+                      }
+                      return (
+                        <Field key={f.id} label={label}>
+                          {f.type === 'textarea' ? (
+                            <textarea
+                              value={values[f.id] ?? ''}
+                              placeholder={f.ph}
+                              onChange={(e) => setField(id, f.id, e.target.value)}
+                            />
+                          ) : f.type === 'select' ? (
+                            <select value={values[f.id] ?? ''} onChange={(e) => setField(id, f.id, e.target.value)}>
+                              <option value="">Select…</option>
+                              {(f.options ?? []).map((o) => (
+                                <option key={o} value={o}>
+                                  {o}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              value={values[f.id] ?? ''}
+                              placeholder={f.ph}
+                              onChange={(e) => setField(id, f.id, e.target.value)}
+                            />
+                          )}
+                        </Field>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </Panel>
+          )}
+
+          <Storyboard
+            scenePlan={built?.scenePlan ?? null}
+            sceneEdits={project.sceneEdits}
+            narration={project.spec.narration}
+            onEditScene={(key, patch) =>
+              set({ sceneEdits: { ...project.sceneEdits, [key]: { ...project.sceneEdits[key], ...patch } } })
+            }
+            onClearEdits={() => set({ sceneEdits: {} })}
+          />
+        </div>
+
+        <div className="right-col">
+          {!project.clientId && <Banner kind="warn">No client selected — footer and end card will be empty.</Banner>}
+          {preflight && (
+            <OutputPanel parts={parts} preflight={preflight} cost={cost} promptOnly={promptOnly} />
+          )}
+          {brief && !promptOnly && parts.length > 0 && preflight && (
+            <GenerationPanel
+              brief={brief}
+              parts={parts}
+              scenePlan={built?.scenePlan ?? null}
+              canGenerate={preflight.canGenerate}
+              needsCostConfirm={!!cost?.needsConfirmation}
+              costInr={cost?.inr ?? 0}
+              onGenerated={(jobId, finalUrl) =>
+                set({ status: 'generated', lastJobId: jobId, lastFinalUrl: finalUrl ?? undefined })
+              }
+            />
+          )}
+        </div>
+      </div>
+    </>
+  );
+}

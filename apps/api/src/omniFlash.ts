@@ -108,9 +108,14 @@ export async function generateClip(input: GenerateClipInput, apiKey: string): Pr
       resolution: input.resolution,
       delivery: 'uri',
     },
-    generation_config: { video_config: { task: input.task } },
   };
-  if (input.previousInteractionId) body.previous_interaction_id = input.previousInteractionId;
+  if (input.previousInteractionId) {
+    // A follow-up turn: the extend/edit intent is implied by the prior interaction.
+    // The API rejects an explicit video_config.task together with previous_interaction_id.
+    body.previous_interaction_id = input.previousInteractionId;
+  } else {
+    body.generation_config = { video_config: { task: input.task } };
+  }
 
   const res = await fetch(`${BASE}/interactions`, {
     method: 'POST',

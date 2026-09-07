@@ -56,6 +56,7 @@ export function GenerationPanel({
       setStatus('error');
       setError(`${r.code}: ${r.message}`);
       if (r.jobId) localStorage.setItem('ava.lastJob', r.jobId);
+      if (r.clips?.length) setResult({ jobId: r.jobId ?? '', status: 'failed', clips: r.clips });
       return;
     }
     localStorage.setItem('ava.lastJob', r.jobId);

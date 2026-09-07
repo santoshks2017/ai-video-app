@@ -78,7 +78,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ brief, parts, confirmedCostInr }),
     });
-    if (isApiError(r)) return r;
+    if (isApiError(r)) {
+      if (r.clips) r.clips = r.clips.map((c) => ({ ...c, url: absolute(c.url) }));
+      return r;
+    }
     return hydrate(r);
   },
 

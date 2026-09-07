@@ -35,5 +35,6 @@ export function emptyBrief(): Brief {
     actor: { name: '', gender: 'female', age: '', style: '', voice: '', sourceNote: '' },
     fieldValues: {},
     attachments: [],
+    extraDirection: [],
   };
 }

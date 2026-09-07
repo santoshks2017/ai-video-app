@@ -13,3 +13,5 @@ export * from './costEstimate.js';
 export * from './attachments.js';
 export * from './defaults.js';
 export * from './samples.js';
+export * from './library.js';
+export * from './compose.js';

@@ -210,6 +210,13 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         : `Maintain the exact same visual style, camera language, grading and graphic treatment as the previous clip: ${ctx.visStyle}.`,
     );
 
+    const direction = (brief.extraDirection ?? []).filter((x) => x.trim());
+    if (direction.length) {
+      L.push('');
+      L.push('## ADDITIONAL DIRECTION');
+      direction.forEach((d) => L.push(d));
+    }
+
     L.push('');
     L.push('---');
     scenes.forEach((sc, i) => {
@@ -321,6 +328,12 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     }
     C.push(`Music: ${ctx.music || 'a neutral modern commercial track'}.`);
     if (ctx.footer) C.push(`Hold the bottom footer bar unchanged: "${ctx.footer}". Top-right: ${ctx.displayDealer}.`);
+    const contDirection = (brief.extraDirection ?? []).filter((x) => x.trim());
+    if (contDirection.length) {
+      C.push('');
+      C.push('Additional direction (applies to this segment too):');
+      contDirection.forEach((d) => C.push(d));
+    }
     C.push('');
     C.push('Scenes in this segment:');
     scenes.forEach((sc, i) => {

@@ -7,6 +7,14 @@ import type { Beat } from './types.js';
 import { CATEGORY_BY_ID } from './categories.js';
 import { beatContext, type RenderContext } from './context.js';
 
+/**
+ * The end card is TEXT ONLY. Left looser ("logo lockup"), the model invents a
+ * stock car photo and a real manufacturer logo on it — both wrong, and the logo
+ * breaks the fictionalise rule. Spelled out explicitly here.
+ */
+const END_CARD_SHOT =
+  'Static end card, text only. A flat solid-colour background — absolutely NO vehicle, NO car, NO photograph, NO product shot, NO stock imagery and NO manufacturer logo, badge or wordmark of any kind. Only the stacked lines of text listed below, centred, in a clean sans-serif, on the plain background. No camera movement, no parallax, no animated graphics.';
+
 export function buildBeats(ctx: RenderContext): Beat[] {
   const beats: Beat[] = [];
   const bctx = beatContext(ctx);
@@ -33,8 +41,8 @@ export function buildBeats(ctx: RenderContext): Beat[] {
     beats.push({
       title: 'End card',
       isEndCard: true,
-      shot: 'Clean end card — flat background, no camera movement, logo lockup above a stacked contact block.',
-      shotAlt: 'Clean end card — flat background, no camera movement, logo lockup above a stacked contact block.',
+      shot: END_CARD_SHOT,
+      shotAlt: END_CARD_SHOT,
       dialogue: ctx.mode.speaks
         ? 'Closing voiceover line only: the dealership name and the call to action.'
         : 'No speech.',

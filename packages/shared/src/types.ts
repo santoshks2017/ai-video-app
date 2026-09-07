@@ -169,6 +169,11 @@ export interface Brief {
   fieldValues: Partial<Record<CategoryId, Record<string, string>>>;
   /** Labelled reference images in scope for this brief (P0.4). */
   attachments: DealerPhoto[];
+  /**
+   * Extra prompt direction: enabled global instructions, then the project's own
+   * free-text steer. Rendered as its own block in the master prompt.
+   */
+  extraDirection?: string[];
 }
 
 export interface Scene {

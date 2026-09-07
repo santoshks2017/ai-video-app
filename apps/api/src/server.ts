@@ -16,14 +16,18 @@ import {
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
 import { concatClips, lastFrame } from './concat.js';
+import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './auth.js';
+import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
+import { syncCarModel } from './carSync.js';
+import { importPlace, PlacesError } from './places.js';
 
 const config = loadConfig();
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 
 app.addHook('onSend', async (_req, reply, payload) => {
   reply.header('access-control-allow-origin', config.allowOrigin);
-  reply.header('access-control-allow-headers', 'content-type');
-  reply.header('access-control-allow-methods', 'GET,POST,OPTIONS');
+  reply.header('access-control-allow-headers', 'content-type, authorization');
+  reply.header('access-control-allow-methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
   return payload;
 });
 app.options('/*', async (_req, reply) => reply.code(204).send());
@@ -33,6 +37,99 @@ app.get('/api/health', async () => ({
   omniFlashKeyPresent: Boolean(config.googleApiKey),
   model: config.omniFlashModel,
 }));
+
+/* ============================ auth (shared password) ============================ */
+
+const OPEN_PATHS = new Set(['/api/health', '/api/session']);
+
+app.addHook('preHandler', async (req, reply) => {
+  if (req.method === 'OPTIONS') return;
+  const url = (req.raw.url ?? '').split('?')[0] ?? '';
+  if (!url.startsWith('/api/')) return;
+  if (OPEN_PATHS.has(url)) return;
+  // Clips and reference images are fetched by <video>/<img>, which cannot send
+  // an Authorization header. They are unguessable UUID paths.
+  if (url.startsWith('/api/clips/') || url.startsWith('/api/refs/')) return;
+  if (!verifyToken(bearer(req.headers.authorization))) {
+    return reply.code(401).send({ code: 'unauthorized', message: 'Sign in with the team password.' });
+  }
+});
+
+app.get('/api/session', async () => ({ authEnabled: authEnabled() }));
+
+app.post<{ Body: { password?: string } }>('/api/session', async (req, reply) => {
+  if (!authEnabled()) return { token: 'open', authEnabled: false };
+  if (!checkPassword(req.body?.password ?? '')) {
+    return reply.code(401).send({ code: 'bad-password', message: 'Wrong password.' });
+  }
+  return { token: issueToken(), authEnabled: true };
+});
+
+/* ============================ library CRUD ============================ */
+
+const COLLECTIONS: Collection[] = ['actors', 'cars', 'clients', 'instructions', 'projects'];
+
+for (const name of COLLECTIONS) {
+  app.get(`/api/${name}`, async () => ({ items: await listAll(name) }));
+
+  app.get<{ Params: { id: string } }>(`/api/${name}/:id`, async (req, reply) => {
+    const doc = await getOne(name, req.params.id);
+    if (!doc) return reply.code(404).send({ code: 'not-found', message: `No such ${name} record` });
+    return doc;
+  });
+
+  app.post<{ Body: Record<string, unknown> }>(`/api/${name}`, async (req, reply) => {
+    if (!req.body || typeof req.body !== 'object') {
+      return reply.code(400).send({ code: 'bad-request', message: 'Body required' });
+    }
+    return await upsert(name, req.body);
+  });
+
+  app.patch<{ Params: { id: string }; Body: Record<string, unknown> }>(
+    `/api/${name}/:id`,
+    async (req, reply) => {
+      const existing = await getOne(name, req.params.id);
+      if (!existing) return reply.code(404).send({ code: 'not-found', message: 'No such record' });
+      await patch(name, req.params.id, req.body ?? {});
+      return await getOne(name, req.params.id);
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(`/api/${name}/:id`, async (req) => {
+    await remove(name, req.params.id);
+    return { ok: true };
+  });
+}
+
+/* ---- car library sync: Brand → Model → Variant → Colour ---- */
+app.post<{ Body: { query?: string; refresh?: boolean } }>('/api/cars/sync', async (req, reply) => {
+  const query = req.body?.query?.trim();
+  if (!query) return reply.code(400).send({ code: 'bad-request', message: 'query required (e.g. "Hyundai Creta")' });
+  try {
+    const profile = await syncCarModel(query);
+    const existing = await getOne<{ createdAt?: number }>('cars', profile.id);
+    const saved = await upsert('cars', { ...profile, createdAt: existing?.createdAt ?? profile.createdAt });
+    return saved;
+  } catch (e) {
+    return reply.code(502).send({ code: 'car-sync-failed', message: (e as Error).message });
+  }
+});
+
+/* ---- client import from a Google Business Profile link ---- */
+app.post<{ Body: { url?: string; query?: string } }>('/api/clients/gmb', async (req, reply) => {
+  try {
+    const out = await importPlace(
+      { url: req.body?.url, query: req.body?.query, maxPhotos: 4 },
+      config.googleApiKey ?? '',
+    );
+    return out;
+  } catch (e) {
+    const err = e as PlacesError;
+    return reply
+      .code(err.status ?? 502)
+      .send({ code: err.code ?? 'gmb-import-failed', message: err.message });
+  }
+});
 
 /** Resolution for v1: Omni Flash is used at 720p (PRD P0.3 note). */
 const RES = '720p' as const;

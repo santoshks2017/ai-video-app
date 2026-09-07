@@ -43,6 +43,13 @@ Approach: NO extend — each segment an independent `create`; segments 2+ seeded
 - All 9 use cases flipped to automated — the prompt-only split was dropped.
 - Generate panel no longer disappears silently on a prompt-only mix; it explains and offers one-click removal (now unreachable, kept for future opt-outs).
 
+## Done (post-production + planning rework, 2026-09-07)
+- `apps/api/src/post.ts` replaces `concat.ts`: crossfade chain (xfade + acrossfade), appended end card, footer + dealer/brand logo overlays. Art is SVG rasterised by `sharp`; Dockerfile installs `fonts-dejavu-core fonts-noto-core` (Devanagari) alongside ffmpeg. `selfTest()` exposed at `/api/health?deep=1` so a broken container is caught before a paid run — it checks pixel variance in the text band to prove glyphs drew.
+- Prompt: `CLEAN_FRAME` instruction replaces the persistent-branding block; end-card beat removed from `buildBeats`; footer dropped from `collectStrings`; footer-mismatch and long-footer checks removed (impossible now).
+- `planScenes` rewritten — see decisions.md. `ScenePlan.droppedBeats` surfaces trimming in pre-flight; 3+ use cases now warns about a disjointed story.
+- `ClientProfile.brandLogo` added; Clients section has both logo slots.
+- Project editor: essentials first, rest behind `Collapse`; storyboard collapsed.
+
 ## Next steps
 - Test on Cloud Run: (a) a multi-part video (~24s, maxChunk 8 → 3 parts) to exercise `extend` + whether `previous_interaction_id` carries visual continuity; (b) a model-specific brief → Fetch from CarDekho → generate, and eyeball whether the reference images actually steer the car design.
 - Judge first-time-right quality vs the storyboard intent (>90% target); tune prompt assembly.

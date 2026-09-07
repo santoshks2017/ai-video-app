@@ -42,6 +42,7 @@ export function BriefForm() {
     setActor,
     toggleCategory,
     setFieldValue,
+    prefillCategory,
     addAttachment,
     removeAttachment,
   } = useBrief();
@@ -347,7 +348,13 @@ export function BriefForm() {
       {brief.categories.length > 0 && (
         <Card n={7} title="Category details" step="Shown for selected categories">
           {brief.categories.map((id) => (
-            <CategoryFields key={id} id={id} values={brief.fieldValues[id] ?? {}} onChange={setFieldValue} />
+            <CategoryFields
+              key={id}
+              id={id}
+              values={brief.fieldValues[id] ?? {}}
+              onChange={setFieldValue}
+              onPrefill={prefillCategory}
+            />
           ))}
         </Card>
       )}
@@ -490,16 +497,28 @@ function CategoryFields({
   id,
   values,
   onChange,
+  onPrefill,
 }: {
   id: CategoryId;
   values: Record<string, string>;
   onChange: (cat: CategoryId, field: string, value: string) => void;
+  onPrefill: (cat: CategoryId) => void;
 }) {
   const cat = CATEGORIES.find((c) => c.id === id)!;
   const mandatoryIds = new Set(cat.mandatory.map((m) => m.id));
   return (
     <div style={{ marginBottom: 14 }}>
-      <h3 style={{ marginBottom: 8 }}>{cat.label}</h3>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <h3 style={{ marginBottom: 8 }}>{cat.label}</h3>
+        <button
+          className="btn ghost small"
+          type="button"
+          onClick={() => onPrefill(id)}
+          title="Fill this category's fields with sample data (and any blank dealer/actor essentials). Manual — only on click."
+        >
+          Use prefill sample data
+        </button>
+      </div>
       <div className="hint" style={{ marginBottom: 10 }}>
         {cat.purpose}
       </div>

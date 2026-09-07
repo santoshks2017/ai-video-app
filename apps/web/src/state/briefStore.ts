@@ -2,6 +2,11 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
   emptyBrief,
+  SAMPLE_FIELDS,
+  SAMPLE_DEALER,
+  SAMPLE_ACTOR,
+  SAMPLE_CAR_MODEL,
+  CATEGORY_BY_ID,
   type Brief,
   type CategoryId,
   type DealerPhoto,
@@ -14,6 +19,8 @@ interface BriefState {
   setActor: (patch: Partial<Brief['actor']>) => void;
   toggleCategory: (id: CategoryId) => void;
   setFieldValue: (cat: CategoryId, field: string, value: string) => void;
+  /** Fill this category's fields with sample data + backfill any blank shared essentials. */
+  prefillCategory: (cat: CategoryId) => void;
   addAttachment: (a: DealerPhoto) => void;
   removeAttachment: (filename: string) => void;
   reset: () => void;
@@ -44,6 +51,35 @@ export const useBrief = create<BriefState>()(
           brief: {
             ...get().brief,
             fieldValues: { ...fv, [cat]: { ...(fv[cat] ?? {}), [field]: value } },
+          },
+        });
+      },
+      prefillCategory: (cat) => {
+        const b = get().brief;
+        const orBlank = (cur: string | undefined, sample: string) => (cur?.trim() ? cur : sample);
+        setState({
+          brief: {
+            ...b,
+            categories: b.categories.includes(cat) ? b.categories : [...b.categories, cat],
+            music: b.music.trim() || CATEGORY_BY_ID[cat].music,
+            carModel: b.modelSpecific ? orBlank(b.carModel, SAMPLE_CAR_MODEL) : b.carModel,
+            fieldValues: { ...b.fieldValues, [cat]: { ...SAMPLE_FIELDS[cat] } },
+            dealer: {
+              ...b.dealer,
+              dealerName: orBlank(b.dealer.dealerName, SAMPLE_DEALER.dealerName),
+              brandModel: orBlank(b.dealer.brandModel, SAMPLE_DEALER.brandModel),
+              phone: orBlank(b.dealer.phone, SAMPLE_DEALER.phone),
+              address: orBlank(b.dealer.address, SAMPLE_DEALER.address),
+              fakeBrandModel: orBlank(b.dealer.fakeBrandModel, SAMPLE_DEALER.fakeBrandModel),
+              fakeDealer: orBlank(b.dealer.fakeDealer, SAMPLE_DEALER.fakeDealer),
+            },
+            actor: {
+              ...b.actor,
+              name: orBlank(b.actor.name, SAMPLE_ACTOR.name),
+              age: orBlank(b.actor.age, SAMPLE_ACTOR.age ?? ''),
+              style: orBlank(b.actor.style, SAMPLE_ACTOR.style ?? ''),
+              voice: orBlank(b.actor.voice, SAMPLE_ACTOR.voice ?? ''),
+            },
           },
         });
       },

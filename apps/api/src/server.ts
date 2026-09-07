@@ -113,13 +113,10 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     });
   }
 
-  // Omni Flash `extend` only accepts a source video up to ~10s, so a long video
-  // is built as one-or-more "runs": each run is a create + at most one cumulative
-  // extend (~18–20s), then a fresh create for the next run. Runs are stitched
-  // with ffmpeg. The last frame of a finished run is fed to the next fresh
-  // create so the cut still looks like the same presenter / car / setting.
-  const EXTEND_MAX_SOURCE = 10.5;
-
+  // No `extend` — each segment is an independent `create`, seeded with the
+  // PREVIOUS segment's last frame as a reference image (+ any brief reference
+  // images) so the presenter / car / setting stay identical across the cut.
+  // All segments are ffmpeg-stitched into one final video.
   async function pull(clip: Awaited<ReturnType<typeof generateClip>>): Promise<Buffer> {
     if (clip.base64) return Buffer.from(clip.base64, 'base64');
     if (clip.fileId) return (await downloadFile(clip.fileId, config.googleApiKey!)).bytes;
@@ -127,31 +124,35 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   }
 
   try {
-    let runInteractionId: string | undefined;
-    let runClipDuration = Infinity;
-    let runFinalBytes: Buffer | null = null;
-    const runFinals: Buffer[] = [];
+    const segmentBytes: Buffer[] = [];
+    let prevBytes: Buffer | null = null;
 
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]!;
-      const canExtend = i > 0 && !!runInteractionId && runClipDuration <= EXTEND_MAX_SOURCE;
+      const isFirst = i === 0;
 
-      let refs = i === 0 ? references.slice() : [];
-      if (!canExtend && i > 0 && runFinalBytes) {
-        // Starting a new run after a cut — anchor it to the previous run's last frame.
-        const frame = await lastFrame(runFinalBytes);
-        if (frame) refs = [{ data: frame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' }, ...refs];
-        runFinals.push(runFinalBytes);
+      const refs: OmniRef[] = [];
+      let seededFromFrame = false;
+      if (!isFirst && prevBytes) {
+        const frame = await lastFrame(prevBytes);
+        if (frame) {
+          refs.push({ data: frame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
+          seededFromFrame = true;
+        }
       }
+      refs.push(...references); // brief attachments (dealer / car-model / logo)
 
       const clip = await generateClip(
         {
-          prompt: canExtend ? part.continuationText || part.text : part.text,
+          prompt: isFirst ? part.text : part.continuationText || part.text,
           aspect: brief.aspect,
           resolution: RES,
-          references: canExtend ? undefined : refs.length ? refs : undefined,
-          previousInteractionId: canExtend ? runInteractionId : undefined,
-          task: canExtend ? 'extend' : refs.length ? 'reference_to_video' : 'text_to_video',
+          references: refs.length ? refs : undefined,
+          task: seededFromFrame
+            ? 'image_to_video' // prev frame is frame 1 → continue the motion
+            : refs.length
+              ? 'reference_to_video'
+              : 'text_to_video',
         },
         config.googleApiKey,
       );
@@ -161,23 +162,15 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       clips[i] = { ...clips[i]!, interactionId: clip.interactionId, storagePath, status: 'done' };
       await updateJob(jobId, { clips });
 
-      if (canExtend) {
-        // Cumulative — this replaces the run's kept clip.
-        runFinalBytes = bytes;
-        runClipDuration = part.end; // cumulative length so far
-      } else {
-        runInteractionId = clip.interactionId;
-        runFinalBytes = bytes;
-        runClipDuration = part.duration;
-      }
+      segmentBytes.push(bytes);
+      prevBytes = bytes;
     }
-    if (runFinalBytes) runFinals.push(runFinalBytes);
 
     let finalStoragePath: string;
-    if (runFinals.length <= 1) {
-      finalStoragePath = [...clips].reverse().find((c) => c.status === 'done')!.storagePath;
+    if (segmentBytes.length <= 1) {
+      finalStoragePath = clips[0]!.storagePath;
     } else {
-      const finalBytes = await concatClips(runFinals);
+      const finalBytes = await concatClips(segmentBytes);
       finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
     }
 

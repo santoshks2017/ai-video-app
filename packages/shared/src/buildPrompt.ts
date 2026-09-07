@@ -282,20 +282,42 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       L.push(rulebookText(actor.gender));
     }
 
-    // Compact continuation prompt for parts 2+ (Omni Flash multi-turn extend:
-    // a short instruction on top of previous_interaction_id context, NOT a
-    // second full standalone prompt — that makes the model restart).
+    // Prompt for segments 2+. Each is an independent `create` call seeded with
+    // the PREVIOUS segment's last frame as a reference image, then ffmpeg-stitched.
+    // So it must be self-sufficient (branding, style, identity) AND lock onto the
+    // reference frame so the character / car / setting don't change across the cut.
     const C: string[] = [];
     C.push(
-      `Continue this video by about ${partDuration} more seconds. The scene continues from the last frame — do NOT cut back to the start or restart.`,
+      `Generate a ${partDuration}-second ${ctx.aspect} segment that continues an ongoing Indian car-dealership video.`,
     );
     C.push(
-      mode.onCameraPerson
-        ? 'Keep the exact same presenter (same face, hair, wardrobe), the same car, the same showroom, lighting, colour grade and camera language as the video so far.'
-        : 'Keep the exact same car, showroom, lighting, colour grade and camera language as the video so far.',
+      'The FIRST frame must match the supplied reference frame EXACTLY: ' +
+        (mode.onCameraPerson
+          ? 'same presenter (identical face, hair, skin tone, make-up, wardrobe and body), '
+          : '') +
+        'same car (identical model, colour, wheels, badges), same showroom and background, same framing, lens, lighting and colour grade. Then continue the motion naturally — no cut back to an intro, no titles, no restart.',
     );
+    if (mode.onCameraPerson && actor.name) C.push(`Presenter: ${actor.name}.`);
+    if (mode.onCameraPerson && actor.style) C.push(`Presenter styling: ${actor.style}.`);
+    C.push(
+      ctx.useFake
+        ? `Fictional branding only: ${ctx.displayBrandModel} — Dealership: ${ctx.displayDealer}. No real manufacturer logo or badge.`
+        : `Brand and model: ${ctx.displayBrandModel}. Dealership: ${ctx.displayDealer}.`,
+    );
+    C.push(`Visual style: ${ctx.visStyle}. Keep the exact same grade and camera language as the reference frame.`);
+    if (ctx.mode.speaks) {
+      C.push(
+        `Spoken language: Hindi/Hinglish, natural unhurried pace, about ${
+          scenes.reduce((s, x) => s + wordBudget(x.duration), 0)
+        } words total across this segment.`,
+      );
+    } else {
+      C.push('No spoken audio; carry the message through footage and on-screen text.');
+    }
+    C.push(`Music: ${ctx.music || 'a neutral modern commercial track'}.`);
+    if (ctx.footer) C.push(`Hold the bottom footer bar unchanged: "${ctx.footer}". Top-right: ${ctx.displayDealer}.`);
     C.push('');
-    C.push('Add these scenes next:');
+    C.push('Scenes in this segment:');
     scenes.forEach((sc, i) => {
       const ov = overrides[String(plan.scenes.indexOf(sc))] ?? {};
       C.push(`Scene ${i + 1} (~${sc.duration}s) — ${sc.beat.title}`);

@@ -33,8 +33,7 @@ export interface GenerateClipInput {
   references?: OmniRef[];
   /** Present for every part after the first — the create call's interaction id. */
   previousInteractionId?: string;
-  /** 'text_to_video' | 'reference_to_video' for part 1; 'extend' after. */
-  task: 'text_to_video' | 'reference_to_video' | 'extend';
+  task: 'text_to_video' | 'reference_to_video' | 'image_to_video' | 'extend';
 }
 
 export interface GeneratedClip {

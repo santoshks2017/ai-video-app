@@ -92,14 +92,17 @@ test('on-screen strings are emitted as an exact-spelling lock', () => {
   assert.match(res.parts[0]!.text, /Render these strings EXACTLY as written/);
 });
 
-test('presenter categories are prompt-only', () => {
-  assert.equal(isPromptOnly(['offer']), true);
-  assert.equal(isPromptOnly(['walkaround']), false);
-  assert.equal(CATEGORY_BY_ID.testimonial.mode, 'presenter');
-  assert.equal(CATEGORY_BY_ID.walkaround.mode, 'automated');
+test('every use case is automated — the prompt-only split was dropped', () => {
+  // Omni Flash does generate a lip-synced presenter, which the original PRD
+  // assumed impossible. See decisions.md 2026-09-07.
+  for (const c of Object.values(CATEGORY_BY_ID)) {
+    assert.equal(c.mode, 'automated', `${c.id} should be automated`);
+  }
+  assert.equal(isPromptOnly(['offer']), false);
+  assert.equal(isPromptOnly(['walkaround', 'testimonial']), false);
 });
 
-test('offer (presenter) prompt still carries the full rulebook (P0.11)', () => {
+test('offer prompt still carries the full rulebook', () => {
   const b = base({ categories: ['offer'], fieldValues: { offer: { cashDiscount: '₹2,25,000' } } });
   const res = buildPrompt(b)!;
   assert.match(res.parts[0]!.text, /PRONUNCIATION & DELIVERY RULES/);

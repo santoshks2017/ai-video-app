@@ -37,6 +37,12 @@ Approach: NO extend — each segment an independent `create`; segments 2+ seeded
 - Web: `Shell` + sign-in, `sections/{Projects,ProjectEditor,Clients,Cars,Actors,Instructions}`, `components/ui.tsx` kit. `Storyboard`/`GenerationPanel` now prop-driven; `BriefForm` + `briefStore` deleted.
 - End-card fix: the shot direction said "logo lockup", which made the model draw a random car and a real manufacturer badge. Now explicitly text-only.
 
+## Done (design-team app, 2026-09-07 cont.)
+- Left rail nav (Google Flow style) with collapse; replaces the top bar.
+- **APIs & models** section: API connections (Google Gemini / OpenAI-compatible / Replicate / fal / custom) with write-only key storage in a backend-only Firestore collection, and Models with real capability limits (min/max clip, resolutions, aspects, image-to-video, reference-image cap, $/sec, default flag). Those limits drive chunking, cost and the generate call. Only the Google adapter is implemented; others return a clear "not implemented".
+- All 9 use cases flipped to automated — the prompt-only split was dropped.
+- Generate panel no longer disappears silently on a prompt-only mix; it explains and offers one-click removal (now unreachable, kept for future opt-outs).
+
 ## Next steps
 - Test on Cloud Run: (a) a multi-part video (~24s, maxChunk 8 → 3 parts) to exercise `extend` + whether `previous_interaction_id` carries visual continuity; (b) a model-specific brief → Fetch from CarDekho → generate, and eyeball whether the reference images actually steer the car design.
 - Judge first-time-right quality vs the storyboard intent (>90% target); tune prompt assembly.

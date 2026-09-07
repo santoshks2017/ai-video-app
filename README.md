@@ -47,7 +47,8 @@ npm run dev:api                           # http://localhost:8080  (needs GOOGLE
 
 - **Live:** brief intake (all 9 categories), editable storyboard, blocking pre-flight
   gate, master-prompt assembly with rulebook injection, cost estimate + Rs 500
-  confirmation gate, prompt-only path for presenter categories.
+  confirmation gate. All 9 use cases generate video (the original prompt-only
+  split for presenter-led categories was dropped — Omni Flash lip-syncs fine).
 - **Live — real generation (P0.1 / P0.7 / P0.10):** `Generate video` runs the parts
   as a create-then-extend chain on **Gemini Omni Flash** (`gemini-omni-1.1-flash`,
   Interactions API, `previous_interaction_id` for continuity). Clips are stored in

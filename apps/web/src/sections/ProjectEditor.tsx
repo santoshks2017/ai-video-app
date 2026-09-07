@@ -228,7 +228,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 const on = project.useCases.includes(c.id);
                 return (
                   <div key={c.id} className={`cat${on ? ' on' : ''}`} onClick={() => toggleUseCase(c.id)}>
-                    <span className="m">{c.mode === 'automated' ? 'Automated' : 'Prompt-only'}</span>
+                    {c.mode !== 'automated' && <span className="m">Prompt-only</span>}
                     <span className="n">{c.label}</span>
                   </div>
                 );

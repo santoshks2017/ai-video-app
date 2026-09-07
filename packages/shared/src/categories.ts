@@ -3,9 +3,11 @@
  * Ported from the legacy tool's CATEGORIES array. Beat text is unchanged;
  * only the container shape and the `mode` classification are new.
  *
- * `mode`:
- *  - 'automated' (5): wired to the Omni Flash API call (PRD goal 1).
- *  - 'presenter' (4): prompt-only, no API call, no cost estimate (PRD P0.11).
+ * `mode`: all nine are 'automated'. The original PRD held four presenter-led
+ * categories back as prompt-only on the belief that no model could lip-sync a
+ * presenter — Omni Flash does, as the first real generations showed, so the
+ * split was dropped (decisions.md 2026-09-07). 'presenter' remains in the type
+ * so a future category or provider can opt out of automation.
  *
  * Beat shape: {title, shot, shotAlt?, dialogue?, card?, cardSub?, note?}
  *  - shot     : camera / shot-type direction
@@ -341,7 +343,7 @@ export const CATEGORIES: CategoryDef[] = [
   {
     id: 'delivery',
     label: 'Delivery / Handover',
-    mode: 'presenter',
+    mode: 'automated',
     hue: 350,
     music: 'warm emotional uplifting track, soft piano into strings',
     purpose: "Celebrate the customer's new car purchase — the highest-emotion content type.",
@@ -400,7 +402,7 @@ export const CATEGORIES: CategoryDef[] = [
   {
     id: 'festival',
     label: 'Festival / Occasion',
-    mode: 'presenter',
+    mode: 'automated',
     hue: 60,
     music: 'warm festive underscore with light percussion, celebratory but not loud',
     purpose: 'Connect the brand with a cultural moment. Emotion first — never lead with price.',
@@ -476,7 +478,7 @@ export const CATEGORIES: CategoryDef[] = [
   {
     id: 'offer',
     label: 'Offer / Deal',
-    mode: 'presenter',
+    mode: 'automated',
     hue: 165,
     music: 'upbeat modern commercial track, energetic but sitting under the voice',
     purpose: 'Drive leads. Create urgency without cheapening the brand. Clarity over cleverness.',
@@ -575,7 +577,7 @@ export const CATEGORIES: CategoryDef[] = [
   {
     id: 'testimonial',
     label: 'Customer Testimonial',
-    mode: 'presenter',
+    mode: 'automated',
     hue: 320,
     music: 'soft warm bed, low — the voice carries this one',
     purpose: 'Social proof — let a real customer sell for you.',

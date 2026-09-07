@@ -35,8 +35,8 @@ export default function App() {
       {section === 'instructions' && <InstructionsSection />}
       {section === 'models' && <ModelsSection />}
       <div className="foot-note">
-        Automated use cases call Gemini Omni Flash; presenter-led use cases stop at the master prompt. The
-        pronunciation &amp; delivery rulebook is injected into every prompt that contains speech.
+        All use cases generate video through the selected model. The pronunciation &amp; delivery rulebook is
+        injected into every prompt that contains speech.
       </div>
     </Shell>
   );

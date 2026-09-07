@@ -30,4 +30,5 @@
 | 2026-09-07 | Client GMB import uses the Google Places API (New), not HTML scraping of Maps | Legitimate and reliable; Maps renders in JS so scraping would be brittle and against ToS. Costs a small amount per lookup | Santosh |
 | 2026-09-07 | Car library hierarchy: Brand → Model → Variant → Colour | CarDekho publishes images per model + colour, so variants inherit the model angle set and carry their own spec/price. Colour name AND hex come free in the swatch filename | Santosh |
 | 2026-09-07 | Projects compose into the existing `Brief` via `composeBrief()` rather than the pipeline reading library records directly | Keeps buildPrompt / runChecks / estimateCost / the generation loop completely unchanged — one integration point instead of rewriting the engine | Claude Code |
+| 2026-09-07 | **Reversed** the 2026-09-06 split: all 9 use cases are now automated, none are prompt-only | The split assumed no model could lip-sync a presenter from a photo. Omni Flash does — the first real generations produced a presenter speaking Hindi to camera convincingly. The `presenter` mode stays in the type so a future category or provider can opt out | Santosh |
 

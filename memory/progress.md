@@ -1,7 +1,10 @@
 # Progress
 
-**Status:** Working end to end, including multi-segment. 2026-09-07: a 27s Product Feature brief generated 3× 9s segments and ffmpeg-stitched to one 27.0s 9:16 video. Presenter, branding overlays, footer and showroom stay consistent across cuts; the s2→s3 cut (both wide shots) is near-seamless. Known drift: the hero CAR changes between segment 1 (SUV) and 2–3 (sedan), and lighting shifts at the first cut — fixable by attaching a car-model reference set (P0.2/P0.4). Single-segment (≤~10s) has no cuts.
-Approach: NO extend — each segment is an independent `create` seeded with the previous segment's last frame (`image_to_video`) + brief reference images; segments concatenated with ffmpeg. `/api/clips/:jobId/final` serves the stitched result.
+**Status:** Working end to end incl. multi-segment + reference grounding. 2026-09-07 tests (27s Product Feature, 3× 9s → ffmpeg-stitched 27.0s 9:16):
+- No refs: car drifted SUV→sedan at the first cut; presenter/branding/showroom held.
+- With CarDekho Creta refs: **car consistent** (dark-green Creta SUV throughout, interior matches the scraped dashboard ref); both cuts near-seamless (frame-seed working); presenter rock-solid.
+- Remaining defect (prompt fix pushed, not re-tested): on-screen text garbled in segments 2+ and the actor name leaked as an on-screen label — continuation prompt now has part 1's strict exact-string lock + "no presenter name on screen".
+Approach: NO extend — each segment an independent `create`; segments 2+ seeded with the previous segment's last frame (`image_to_video`, max 2 images = frame + 1 car ref) so character/car/setting hold across the cut; part 1 gets the full ref set (`reference_to_video`); all segments concatenated with ffmpeg → `/api/clips/:jobId/final`.
 - Frontend: https://ai-video-app-cd.web.app
 - API: https://ava-api-85831607354.asia-south1.run.app (also `/api/**` via the Hosting rewrite)
 - Real key is Secret Manager version 5; Cloud Run pinned to `GOOGLE_API_KEY:5` (`:latest` was stuck on destroyed v6). Repo var `GOOGLE_API_KEY_VERSION=5`. Key was pasted in chat 2026-09-07 — still worth rotating.

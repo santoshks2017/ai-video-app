@@ -297,8 +297,13 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
           : '') +
         'same car (identical model, colour, wheels, badges), same showroom and background, same framing, lens, lighting and colour grade. Then continue the motion naturally — no cut back to an intro, no titles, no restart.',
     );
-    if (mode.onCameraPerson && actor.name) C.push(`Presenter: ${actor.name}.`);
-    if (mode.onCameraPerson && actor.style) C.push(`Presenter styling: ${actor.style}.`);
+    if (mode.onCameraPerson) {
+      C.push(
+        `The on-camera presenter is the same person as in the reference frame${
+          actor.style ? `, styled as: ${actor.style}` : ''
+        }. Do NOT write the presenter's name or any label anywhere on screen.`,
+      );
+    }
     C.push(
       ctx.useFake
         ? `Fictional branding only: ${ctx.displayBrandModel} — Dealership: ${ctx.displayDealer}. No real manufacturer logo or badge.`
@@ -335,11 +340,24 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       (sc.beat.cardLines ?? []).forEach((line) => C.push(`  On-screen line: "${line}"`));
     });
     const contStrings = collectStrings(scenes, '');
+    C.push('');
+    C.push('## ON-SCREEN TEXT — EXACT STRINGS (do not render anything else as text)');
     if (contStrings.length) {
-      C.push('');
-      C.push(`Render on-screen text spelled exactly: ${contStrings.map((x) => `"${x}"`).join(', ')}.`);
+      C.push(
+        "Render these strings EXACTLY as written — same spelling, spacing, punctuation, case and symbols. Do not paraphrase, translate, abbreviate, re-spell or 'correct' them. Garbled on-screen text is the most common failure in this format:",
+      );
+      contStrings.forEach((s, i) => C.push(`${i + 1}. "${s}"`));
+      C.push(textLangLine(brief.textLang));
+      C.push('One short headline plus at most one smaller sub-line per card. Never more than two text elements on screen at once.');
+    } else {
+      C.push('No on-screen text cards in this segment. Only the persistent corner logos and the footer bar.');
     }
-    if (mode.speaks) C.push('Same Hindi/Hinglish pronunciation and delivery rules as the earlier parts.');
+    C.push(
+      `The persistent overlays are ONLY: top-left "${String(ctx.displayBrandModel).split(' ')[0]}", top-right "${ctx.displayDealer}"${
+        ctx.footer ? `, and the bottom footer bar "${ctx.footer}"` : ''
+      }. No other words, names or labels anywhere.`,
+    );
+    if (mode.speaks) C.push('Same Hindi/Hinglish pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
     if (isLast) C.push('This is the final segment — end cleanly on the last scene.');
 
     partsOut.push({

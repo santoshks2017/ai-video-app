@@ -50,6 +50,13 @@ Approach: NO extend — each segment an independent `create`; segments 2+ seeded
 - `ClientProfile.brandLogo` added; Clients section has both logo slots.
 - Project editor: essentials first, rest behind `Collapse`; storyboard collapsed.
 
+## Done (history + bucketing, 2026-09-07)
+- Scene-driven segment bucketing (whole scenes, ≤ model cap, ≤9% squeeze allowance). 31s → [6.4] [4.7+5.3] [4.7+5.3] [4.7]; 50s → 5 segments none over cap.
+- Prompt parts are an accordion (all collapsed, one open at a time).
+- Per-project generation history: `GET /api/projects/:id/generations`, poster frames via `/api/clips/:jobId/poster`, per-video cost + specs (duration, aspect, resolution, segments, model, $/s), project total spend, and portfolio total on the Projects header. `Project.generationCount` / `totalCostInr` roll up server-side.
+- `/api/health?deep=1` confirms the container toolchain — ffmpeg present, footer/end-card art rasterises, `textRendered: true` proves fonts loaded.
+- NOTE: the three pre-history test generations (~₹714) aren't attributed to any project.
+
 ## Next steps
 - Test on Cloud Run: (a) a multi-part video (~24s, maxChunk 8 → 3 parts) to exercise `extend` + whether `previous_interaction_id` carries visual continuity; (b) a model-specific brief → Fetch from CarDekho → generate, and eyeball whether the reference images actually steer the car design.
 - Judge first-time-right quality vs the storyboard intent (>90% target); tune prompt assembly.

@@ -66,6 +66,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   );
   const preflight = useMemo(() => (brief ? runChecks(brief) : null), [brief]);
   const promptOnly = project ? isPromptOnly(project.useCases) : false;
+  const presenterPicked = (project?.useCases ?? []).filter(
+    (id) => CATEGORIES.find((c) => c.id === id)?.mode === 'presenter',
+  );
   const activeModel =
     models.find((m) => m.id === project?.spec.modelId) ??
     models.find((m) => m.isDefault && m.enabled !== false) ??
@@ -210,7 +213,16 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             )}
           </Panel>
 
-          <Panel title="2. Use case" step="Composable — pick 1 or more">
+          <Panel
+            title="2. Use case"
+            step={promptOnly ? 'Prompt-only — no video generation' : 'Composable — pick 1 or more'}
+          >
+            {promptOnly && (
+              <Banner kind="warn">
+                Presenter-led use cases can't be generated automatically — picking one makes the whole project
+                prompt-only.
+              </Banner>
+            )}
             <div className="cat-grid">
               {CATEGORIES.map((c) => {
                 const on = project.useCases.includes(c.id);
@@ -459,6 +471,37 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           {preflight && (
             <OutputPanel parts={parts} preflight={preflight} cost={cost} promptOnly={promptOnly} />
           )}
+          {promptOnly && parts.length > 0 && (
+            <Panel title="Generate &amp; preview" step="Unavailable for this mix">
+              <Banner kind="warn">
+                This project is prompt-only because{' '}
+                <b>
+                  {presenterPicked
+                    .map((id) => CATEGORIES.find((c) => c.id === id)?.label ?? id)
+                    .join(' and ')}
+                </b>{' '}
+                {presenterPicked.length > 1 ? 'are' : 'is'} presenter-led.
+              </Banner>
+              <div className="section-desc">
+                No video model can lip-sync a named presenter from a photo yet, so these use cases stop at the
+                master prompt — copy it into Lumina to finish there. Remove{' '}
+                {presenterPicked.length > 1 ? 'them' : 'it'} to generate automatically.
+              </div>
+              <div className="toolbar" style={{ marginTop: 0 }}>
+                {presenterPicked.map((id) => (
+                  <button
+                    key={id}
+                    className="btn small"
+                    type="button"
+                    onClick={() => set({ useCases: project.useCases.filter((u) => u !== id) })}
+                  >
+                    Remove “{CATEGORIES.find((c) => c.id === id)?.label ?? id}”
+                  </button>
+                ))}
+              </div>
+            </Panel>
+          )}
+
           {brief && !promptOnly && parts.length > 0 && preflight && (
             <GenerationPanel
               brief={brief}

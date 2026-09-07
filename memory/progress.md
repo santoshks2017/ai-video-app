@@ -30,8 +30,17 @@ Approach: NO extend — each segment an independent `create`; segments 2+ seeded
 - GCP + Firebase project `ai-video-app-cd` created, Firebase added, `.firebaserc` set.
 - `docs/DEPLOY-SETUP.md`: exact remaining deploy commands.
 
+## Done (app restructure, 2026-09-07)
+- Five sections behind a shared-password gate: **Projects** (main flow), **Clients**, **Cars**, **Actors**, **Global Instructions**.
+- `@ava/shared`: `library.ts` (entity types) + `compose.ts` (`composeBrief()` resolves a project + client/actor/car/instructions into the existing `Brief`; `carReferenceImages()` picks variant/colour with model fallback). `Brief.extraDirection` carries global instructions + the project's free-text steer into the prompt.
+- `@ava/api`: `auth.ts` (HMAC bearer, 30d, `APP_PASSWORD` with 'unset' sentinel), `library.ts` (Firestore CRUD), `carSync.ts` (Brand→Model→Variant→Colour; Creta parses to 50 variants + 9 colours with hex), `places.ts` (GMB import via Places API New). Routes: `/api/session`, CRUD for all 5 collections, `/api/cars/sync`, `/api/clients/gmb`.
+- Web: `Shell` + sign-in, `sections/{Projects,ProjectEditor,Clients,Cars,Actors,Instructions}`, `components/ui.tsx` kit. `Storyboard`/`GenerationPanel` now prop-driven; `BriefForm` + `briefStore` deleted.
+- End-card fix: the shot direction said "logo lockup", which made the model draw a random car and a real manufacturer badge. Now explicitly text-only.
+
 ## Next steps
 - Test on Cloud Run: (a) a multi-part video (~24s, maxChunk 8 → 3 parts) to exercise `extend` + whether `previous_interaction_id` carries visual continuity; (b) a model-specific brief → Fetch from CarDekho → generate, and eyeball whether the reference images actually steer the car design.
 - Judge first-time-right quality vs the storyboard intent (>90% target); tune prompt assembly.
+- **Set the team password** — `printf 'PASSWORD' | gcloud secrets versions add APP_PASSWORD --project ai-video-app-cd --data-file=-` then redeploy. Until then the app is open and shows a warning banner.
 - Rotate the Omni Flash key (pasted in chat): new secret version → set `GOOGLE_API_KEY_VERSION` → redeploy → disable v5. Steps in docs/DEPLOY-SETUP.md.
+- Verify the end-card fix on the next generation (no random car, no real badge).
 - Then: scene-level (not just part-level) re-generate; the other 4 automated categories; P1 items.

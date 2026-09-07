@@ -15,7 +15,7 @@ import {
   type JobClip,
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
-import { composeFinal, lastFrame, type BrandOverlay } from './post.js';
+import { composeFinal, lastFrame, selfTest, type BrandOverlay } from './post.js';
 import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './auth.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
 import { syncCarModel } from './carSync.js';
@@ -33,10 +33,12 @@ app.addHook('onSend', async (_req, reply, payload) => {
 });
 app.options('/*', async (_req, reply) => reply.code(204).send());
 
-app.get('/api/health', async () => ({
+app.get<{ Querystring: { deep?: string } }>('/api/health', async (req) => ({
   ok: true,
   omniFlashKeyPresent: Boolean(config.googleApiKey),
   model: config.omniFlashModel,
+  // ?deep=1 exercises ffmpeg + the SVG rasteriser used for the overlays.
+  ...(req.query?.deep ? { post: await selfTest() } : {}),
 }));
 
 /* ============================ auth (shared password) ============================ */

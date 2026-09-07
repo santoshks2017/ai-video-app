@@ -258,3 +258,48 @@ export async function lastFrame(clip: Buffer): Promise<Buffer | null> {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+/**
+ * Verify the post-production toolchain without spending a generation: renders
+ * the real footer + end-card art and probes ffmpeg. Surfaced on /api/health so
+ * a broken container is obvious before a paid run, not after.
+ */
+export async function selfTest(): Promise<{
+  ok: boolean;
+  ffmpeg?: string;
+  footerPx?: string;
+  endCardPx?: string;
+  textRendered?: boolean;
+  error?: string;
+}> {
+  try {
+    const version = (await run('ffmpeg', ['-version'])).split('\n')[0] ?? '';
+    const footer = await footerPng('Sterling Hyundai  |  MG Road  |  98765 43210', 720, DEFAULT_INK);
+    const fm = await sharp(footer).metadata();
+    const end = await endCardPng(
+      { lines: ['Sterling Hyundai', 'Book your test drive today', 'MG Road'], seconds: 3 },
+      720,
+      1280,
+      DEFAULT_ACCENT,
+      DEFAULT_INK,
+    );
+    const em = await sharp(end).metadata();
+
+    // If fonts are missing the SVG rasterises to a flat bar — compare the text
+    // band against the bar colour to prove glyphs actually drew.
+    const band = await sharp(footer)
+      .extract({ left: 60, top: Math.round((fm.height ?? 92) * 0.3), width: 600, height: 20 })
+      .stats();
+    const textRendered = (band.channels[0]?.stdev ?? 0) > 8;
+
+    return {
+      ok: true,
+      ffmpeg: version,
+      footerPx: `${fm.width}x${fm.height}`,
+      endCardPx: `${em.width}x${em.height}`,
+      textRendered,
+    };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}

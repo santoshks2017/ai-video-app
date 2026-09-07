@@ -71,52 +71,187 @@ async function probe(file: string): Promise<{ duration: number; width: number; h
   };
 }
 
-/** Bottom strip: solid bar + centred line of contact detail. */
+
+/* ---------------------------------------------------------------------------
+ * Text layout. SVG text neither wraps nor shrinks, so long strings — a full
+ * dealer address, a legal entity name — simply ran off both edges of the frame.
+ * These estimate glyph advances, wrap on word boundaries, and step the font size
+ * down until the block fits the space it has been given.
+ * ------------------------------------------------------------------------- */
+
+/** Approximate advance width of a string, in font-size units. */
+function textUnits(text: string): number {
+  let u = 0;
+  for (const ch of text) {
+    if (/[iIljt.,:;'`!|()[\]]/.test(ch)) u += 0.31;
+    else if (/[mwMW]/.test(ch)) u += 0.92;
+    else if (/[A-Z0-9@#&%]/.test(ch)) u += 0.63;
+    else if (ch === ' ') u += 0.27;
+    else u += 0.54;
+  }
+  return u;
+}
+
+const measure = (text: string, fontSize: number, bold: boolean): number =>
+  textUnits(text) * fontSize * (bold ? 1.06 : 1);
+
+/** Greedy word wrap; a single word longer than the line is left to overflow-fit. */
+function wrap(text: string, maxWidth: number, fontSize: number, bold: boolean): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines: string[] = [];
+  let line = words[0]!;
+  for (const w of words.slice(1)) {
+    const candidate = `${line} ${w}`;
+    if (measure(candidate, fontSize, bold) <= maxWidth) line = candidate;
+    else {
+      lines.push(line);
+      line = w;
+    }
+  }
+  lines.push(line);
+  return lines;
+}
+
+interface FittedText {
+  lines: string[];
+  fontSize: number;
+  lineHeight: number;
+}
+
+/** Shrink until the text wraps into at most `maxLines` within `maxWidth`. */
+function fitText(
+  text: string,
+  maxWidth: number,
+  opts: { start: number; min: number; maxLines: number; bold?: boolean },
+): FittedText {
+  const bold = opts.bold ?? false;
+  let size = opts.start;
+  let lines = wrap(text, maxWidth, size, bold);
+  while (size > opts.min && (lines.length > opts.maxLines || lines.some((l) => measure(l, size, bold) > maxWidth))) {
+    size -= 1;
+    lines = wrap(text, maxWidth, size, bold);
+  }
+  // Still too wide at the minimum (one very long word) — squeeze that line.
+  return { lines, fontSize: size, lineHeight: Math.round(size * 1.28) };
+}
+
+const tspans = (
+  f: FittedText,
+  x: number,
+  yStart: number,
+  fill: string,
+  weight: number,
+  maxWidth: number,
+): string =>
+  f.lines
+    .map((line, i) => {
+      const over = measure(line, f.fontSize, weight >= 600) > maxWidth;
+      return `<text x="${x}" y="${yStart + i * f.lineHeight}" text-anchor="middle" font-family="${FONT}"
+        font-size="${f.fontSize}" font-weight="${weight}" fill="${fill}"${
+          over ? ` textLength="${maxWidth}" lengthAdjust="spacingAndGlyphs"` : ''
+        }>${esc(line)}</text>`;
+    })
+    .join('\n');
+
+/** Bottom strip: solid bar + centred contact detail, wrapped and fitted. */
 async function footerPng(text: string, w: number, ink: string): Promise<Buffer> {
-  const h = Math.round(w * 0.128);
-  const fs = Math.round(h * 0.30);
+  const pad = Math.round(w * 0.05);
+  const maxWidth = w - pad * 2;
+  const fitted = fitText(text, maxWidth, {
+    start: Math.round(w * 0.036),
+    min: Math.round(w * 0.022),
+    maxLines: 2,
+  });
+  const h = Math.round(fitted.lineHeight * fitted.lines.length + w * 0.05);
+  const firstBaseline = Math.round((h - fitted.lineHeight * (fitted.lines.length - 1)) / 2 + fitted.fontSize * 0.35);
+
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
   <rect width="${w}" height="${h}" fill="${ink}" fill-opacity="0.92"/>
-  <text x="${w / 2}" y="${h * 0.63}" text-anchor="middle" font-family="${FONT}" font-size="${fs}"
-        font-weight="600" fill="#ffffff" letter-spacing="0.4">${esc(text)}</text>
+  ${tspans(fitted, w / 2, firstBaseline, '#ffffff', 600, maxWidth)}
 </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
 /** Full-frame outro: dealer name, CTA, contact — always the last thing on screen. */
-async function endCardPng(spec: EndCardSpec, w: number, h: number, accent: string, ink: string): Promise<Buffer> {
-  const [name, cta, ...rest] = spec.lines.filter((l) => l && l.trim());
-  const cy = h / 2;
-  const nameSize = Math.round(w * 0.075);
-  const ctaSize = Math.round(w * 0.042);
-  const restSize = Math.round(w * 0.036);
+async function endCardPng(
+  spec: EndCardSpec,
+  w: number,
+  h: number,
+  accent: string,
+  ink: string,
+): Promise<Buffer> {
+  const [name, cta, ...rest] = spec.lines.map((l) => (l ?? '').trim()).filter(Boolean);
+  const pad = Math.round(w * 0.08);
+  const maxWidth = w - pad * 2;
 
-  const restText = rest
-    .map((line, i) => `<text x="${w / 2}" y="${cy + 90 + i * (restSize * 1.6)}" text-anchor="middle"
-        font-family="${FONT}" font-size="${restSize}" fill="#c9d3e0">${esc(line)}</text>`)
-    .join('\n');
+  const nameFit = name
+    ? fitText(name, maxWidth, { start: Math.round(w * 0.075), min: Math.round(w * 0.036), maxLines: 3, bold: true })
+    : null;
+  const ctaFit = cta
+    ? fitText(cta, maxWidth, { start: Math.round(w * 0.042), min: Math.round(w * 0.028), maxLines: 2 })
+    : null;
+  const restFits = rest.map((line) =>
+    fitText(line, maxWidth, { start: Math.round(w * 0.034), min: Math.round(w * 0.024), maxLines: 2 }),
+  );
+
+  // Lay the block out as a stack, then centre the whole thing vertically.
+  const gapAfterName = Math.round(w * 0.045);
+  const gapAfterCta = Math.round(w * 0.06);
+  const gapBetweenRest = Math.round(w * 0.012);
+  const logoH = spec.logo ? Math.round(h * 0.09) : 0;
+  const gapAfterLogo = spec.logo ? Math.round(w * 0.06) : 0;
+
+  const nameH = nameFit ? nameFit.lineHeight * nameFit.lines.length : 0;
+  const ctaH = ctaFit ? ctaFit.lineHeight * ctaFit.lines.length : 0;
+  const restH = restFits.reduce((a, f) => a + f.lineHeight * f.lines.length + gapBetweenRest, 0);
+  const blockH =
+    logoH + gapAfterLogo + nameH + (nameFit && ctaFit ? gapAfterName : 0) + ctaH + (restH ? gapAfterCta + restH : 0);
+
+  let y = Math.round((h - blockH) / 2);
+  const logoTop = y;
+  y += logoH + gapAfterLogo;
+
+  const parts: string[] = [];
+  if (nameFit) {
+    parts.push(tspans(nameFit, w / 2, y + nameFit.fontSize, '#ffffff', 700, maxWidth));
+    y += nameH + (ctaFit ? gapAfterName : 0);
+  }
+  if (ctaFit) {
+    parts.push(tspans(ctaFit, w / 2, y + ctaFit.fontSize, accent, 500, maxWidth));
+    y += ctaH;
+  }
+  if (restH) {
+    y += gapAfterCta;
+    for (const f of restFits) {
+      parts.push(tspans(f, w / 2, y + f.fontSize, '#c9d3e0', 400, maxWidth));
+      y += f.lineHeight * f.lines.length + gapBetweenRest;
+    }
+  }
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
   <rect width="${w}" height="${h}" fill="${ink}"/>
   <rect x="0" y="0" width="${w}" height="${Math.round(h * 0.006)}" fill="${accent}"/>
-  ${name ? `<text x="${w / 2}" y="${cy - 60}" text-anchor="middle" font-family="${FONT}" font-size="${nameSize}" font-weight="700" fill="#ffffff">${esc(name)}</text>` : ''}
-  ${cta ? `<text x="${w / 2}" y="${cy + 10}" text-anchor="middle" font-family="${FONT}" font-size="${ctaSize}" font-weight="500" fill="${accent}">${esc(cta)}</text>` : ''}
-  ${restText}
+  ${parts.join('\n')}
 </svg>`;
 
-  let png = sharp(Buffer.from(svg));
+  const base = sharp(Buffer.from(svg));
   if (spec.logo) {
-    const logoW = Math.round(w * 0.34);
-    const logo = await sharp(spec.logo).resize({ width: logoW, fit: 'inside' }).png().toBuffer();
+    const logo = await sharp(spec.logo)
+      .resize({ height: logoH, fit: 'inside', withoutEnlargement: false })
+      .png()
+      .toBuffer();
     const lm = await sharp(logo).metadata();
-    png = sharp(
-      await png
-        .composite([{ input: logo, top: Math.round(cy - 260 - (lm.height ?? 0)), left: Math.round((w - logoW) / 2) }])
+    return sharp(
+      await base
+        .composite([{ input: logo, top: logoTop, left: Math.round((w - (lm.width ?? 0)) / 2) }])
         .png()
         .toBuffer(),
-    );
+    )
+      .png()
+      .toBuffer();
   }
-  return png.png().toBuffer();
+  return base.png().toBuffer();
 }
 
 async function scaledLogo(src: Buffer, frameW: number): Promise<Buffer> {

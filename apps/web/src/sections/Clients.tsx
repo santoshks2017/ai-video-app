@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ClientProfile, StoredImage } from '@ava/shared';
+import { suggestDisplayName, type ClientProfile, type StoredImage } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, PickList, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
 import { isApiError, post, abs } from '../lib/client.js';
@@ -68,8 +68,10 @@ export function ClientsSection() {
       return;
     }
     const photos = r.photos.map((p) => ({ ...p, url: abs(p.url ?? null) ?? p.url }));
+    const importedName = draft.name.trim() || r.name;
     set({
-      name: draft.name.trim() || r.name,
+      name: importedName,
+      displayName: draft.displayName?.trim() || suggestDisplayName(importedName),
       address: r.address ?? draft.address,
       phone: r.phone ?? draft.phone,
       city: r.city ?? draft.city,
@@ -107,7 +109,7 @@ export function ClientsSection() {
             <>
               <b>{c.name}</b>
               <span>
-                {[c.brand, c.city, `${c.photos.length} photo${c.photos.length === 1 ? '' : 's'}`]
+                {[c.displayName && c.displayName !== c.name ? `“${c.displayName}”` : null, c.brand, c.city]
                   .filter(Boolean)
                   .join(' · ')}
               </span>
@@ -155,13 +157,38 @@ export function ClientsSection() {
           <div className="divider" />
 
           <div className="row2">
-            <Field label="Client / showroom name">
-              <input value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Sterling Hyundai" />
+            <Field label="Client / showroom name" hint="Full name, as on the Google listing.">
+              <input
+                value={draft.name}
+                onChange={(e) => set({ name: e.target.value })}
+                placeholder="e.g. Sterling Hyundai"
+              />
             </Field>
             <Field label="Brand">
               <input value={draft.brand} onChange={(e) => set({ brand: e.target.value })} placeholder="e.g. Hyundai" />
             </Field>
           </div>
+          <Field
+            label="Display name"
+            hint="The short name shown on screen — footer, end card, spoken lines. A full legal name won't fit."
+          >
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={draft.displayName ?? ''}
+                onChange={(e) => set({ displayName: e.target.value })}
+                placeholder={suggestDisplayName(draft.name) || 'e.g. Jasper Cars'}
+              />
+              {draft.name && suggestDisplayName(draft.name) !== draft.displayName && (
+                <button
+                  className="btn small"
+                  type="button"
+                  onClick={() => set({ displayName: suggestDisplayName(draft.name) })}
+                >
+                  Use “{suggestDisplayName(draft.name)}”
+                </button>
+              )}
+            </div>
+          </Field>
           <div className="row2">
             <Field label="City">
               <input value={draft.city ?? ''} onChange={(e) => set({ city: e.target.value })} placeholder="e.g. Jaipur" />

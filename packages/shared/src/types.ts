@@ -136,6 +136,7 @@ export interface Dealer {
   phone?: string;
   tier: 'Metro Premium' | 'Regional/Volume' | 'Hyperlocal';
   address?: string;
+  city?: string;
   fictionalize: boolean;
   fakeBrandModel?: string;
   fakeDealer?: string;

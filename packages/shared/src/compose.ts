@@ -123,11 +123,12 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   if (client) {
     b.dealer = {
       id: client.id,
-      dealerName: client.name,
+      dealerName: client.displayName?.trim() || client.name,
       brandModel: car ? `${car.brand} ${car.model}` : client.brand,
       phone: client.phone ?? '',
       tier: client.tier,
       address: [client.address, client.city].filter(Boolean).join(', '),
+      city: client.city,
       fictionalize: client.fictionalize,
       fakeBrandModel: client.fakeBrandModel ?? '',
       fakeDealer: client.fakeDealer ?? '',
@@ -190,8 +191,14 @@ export function projectUseCases(project: Project): CategoryId[] {
 export function overlayCopy(brief: Brief): { footerText: string; endCardLines: string[] } {
   const d = brief.dealer;
   const shown = d.fictionalize ? d.fakeDealer || d.dealerName : d.dealerName;
+
+  // The footer is a single glanceable strip, so it gets the short form — name,
+  // city, phone. A full postal address (what a Google Business import returns)
+  // wraps to two dense lines and reads as noise. The end card carries the
+  // address in full instead.
   const footerText =
-    brief.footer.trim() || [shown, d.address, d.phone].map((x) => (x ?? '').trim()).filter(Boolean).join('  |  ');
+    brief.footer.trim() ||
+    [shown, d.city || shortAddress(d.address), d.phone].map((x) => (x ?? '').trim()).filter(Boolean).join('  ·  ');
 
   const endCardLines = brief.endCard.trim()
     ? brief.endCard
@@ -201,4 +208,42 @@ export function overlayCopy(brief: Brief): { footerText: string; endCardLines: s
     : [shown, brief.cta, d.address, d.phone].map((x) => (x ?? '').trim()).filter(Boolean);
 
   return { footerText, endCardLines };
+}
+
+/** Last meaningful part of a postal address — usually the locality. */
+function shortAddress(address?: string): string {
+  const parts = (address ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter((x) => x && !/^\d{5,6}$/.test(x) && !/^india$/i.test(x));
+  return parts.length > 1 ? parts[parts.length - 1]! : (parts[0] ?? '');
+}
+
+/**
+ * Guess a short trading name from a full listing name.
+ * "Tata Motors Cars Showroom - Jasper Cars Private Limited, Malviya Nagar"
+ *   → "Jasper Cars"
+ */
+export function suggestDisplayName(fullName: string): string {
+  const raw = (fullName ?? '').trim();
+  if (!raw) return '';
+  const words = (v: string): number => v.split(/\s+/).filter(Boolean).length;
+
+  const strip = (v: string): string => {
+    let out = v.split(',')[0]!.trim();
+    out = out.replace(/\s+(private\s+limited|pvt\.?\s*ltd\.?|limited|ltd\.?|llp|inc\.?)$/i, '').trim();
+    // Trailing "Motors"/"Cars"/"Showroom" is only noise when a real name remains.
+    const lean = out.replace(/\s+(showroom|dealership|dealer|motors|automobiles|cars)$/i, '').trim();
+    if (words(lean) >= 2) out = lean;
+    return out;
+  };
+
+  const parts = raw.split(/\s+[-–|]\s+/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const tail = strip(parts[parts.length - 1]!);
+    // A one-word tail is almost always the locality, not the trading name.
+    const pick = words(tail) > 1 ? tail : strip(parts[0]!);
+    if (pick) return pick;
+  }
+  return strip(raw) || raw;
 }

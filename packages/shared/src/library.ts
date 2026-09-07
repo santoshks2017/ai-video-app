@@ -79,7 +79,14 @@ export interface CarModelProfile {
 
 export interface ClientProfile {
   id: string;
+  /** Full/legal name, e.g. as it appears on the Google listing. */
   name: string;
+  /**
+   * Short trading name used on screen — footer, end card, spoken lines.
+   * A Google Business import returns things like "Tata Motors Cars Showroom -
+   * Jasper Cars Private Limited, Malviya Nagar", which no overlay can carry.
+   */
+  displayName?: string;
   /** Brand(s) the dealer sells, e.g. "Hyundai". */
   brand: string;
   city?: string;

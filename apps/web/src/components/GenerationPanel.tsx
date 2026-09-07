@@ -14,6 +14,8 @@ export function GenerationPanel({
   canGenerate,
   needsCostConfirm,
   costInr,
+  modelId,
+  modelLabel,
   onGenerated,
 }: {
   brief: Brief;
@@ -22,6 +24,9 @@ export function GenerationPanel({
   canGenerate: boolean;
   needsCostConfirm: boolean;
   costInr: number;
+  /** Which registered model to generate with. */
+  modelId?: string;
+  modelLabel?: string;
   /** Lets the caller record the finished job against a project. */
   onGenerated?: (jobId: string, finalUrl: string | null) => void;
 }) {
@@ -47,7 +52,7 @@ export function GenerationPanel({
     setStatus('running');
     setError('');
     setResult(null);
-    const r = await api.generate(brief, parts, needsCostConfirm ? costInr : undefined);
+    const r = await api.generate(brief, parts, needsCostConfirm ? costInr : undefined, modelId);
     if (isApiError(r)) {
       setStatus('error');
       setError(`${r.code}: ${r.message}`);
@@ -79,7 +84,7 @@ export function GenerationPanel({
     <div className="card">
       <div className="head">
         <h2>Generate &amp; preview</h2>
-        <span className="step">Omni Flash · P0.1 / P0.10</span>
+        <span className="step">{modelLabel ?? 'default model'}</span>
       </div>
       <div className="body tight">
         {needsCostConfirm && status === 'idle' && (

@@ -7,6 +7,7 @@ import { ActorsSection } from './sections/Actors.js';
 import { CarsSection } from './sections/Cars.js';
 import { ClientsSection } from './sections/Clients.js';
 import { InstructionsSection } from './sections/Instructions.js';
+import { ModelsSection } from './sections/Models.js';
 
 export default function App() {
   const { signedIn, section, openProjectId, init } = useApp();
@@ -32,6 +33,7 @@ export default function App() {
       {section === 'cars' && <CarsSection />}
       {section === 'clients' && <ClientsSection />}
       {section === 'instructions' && <InstructionsSection />}
+      {section === 'models' && <ModelsSection />}
       <div className="foot-note">
         Automated use cases call Gemini Omni Flash; presenter-led use cases stop at the master prompt. The
         pronunciation &amp; delivery rulebook is injected into every prompt that contains speech.

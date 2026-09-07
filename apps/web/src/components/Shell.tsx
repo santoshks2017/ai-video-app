@@ -7,6 +7,7 @@ const NAV: { id: Section; label: string; icon: string }[] = [
   { id: 'cars', label: 'Cars', icon: '🚗' },
   { id: 'actors', label: 'Actors', icon: '🎭' },
   { id: 'instructions', label: 'Instructions', icon: '📐' },
+  { id: 'models', label: 'APIs & models', icon: '🔌' },
 ];
 
 export function SignIn() {
@@ -47,52 +48,77 @@ export function SignIn() {
 
 export function Shell({ children }: { children: ReactNode }) {
   const { section, go, signOut, authEnabled, loading, openProjectId } = useApp();
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <div className="app">
-      <div className="topbar">
-        <div className="brand">
+    <div className={`layout${collapsed ? ' collapsed' : ''}`}>
+      <aside className="rail">
+        <div className="rail-brand">
           <div className="mark">AV</div>
-          <div>
-            <h1>AI Video App</h1>
-            <div className="sub">CarDekho dealer ad-slot videos</div>
-          </div>
+          {!collapsed && (
+            <div>
+              <h1>AI Video App</h1>
+              <div className="sub">CarDekho dealer ad-slots</div>
+            </div>
+          )}
         </div>
-        <nav className="nav">
+
+        <nav className="rail-nav">
           {NAV.map((n) => (
             <button
               key={n.id}
               type="button"
-              className={`nav-item${section === n.id && !(n.id === 'projects' && openProjectId) ? ' on' : ''}`}
+              title={n.label}
+              className={`rail-item${
+                section === n.id && !(n.id === 'projects' && openProjectId) ? ' on' : ''
+              }`}
               onClick={() => go(n.id, null)}
             >
-              <span aria-hidden>{n.icon}</span>
-              {n.label}
+              <span className="rail-icon" aria-hidden>
+                {n.icon}
+              </span>
+              {!collapsed && <span className="rail-label">{n.label}</span>}
             </button>
           ))}
         </nav>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {loading && <span className="hint">Loading…</span>}
+
+        <div className="rail-foot">
+          {loading && !collapsed && <div className="hint">Loading…</div>}
           {authEnabled && (
-            <button className="btn ghost small" type="button" onClick={signOut}>
-              Sign out
+            <button className="rail-item" type="button" onClick={signOut} title="Sign out">
+              <span className="rail-icon" aria-hidden>
+                ⏻
+              </span>
+              {!collapsed && <span className="rail-label">Sign out</span>}
             </button>
           )}
+          <button
+            className="rail-item"
+            type="button"
+            onClick={() => setCollapsed((c) => !c)}
+            title={collapsed ? 'Expand' : 'Collapse'}
+          >
+            <span className="rail-icon" aria-hidden>
+              {collapsed ? '▶' : '◀'}
+            </span>
+            {!collapsed && <span className="rail-label">Collapse</span>}
+          </button>
         </div>
-      </div>
+      </aside>
 
-      {!authEnabled && (
-        <div className="check warn" style={{ marginBottom: 14 }}>
-          <span className="icon">!</span>
-          <span>
-            No team password is set, so anyone with this link can generate videos and spend the API budget. Set
-            one with <code>gcloud secrets versions add APP_PASSWORD --project ai-video-app-cd --data-file=-</code>{' '}
-            then redeploy.
-          </span>
-        </div>
-      )}
-
-      {children}
+      <main className="main">
+        {!authEnabled && (
+          <div className="check warn" style={{ marginBottom: 14 }}>
+            <span className="icon">!</span>
+            <span>
+              No team password is set, so anyone with this link can generate videos and spend the API budget. Set
+              one with <code>gcloud secrets versions add APP_PASSWORD --project ai-video-app-cd --data-file=-</code>{' '}
+              then redeploy.
+            </span>
+          </div>
+        )}
+        {children}
+      </main>
     </div>
   );
 }

@@ -121,6 +121,8 @@ export interface GlobalInstruction {
 /* ---------- Projects ---------- */
 
 export interface ProjectVideoSpec {
+  /** Which VideoModelProfile generates this video. Blank = the default model. */
+  modelId?: string;
   durationSec: number;
   maxChunkSec: number;
   aspect: AspectRatio;
@@ -180,3 +182,79 @@ export interface ProjectSummary {
   lastFinalUrl?: string;
   updatedAt: number;
 }
+
+/* ---------- API providers & models ---------- */
+
+export type ProviderKind = 'google-gemini' | 'openai-compatible' | 'replicate' | 'fal' | 'custom';
+
+export interface ApiCredential {
+  id: string;
+  /** Display name, e.g. "Gemini (CarDekho)". */
+  name: string;
+  provider: ProviderKind;
+  /** Base URL for openai-compatible / custom providers. */
+  baseUrl?: string;
+  /**
+   * The key itself is NEVER stored here or sent to the browser — it lives in
+   * Secret Manager (or, as a fallback, a backend-only Firestore doc). This flag
+   * just tells the UI whether one has been saved.
+   */
+  hasKey: boolean;
+  /** Secret Manager secret name holding the key. */
+  secretName?: string;
+  /** Set when this credential reads the deploy-time GOOGLE_API_KEY env var. */
+  usesEnvKey?: boolean;
+  enabled: boolean;
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** What a model can do — drives chunking, the specs UI and cost. */
+export interface VideoModelProfile {
+  id: string;
+  credentialId: string;
+  /** Display name, e.g. "Gemini Omni Flash". */
+  name: string;
+  /** The provider's model identifier, e.g. "gemini-omni-1.1-flash". */
+  modelId: string;
+  minClipSec: number;
+  maxClipSec: number;
+  resolutions: Resolution[];
+  aspects: AspectRatio[];
+  /** Can a still image seed the first frame? (drives multi-segment continuity) */
+  supportsImageToVideo: boolean;
+  supportsReferenceImages: boolean;
+  /** Hard cap the provider enforces on reference images per call. */
+  maxReferenceImages: number;
+  usdPerSecond: number;
+  enabled: boolean;
+  isDefault: boolean;
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** The built-in model, seeded on first run so the app works out of the box. */
+export const OMNI_FLASH_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' | 'createdAt' | 'updatedAt'> = {
+  name: 'Gemini Omni Flash',
+  modelId: 'gemini-omni-1.1-flash',
+  minClipSec: 3,
+  maxClipSec: 10,
+  resolutions: ['720p'],
+  aspects: ['9:16', '16:9'],
+  supportsImageToVideo: true,
+  supportsReferenceImages: true,
+  maxReferenceImages: 2,
+  usdPerSecond: 0.1,
+  enabled: true,
+  isDefault: true,
+};
+
+export const PROVIDER_LABELS: Record<ProviderKind, string> = {
+  'google-gemini': 'Google — Gemini / Veo',
+  'openai-compatible': 'OpenAI-compatible endpoint',
+  replicate: 'Replicate',
+  fal: 'fal.ai',
+  custom: 'Custom HTTP endpoint',
+};

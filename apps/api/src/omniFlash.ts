@@ -34,6 +34,8 @@ export interface GenerateClipInput {
   /** Present for every part after the first — the create call's interaction id. */
   previousInteractionId?: string;
   task: 'text_to_video' | 'reference_to_video' | 'image_to_video' | 'extend';
+  /** Provider model id; defaults to the deploy-time setting. */
+  model?: string;
 }
 
 export interface GeneratedClip {
@@ -99,7 +101,7 @@ function findVideo(obj: unknown): { mimeType: string; data?: string; fileId?: st
 export async function generateClip(input: GenerateClipInput, apiKey: string): Promise<GeneratedClip> {
   if (!apiKey) throw new OmniFlashError('omni-flash-not-configured', 'GOOGLE_API_KEY is not set on the server.', 503);
 
-  const model = process.env.OMNI_FLASH_MODEL || 'gemini-omni-1.1-flash';
+  const model = input.model || process.env.OMNI_FLASH_MODEL || 'gemini-omni-1.1-flash';
   let body: Record<string, unknown>;
 
   if (input.previousInteractionId) {

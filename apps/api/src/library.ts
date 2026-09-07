@@ -8,7 +8,14 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { randomUUID } from 'node:crypto';
 import { ensureFirebase } from './store.js';
 
-export type Collection = 'actors' | 'cars' | 'clients' | 'instructions' | 'projects';
+export type Collection =
+  | 'actors'
+  | 'cars'
+  | 'clients'
+  | 'instructions'
+  | 'projects'
+  | 'credentials'
+  | 'models';
 
 interface Timestamped {
   id: string;
@@ -32,19 +39,20 @@ export async function getOne<T>(name: Collection, id: string): Promise<T | null>
 }
 
 /** Create or replace. Generates an id and stamps timestamps. */
-export async function upsert<T extends Partial<Timestamped>>(
+export async function upsert<T extends Record<string, unknown>>(
   name: Collection,
   body: T,
 ): Promise<T & Timestamped> {
   const now = Date.now();
-  const id = body.id && String(body.id).trim() ? String(body.id) : randomUUID();
-  const existing = body.id ? await getOne<Timestamped>(name, id) : null;
+  const rawId = body.id as string | undefined;
+  const id = rawId && String(rawId).trim() ? String(rawId) : randomUUID();
+  const existing = rawId ? await getOne<Timestamped>(name, id) : null;
   const doc = {
     ...body,
     id,
-    createdAt: existing?.createdAt ?? body.createdAt ?? now,
+    createdAt: existing?.createdAt ?? (body.createdAt as number | undefined) ?? now,
     updatedAt: now,
-  } as T & Timestamped;
+  } as unknown as T & Timestamped;
   await col(name).doc(id).set(stripUndefined(doc));
   return doc;
 }

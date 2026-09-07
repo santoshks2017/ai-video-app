@@ -21,7 +21,7 @@ import { OutputPanel } from '../components/OutputPanel.js';
 import { GenerationPanel } from '../components/GenerationPanel.js';
 
 export function ProjectEditor({ projectId }: { projectId: string }) {
-  const { projects, clients, actors, cars, instructions, refresh, go } = useApp();
+  const { projects, clients, actors, cars, instructions, models, refresh, go } = useApp();
   const stored = projects.find((p) => p.id === projectId);
   const [project, setProject] = useState<Project | null>(stored ?? null);
   const [savedAt, setSavedAt] = useState<number>(0);
@@ -66,9 +66,18 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   );
   const preflight = useMemo(() => (brief ? runChecks(brief) : null), [brief]);
   const promptOnly = project ? isPromptOnly(project.useCases) : false;
+  const activeModel =
+    models.find((m) => m.id === project?.spec.modelId) ??
+    models.find((m) => m.isDefault && m.enabled !== false) ??
+    models.find((m) => m.enabled !== false) ??
+    null;
+
   const cost = useMemo(
-    () => (brief && !promptOnly ? estimateCost(brief) : null),
-    [brief, promptOnly],
+    () =>
+      brief && !promptOnly
+        ? estimateCost(brief, activeModel ? { usdPerSecond: activeModel.usdPerSecond } : {})
+        : null,
+    [brief, promptOnly, activeModel],
   );
 
   if (!project) return <Panel title="Project"><div className="hint">Loading…</div></Panel>;
@@ -233,7 +242,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 <input value={project.spec.music} onChange={(e) => setSpec({ music: e.target.value })} />
               </Field>
             </div>
-            <div className="row3">
+            <div className="row2">
               <Field label="Duration (seconds)">
                 <input
                   type="number"
@@ -241,15 +250,6 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   max={120}
                   value={project.spec.durationSec}
                   onChange={(e) => setSpec({ durationSec: Number(e.target.value) })}
-                />
-              </Field>
-              <Field label="Max seconds per clip" hint="Omni Flash: 3–10s. Longer videos are stitched.">
-                <input
-                  type="number"
-                  min={3}
-                  max={30}
-                  value={project.spec.maxChunkSec}
-                  onChange={(e) => setSpec({ maxChunkSec: Number(e.target.value) })}
                 />
               </Field>
               <Field label="Aspect ratio">
@@ -261,6 +261,47 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   <option value="1:1">Square 1:1</option>
                   <option value="16:9">Horizontal 16:9</option>
                 </select>
+              </Field>
+            </div>
+            <div className="row2">
+              <Field
+                label="Model"
+                hint={
+                  activeModel
+                    ? `${activeModel.minClipSec}–${activeModel.maxClipSec}s per clip · $${activeModel.usdPerSecond}/s`
+                    : 'No models registered — add one in APIs & models.'
+                }
+              >
+                <select
+                  value={project.spec.modelId ?? ''}
+                  onChange={(e) => setSpec({ modelId: e.target.value || undefined })}
+                >
+                  <option value="">Default model</option>
+                  {models
+                    .filter((m) => m.enabled !== false)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                        {m.isDefault ? ' (default)' : ''}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              <Field label="Max seconds per clip" hint={activeModel ? `This model caps at ${activeModel.maxClipSec}s.` : 'Longer videos are split and stitched.'}>
+                <input
+                  type="number"
+                  min={activeModel?.minClipSec ?? 3}
+                  max={activeModel?.maxClipSec ?? 30}
+                  value={project.spec.maxChunkSec}
+                  onChange={(e) =>
+                    setSpec({
+                      maxChunkSec: Math.min(
+                        Number(e.target.value),
+                        activeModel?.maxClipSec ?? Number(e.target.value),
+                      ),
+                    })
+                  }
+                />
               </Field>
             </div>
             <div className="row3">
@@ -426,6 +467,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               canGenerate={preflight.canGenerate}
               needsCostConfirm={!!cost?.needsConfirmation}
               costInr={cost?.inr ?? 0}
+              modelId={project.spec.modelId ?? activeModel?.id}
+              modelLabel={activeModel?.name}
               onGenerated={(jobId, finalUrl) =>
                 set({ status: 'generated', lastJobId: jobId, lastFinalUrl: finalUrl ?? undefined })
               }

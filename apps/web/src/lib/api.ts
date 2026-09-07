@@ -51,10 +51,10 @@ function hydrate(r: GenerateResult): GenerateResult {
 export const api = {
   health: () => fetch(`${BASE}/api/health`).then((r) => r.json()).catch(() => null),
 
-  async generate(brief: Brief, parts: PromptPart[], confirmedCostInr?: number) {
+  async generate(brief: Brief, parts: PromptPart[], confirmedCostInr?: number, modelId?: string) {
     const r = await req<GenerateResult>('/api/generate', {
       method: 'POST',
-      body: JSON.stringify({ brief, parts, confirmedCostInr }),
+      body: JSON.stringify({ brief, parts, confirmedCostInr, modelId }),
     });
     if (isApiError(r)) {
       r.clips = errorClips(r).map((c) => ({ ...c, url: absolute(c.url) }));

@@ -20,6 +20,7 @@ import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './a
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
 import { syncCarModel } from './carSync.js';
 import { importPlace, PlacesError } from './places.js';
+import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './credentials.js';
 
 const config = loadConfig();
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
@@ -67,7 +68,7 @@ app.post<{ Body: { password?: string } }>('/api/session', async (req, reply) => 
 
 /* ============================ library CRUD ============================ */
 
-const COLLECTIONS: Collection[] = ['actors', 'cars', 'clients', 'instructions', 'projects'];
+const COLLECTIONS: Collection[] = ['actors', 'cars', 'clients', 'instructions', 'projects', 'credentials', 'models'];
 
 for (const name of COLLECTIONS) {
   app.get(`/api/${name}`, async () => ({ items: await listAll(name) }));
@@ -100,6 +101,57 @@ for (const name of COLLECTIONS) {
     return { ok: true };
   });
 }
+
+/* ---- provider API keys (write-only from the client) ---- */
+
+app.post<{ Params: { id: string }; Body: { key?: string } }>(
+  '/api/credentials/:id/key',
+  async (req, reply) => {
+    const key = (req.body?.key ?? '').trim();
+    if (!key) return reply.code(400).send({ code: 'bad-request', message: 'key required' });
+    const cred = await getOne<{ id: string }>('credentials', req.params.id);
+    if (!cred) return reply.code(404).send({ code: 'not-found', message: 'No such credential' });
+    await putCredentialKey(req.params.id, key);
+    await patch('credentials', req.params.id, { hasKey: true });
+    return { ok: true, hasKey: true };
+  },
+);
+
+app.delete<{ Params: { id: string } }>('/api/credentials/:id/key', async (req) => {
+  await deleteCredentialKey(req.params.id);
+  await patch('credentials', req.params.id, { hasKey: false });
+  return { ok: true, hasKey: false };
+});
+
+/** Seed the built-in Gemini credential + Omni Flash model on first run. */
+app.post('/api/models/seed', async () => {
+  const existing = await listAll<{ id: string }>('models');
+  if (existing.length) return { seeded: false, models: existing.length };
+  const cred = await upsert('credentials', {
+    name: 'Gemini (deploy key)',
+    provider: 'google-gemini',
+    hasKey: Boolean(config.googleApiKey),
+    usesEnvKey: true,
+    enabled: true,
+    notes: 'Uses the GOOGLE_API_KEY set on the Cloud Run service.',
+  });
+  const model = await upsert('models', {
+    credentialId: cred.id,
+    name: 'Gemini Omni Flash',
+    modelId: config.omniFlashModel,
+    minClipSec: 3,
+    maxClipSec: 10,
+    resolutions: ['720p'],
+    aspects: ['9:16', '16:9'],
+    supportsImageToVideo: true,
+    supportsReferenceImages: true,
+    maxReferenceImages: 2,
+    usdPerSecond: config.usdPerSecond,
+    enabled: true,
+    isDefault: true,
+  });
+  return { seeded: true, credential: cred, model };
+});
 
 /* ---- car library sync: Brand → Model → Variant → Colour ---- */
 app.post<{ Body: { query?: string; refresh?: boolean } }>('/api/cars/sync', async (req, reply) => {
@@ -135,6 +187,62 @@ interface GenerateBody {
   brief: Brief;
   parts: PromptPart[];
   confirmedCostInr?: number;
+  /** VideoModelProfile id. Falls back to the default model, then the deploy key. */
+  modelId?: string;
+}
+
+interface ResolvedModel {
+  modelId: string;
+  apiKey: string;
+  maxReferenceImages: number;
+  usdPerSecond: number;
+  supportsImageToVideo: boolean;
+  label: string;
+}
+
+/** Pick the model for this run and fetch the key it needs. */
+async function resolveModel(requestedId?: string): Promise<ResolvedModel | { error: string; code: string }> {
+  const models = await listAll<Record<string, any>>('models');
+  const chosen =
+    (requestedId && models.find((m) => m.id === requestedId)) ||
+    models.find((m) => m.isDefault && m.enabled !== false) ||
+    models.find((m) => m.enabled !== false);
+
+  // Nothing configured yet — fall back to the deploy-time Gemini setup.
+  if (!chosen) {
+    if (!config.googleApiKey)
+      return { code: 'omni-flash-not-configured', error: 'No model configured and GOOGLE_API_KEY is not set.' };
+    return {
+      modelId: config.omniFlashModel,
+      apiKey: config.googleApiKey,
+      maxReferenceImages: 2,
+      usdPerSecond: config.usdPerSecond,
+      supportsImageToVideo: true,
+      label: config.omniFlashModel,
+    };
+  }
+
+  const cred = await getOne<Record<string, any>>('credentials', chosen.credentialId);
+  if (!cred) return { code: 'credential-missing', error: `Model "${chosen.name}" has no API credential.` };
+  if (cred.provider !== 'google-gemini') {
+    return {
+      code: 'provider-not-implemented',
+      error: `${cred.provider} is registered but its video adapter isn't implemented yet — only Google Gemini generates today.`,
+    };
+  }
+
+  const apiKey = cred.usesEnvKey ? config.googleApiKey : await getCredentialKey(cred.id);
+  if (!apiKey)
+    return { code: 'credential-no-key', error: `No API key saved for "${cred.name}". Add one in APIs & models.` };
+
+  return {
+    modelId: chosen.modelId,
+    apiKey,
+    maxReferenceImages: Number(chosen.maxReferenceImages ?? 2),
+    usdPerSecond: Number(chosen.usdPerSecond ?? config.usdPerSecond),
+    supportsImageToVideo: chosen.supportsImageToVideo !== false,
+    label: chosen.name ?? chosen.modelId,
+  };
 }
 
 /**
@@ -153,11 +261,14 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       .code(422)
       .send({ code: 'prompt-only', message: 'This brief includes a presenter category — it is prompt-only.' });
   }
-  if (!config.googleApiKey) {
-    return reply.code(503).send({ code: 'omni-flash-not-configured', message: 'GOOGLE_API_KEY is not set on the server.' });
+  const picked = await resolveModel(req.body?.modelId);
+  if ('error' in picked) {
+    return reply.code(503).send({ code: picked.code, message: picked.error });
   }
+  // Narrowing doesn't survive into the closures below, so bind it explicitly.
+  const resolved: ResolvedModel = picked;
 
-  const cost = estimateCost(brief, { usdPerSecond: config.usdPerSecond });
+  const cost = estimateCost(brief, { usdPerSecond: resolved.usdPerSecond });
   if (cost.needsConfirmation && (confirmedCostInr ?? 0) < cost.inr) {
     return reply.code(428).send({
       code: 'cost-confirmation-required',
@@ -213,7 +324,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   // All segments are ffmpeg-stitched into one final video.
   async function pull(clip: Awaited<ReturnType<typeof generateClip>>): Promise<Buffer> {
     if (clip.base64) return Buffer.from(clip.base64, 'base64');
-    if (clip.fileId) return (await downloadFile(clip.fileId, config.googleApiKey!)).bytes;
+    if (clip.fileId) return (await downloadFile(clip.fileId, resolved.apiKey)).bytes;
     throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
   }
 
@@ -227,7 +338,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
 
       const refs: OmniRef[] = [];
       let seededFromFrame = false;
-      if (!isFirst && prevBytes) {
+      if (!isFirst && prevBytes && resolved.supportsImageToVideo) {
         const frame = await lastFrame(prevBytes);
         if (frame) {
           refs.push({ data: frame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
@@ -235,8 +346,9 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
         }
       }
       if (seededFromFrame) {
-        // image_to_video caps at 2 images: previous frame + one car reference.
-        if (references[0]) refs.push(references[0]);
+        // image_to_video caps the reference count (2 on Omni Flash): seed frame
+        // + as many car references as the model allows.
+        refs.push(...references.slice(0, Math.max(0, resolved.maxReferenceImages - 1)));
       } else {
         refs.push(...references); // part 1: all brief refs (reference_to_video)
       }
@@ -252,8 +364,9 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
             : refs.length
               ? 'reference_to_video'
               : 'text_to_video',
+          model: resolved.modelId,
         },
-        config.googleApiKey,
+        resolved.apiKey,
       );
 
       const bytes = await pull(clip);

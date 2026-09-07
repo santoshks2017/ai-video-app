@@ -140,7 +140,12 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
           seededFromFrame = true;
         }
       }
-      refs.push(...references); // brief attachments (dealer / car-model / logo)
+      if (seededFromFrame) {
+        // image_to_video caps at 2 images: previous frame + one car reference.
+        if (references[0]) refs.push(references[0]);
+      } else {
+        refs.push(...references); // part 1: all brief refs (reference_to_video)
+      }
 
       const clip = await generateClip(
         {

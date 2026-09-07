@@ -71,13 +71,22 @@ jobs:
             --set-secrets "GOOGLE_API_KEY=GOOGLE_API_KEY:${{ vars.GOOGLE_API_KEY_VERSION }}" \
             --set-env-vars "ALLOW_ORIGIN=https://${{ vars.FIREBASE_PROJECT_ID }}.web.app" \
             --quiet
+          RUN_URL=$(gcloud run services describe ava-api \
+            --project "${{ vars.GCP_PROJECT_ID }}" --region "${{ vars.GCP_REGION }}" \
+            --format 'value(status.url)')
+          echo "VITE_API_URL=$RUN_URL" >> "$GITHUB_ENV"
+          echo "Frontend will call the API directly at $RUN_URL"
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Build the frontend to call Cloud Run directly — Firebase Hosting caps
+      # requests at 60s, which is too short for a multi-part generation.
       - run: npm run build --workspace @ava/shared && npm run build --workspace @ava/web
+        env:
+          VITE_API_URL: ${{ env.VITE_API_URL }}
 
       - name: Deploy frontend + rules (Firebase)
         run: |

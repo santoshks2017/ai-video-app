@@ -16,6 +16,8 @@ export interface ClipView {
   end: number;
   status: 'pending' | 'done' | 'failed';
   error?: string;
+  /** The cumulative last clip = the whole finished video. */
+  isFinal?: boolean;
   url: string | null;
 }
 

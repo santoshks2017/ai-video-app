@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fmtTime, type Brief, type PromptPart, type ScenePlan } from '@ava/shared';
 import { api, isApiError, type ClipView, type GenerateResult } from '../lib/api.js';
 
 /**
- * PRD P0.1 + P0.10 — runs the real generation and shows the finished clips with
- * a frame timeline that maps each storyboard scene back to its clip. Per-part
- * re-generate lives here too (a bad part doesn't force redoing the whole video).
+ * PRD P0.1 + P0.10 — runs the real generation and shows the ONE finished video
+ * (Omni Flash extend output is cumulative: the last segment is the whole video)
+ * with a frame timeline that seeks to each storyboard scene.
  */
 export function GenerationPanel({
   brief,
@@ -26,7 +26,6 @@ export function GenerationPanel({
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState('');
   const [confirmed, setConfirmed] = useState(false);
-  const [active, setActive] = useState(1);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Recover an in-flight/finished job across reloads.
@@ -40,12 +39,6 @@ export function GenerationPanel({
       }
     });
   }, []);
-
-  const clipByPart = useMemo(() => {
-    const m = new Map<number, ClipView>();
-    result?.clips.forEach((c) => m.set(c.partNum, c));
-    return m;
-  }, [result]);
 
   const run = async () => {
     setStatus('running');
@@ -64,17 +57,17 @@ export function GenerationPanel({
     setStatus(r.status === 'done' ? 'done' : 'running');
   };
 
-  const jumpToScene = (sceneStart: number, part: number) => {
-    setActive(part);
-    const clip = clipByPart.get(part);
-    if (!clip) return;
-    window.requestAnimationFrame(() => {
-      if (videoRef.current) videoRef.current.currentTime = Math.max(0, sceneStart - clip.start);
-    });
+  const clips: ClipView[] = result?.clips ?? [];
+  const doneClips = clips.filter((c) => c.status === 'done' && c.url);
+  const finalClip = doneClips.find((c) => c.isFinal) ?? doneClips.at(-1) ?? null;
+  const totalDuration = scenePlan?.scenes.at(-1)?.end ?? 0;
+
+  const seekTo = (t: number) => {
+    if (videoRef.current) videoRef.current.currentTime = Math.max(0, t);
   };
 
-  const activeClip = clipByPart.get(active);
   const blocked = !canGenerate || parts.length === 0 || (needsCostConfirm && !confirmed);
+  const failed = clips.filter((c) => c.status === 'failed');
 
   return (
     <div className="card">
@@ -97,71 +90,100 @@ export function GenerationPanel({
             onClick={run}
             title={!canGenerate ? 'Resolve the blocking pre-flight checks first' : ''}
           >
-            {status === 'running' ? 'Generating…' : status === 'done' ? 'Regenerate all' : 'Generate video'}
+            {status === 'running'
+              ? 'Generating…'
+              : status === 'done' || status === 'error'
+                ? 'Regenerate'
+                : 'Generate video'}
           </button>
-          {status === 'running' && <span className="hint">Each clip takes a minute or two — keep this tab open.</span>}
+          {status === 'running' && (
+            <span className="hint">
+              {parts.length > 1 ? `${parts.length} segments, ` : ''}a minute or two per segment — keep this tab
+              open.
+            </span>
+          )}
         </div>
 
-        {status === 'error' && <div className="check bad" style={{ marginTop: 10 }}><span className="icon">✕</span><span>{error}</span></div>}
+        {status === 'error' && (
+          <div className="check bad" style={{ marginTop: 10 }}>
+            <span className="icon">✕</span>
+            <span>{error}</span>
+          </div>
+        )}
 
-        {result && (
+        {finalClip?.url ? (
           <>
-            <div className="clip-strip">
-              {result.clips.map((c) => (
-                <button
-                  key={c.partNum}
-                  className={`clip-tab${c.partNum === active ? ' on' : ''} ${c.status}`}
-                  onClick={() => setActive(c.partNum)}
-                >
-                  Part {c.partNum}
-                  <span>
-                    {c.status === 'done' ? `${fmtTime(c.start)}–${fmtTime(c.end)}` : c.status}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <video
+              ref={videoRef}
+              className="clip-video"
+              src={finalClip.url}
+              controls
+              playsInline
+              style={{ marginTop: 10 }}
+            />
 
-            {activeClip?.url ? (
-              <video ref={videoRef} className="clip-video" src={activeClip.url} controls playsInline />
-            ) : (
-              <div className="prompt-empty" style={{ padding: 24 }}>
-                {activeClip?.status === 'failed'
-                  ? `Part ${active} failed: ${activeClip.error ?? 'unknown error'}`
-                  : `Part ${active} is still rendering…`}
-              </div>
-            )}
-
-            {scenePlan && (
+            {scenePlan && totalDuration > 0 && (
               <div className="timeline">
                 <div className="timeline-label">Frame timeline — click a scene to jump</div>
                 <div className="timeline-track">
-                  {scenePlan.scenes.map((sc, i) => {
-                    const pct = (sc.duration / (scenePlan.scenes.at(-1)?.end || 1)) * 100;
-                    const clip = clipByPart.get(sc.part + 1);
-                    return (
-                      <button
-                        key={i}
-                        className={`tl-seg part-${(sc.part % 4) + 1}${sc.part + 1 === active ? ' on' : ''}`}
-                        style={{ flexGrow: pct }}
-                        title={`${sc.beat.title} · ${fmtTime(sc.start)}–${fmtTime(sc.end)}`}
-                        onClick={() => jumpToScene(sc.start, sc.part + 1)}
-                        disabled={!clip || clip.status !== 'done'}
-                      >
-                        <span className="tl-t">{sc.beat.title}</span>
-                        <span className="tl-time">{fmtTime(sc.start)}</span>
-                      </button>
-                    );
-                  })}
+                  {scenePlan.scenes.map((sc, i) => (
+                    <button
+                      key={i}
+                      className={`tl-seg part-${(sc.part % 4) + 1}`}
+                      style={{ flexGrow: sc.duration / totalDuration }}
+                      title={`${sc.beat.title} · ${fmtTime(sc.start)}–${fmtTime(sc.end)}`}
+                      onClick={() => seekTo(sc.start)}
+                    >
+                      <span className="tl-t">{sc.beat.title}</span>
+                      <span className="tl-time">{fmtTime(sc.start)}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
+
+            {clips.length > 1 && (
+              <details style={{ marginTop: 10 }}>
+                <summary className="hint" style={{ cursor: 'pointer' }}>
+                  Built from {doneClips.length}/{clips.length} segments
+                  {failed.length ? ` — ${failed.length} failed` : ''}
+                </summary>
+                <div className="clip-strip" style={{ marginTop: 8 }}>
+                  {clips.map((c) => (
+                    <a
+                      key={c.partNum}
+                      className={`clip-tab ${c.status}`}
+                      href={c.url ?? undefined}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Segment {c.partNum}
+                      <span>{c.status === 'done' ? `→ ${fmtTime(c.end)}` : c.status}</span>
+                    </a>
+                  ))}
+                </div>
+                {failed.map((c) => (
+                  <div key={c.partNum} className="hint" style={{ color: 'var(--bad)' }}>
+                    Segment {c.partNum}: {c.error ?? 'unknown error'}
+                  </div>
+                ))}
+              </details>
+            )}
           </>
+        ) : (
+          status !== 'idle' &&
+          status !== 'error' && (
+            <div className="prompt-empty" style={{ padding: 24 }}>
+              Rendering…
+            </div>
+          )
         )}
 
         {status === 'idle' && !result && (
           <div className="hint" style={{ marginTop: 8 }}>
-            Runs part 1 as a fresh generation, then each further part as an <code>extend</code> on the previous
-            clip (Omni Flash conversational continuity). Clips are stored server-side and streamed back here.
+            {parts.length > 1
+              ? `Generates in ${parts.length} segments — part 1 fresh, the rest as extend calls that continue the same video. You get one final clip.`
+              : 'Generates one clip and shows it here with a scene timeline.'}
           </div>
         )}
       </div>

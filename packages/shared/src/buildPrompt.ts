@@ -282,6 +282,44 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       L.push(rulebookText(actor.gender));
     }
 
+    // Compact continuation prompt for parts 2+ (Omni Flash multi-turn extend:
+    // a short instruction on top of previous_interaction_id context, NOT a
+    // second full standalone prompt — that makes the model restart).
+    const C: string[] = [];
+    C.push(
+      `Continue this video by about ${partDuration} more seconds. The scene continues from the last frame — do NOT cut back to the start or restart.`,
+    );
+    C.push(
+      mode.onCameraPerson
+        ? 'Keep the exact same presenter (same face, hair, wardrobe), the same car, the same showroom, lighting, colour grade and camera language as the video so far.'
+        : 'Keep the exact same car, showroom, lighting, colour grade and camera language as the video so far.',
+    );
+    C.push('');
+    C.push('Add these scenes next:');
+    scenes.forEach((sc, i) => {
+      const ov = overrides[String(plan.scenes.indexOf(sc))] ?? {};
+      C.push(`Scene ${i + 1} (~${sc.duration}s) — ${sc.beat.title}`);
+      const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
+      if (ov.shot?.trim() || baseShot) C.push(`  Shot: ${ov.shot?.trim() || baseShot}`);
+      const d = ov.dialogue?.trim() || sc.beat.dialogue;
+      if (d) {
+        C.push(
+          mode.speaks
+            ? `  Spoken (Hindi/Hinglish, ~${wordBudget(sc.duration)} words): ${d}`
+            : `  Told visually, no speech: ${d}`,
+        );
+      }
+      if (sc.beat.card) C.push(`  On-screen card: "${sc.beat.card}"${sc.beat.cardSub ? ` / "${sc.beat.cardSub}"` : ''}`);
+      (sc.beat.cardLines ?? []).forEach((line) => C.push(`  On-screen line: "${line}"`));
+    });
+    const contStrings = collectStrings(scenes, '');
+    if (contStrings.length) {
+      C.push('');
+      C.push(`Render on-screen text spelled exactly: ${contStrings.map((x) => `"${x}"`).join(', ')}.`);
+    }
+    if (mode.speaks) C.push('Same Hindi/Hinglish pronunciation and delivery rules as the earlier parts.');
+    if (isLast) C.push('This is the final segment — end cleanly on the last scene.');
+
     partsOut.push({
       partNum: p + 1,
       totalParts,
@@ -291,6 +329,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       isFirst,
       isLast,
       text: L.join('\n'),
+      continuationText: C.join('\n'),
     });
   }
 

@@ -99,22 +99,31 @@ function findVideo(obj: unknown): { mimeType: string; data?: string; fileId?: st
 export async function generateClip(input: GenerateClipInput, apiKey: string): Promise<GeneratedClip> {
   if (!apiKey) throw new OmniFlashError('omni-flash-not-configured', 'GOOGLE_API_KEY is not set on the server.', 503);
 
-  const body: Record<string, unknown> = {
-    model: process.env.OMNI_FLASH_MODEL || 'gemini-omni-1.1-flash',
-    input: buildInput(input.prompt, input.references),
-    response_format: {
-      type: 'video',
-      aspect_ratio: input.aspect === '1:1' ? '16:9' : input.aspect,
-      resolution: input.resolution,
-      delivery: 'uri',
-    },
-  };
+  const model = process.env.OMNI_FLASH_MODEL || 'gemini-omni-1.1-flash';
+  let body: Record<string, unknown>;
+
   if (input.previousInteractionId) {
-    // A follow-up turn: the extend/edit intent is implied by the prior interaction.
-    // The API rejects an explicit video_config.task together with previous_interaction_id.
-    body.previous_interaction_id = input.previousInteractionId;
+    // Follow-up / extend turn — keep it minimal (docs: model + previous_interaction_id
+    // + input only). Adding response_format / generation_config here makes the model
+    // restart instead of continuing, and it rejects an explicit video task alongside
+    // previous_interaction_id. The output is cumulative: the whole video so far.
+    body = {
+      model,
+      previous_interaction_id: input.previousInteractionId,
+      input: input.prompt,
+    };
   } else {
-    body.generation_config = { video_config: { task: input.task } };
+    body = {
+      model,
+      input: buildInput(input.prompt, input.references),
+      response_format: {
+        type: 'video',
+        aspect_ratio: input.aspect === '1:1' ? '16:9' : input.aspect,
+        resolution: input.resolution,
+        delivery: 'uri',
+      },
+      generation_config: { video_config: { task: input.task } },
+    };
   }
 
   const res = await fetch(`${BASE}/interactions`, {

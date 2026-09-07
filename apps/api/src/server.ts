@@ -119,7 +119,9 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       const isFirst = i === 0;
       const clip = await generateClip(
         {
-          prompt: part.text,
+          // Part 1: full standalone prompt. Parts 2+: the compact continuation
+          // instruction on top of previous_interaction_id context.
+          prompt: isFirst ? part.text : part.continuationText || part.text,
           aspect: brief.aspect,
           resolution: RES,
           references: isFirst && references.length ? references : undefined,
@@ -182,6 +184,9 @@ app.get<{ Params: { jobId: string; part: string } }>('/api/clips/:jobId/:part', 
 });
 
 function clipsForClient(jobId: string, clips: JobClip[]) {
+  // Omni Flash extend output is cumulative — the last successful clip is the
+  // whole finished video.
+  const lastDone = [...clips].reverse().find((c) => c.status === 'done');
   return clips.map((c) => ({
     partNum: c.partNum,
     totalParts: c.totalParts,
@@ -190,6 +195,7 @@ function clipsForClient(jobId: string, clips: JobClip[]) {
     end: c.end,
     status: c.status,
     error: c.error,
+    isFinal: c === lastDone,
     url: c.status === 'done' ? `/api/clips/${jobId}/${c.partNum}` : null,
   }));
 }

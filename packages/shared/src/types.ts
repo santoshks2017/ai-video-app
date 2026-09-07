@@ -194,7 +194,10 @@ export interface PromptPart {
   duration: number;
   isFirst: boolean;
   isLast: boolean;
+  /** Full standalone master prompt — used for part 1 (or single-part videos). */
   text: string;
+  /** Compact "continue by N seconds" instruction — used for parts 2+ on the extend call. */
+  continuationText: string;
 }
 
 export type CheckLevel = 'ok' | 'warn' | 'bad';

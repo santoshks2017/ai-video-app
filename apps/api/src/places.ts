@@ -5,14 +5,26 @@
  * the place, pulls name / address / phone / website, and downloads up to a few
  * photos into the reference-image store so they can ground a generation.
  *
- * Uses the same GOOGLE_API_KEY; the Places API must be enabled on the project.
+ * Authenticates as the Cloud Run runtime service account (ADC) — the Places API
+ * rejects API keys of the Gemini `AQ.` form, and OAuth means there is no extra
+ * key to store or rotate. The Places API must be enabled on the project.
  */
 
+import { GoogleAuth } from 'google-auth-library';
 import { putRef } from './store.js';
 import type { StoredImage } from '@ava/shared';
 
 const SEARCH = 'https://places.googleapis.com/v1/places:searchText';
 const DETAILS = 'https://places.googleapis.com/v1/places';
+const PROJECT = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.GCP_PROJECT ?? 'ai-video-app-cd';
+
+let auth: GoogleAuth | undefined;
+async function authHeaders(): Promise<Record<string, string>> {
+  auth ??= new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+  const token = await auth.getAccessToken();
+  if (!token) throw new PlacesError('places-no-credentials', 'No service-account credentials available.', 503);
+  return { authorization: `Bearer ${token}`, 'X-Goog-User-Project': PROJECT };
+}
 
 export interface PlaceImport {
   placeId: string;
@@ -56,9 +68,8 @@ export function queryFromUrl(url: string): string | undefined {
 
 export async function importPlace(
   input: { url?: string; query?: string; maxPhotos?: number },
-  apiKey: string,
 ): Promise<PlaceImport> {
-  if (!apiKey) throw new PlacesError('places-not-configured', 'GOOGLE_API_KEY is not set.', 503);
+  const headers = await authHeaders();
 
   const url = input.url?.trim() ?? '';
   const explicitId = url ? placeIdFromUrl(url) : undefined;
@@ -75,11 +86,7 @@ export async function importPlace(
     }
     const res = await fetch(SEARCH, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'places.id,places.displayName',
-      },
+      headers: { ...headers, 'content-type': 'application/json', 'X-Goog-FieldMask': 'places.id,places.displayName' },
       body: JSON.stringify({ textQuery: query, maxResultCount: 1 }),
     });
     const json = (await res.json().catch(() => ({}))) as Record<string, any>;
@@ -106,7 +113,7 @@ export async function importPlace(
     'photos',
   ].join(',');
   const dRes = await fetch(`${DETAILS}/${placeId}`, {
-    headers: { 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': fields },
+    headers: { ...headers, 'X-Goog-FieldMask': fields },
   });
   const d = (await dRes.json().catch(() => ({}))) as Record<string, any>;
   if (!dRes.ok) {
@@ -131,7 +138,7 @@ export async function importPlace(
     try {
       const media = await fetch(
         `https://places.googleapis.com/v1/${ref}/media?maxWidthPx=1600&skipHttpRedirect=true`,
-        { headers: { 'X-Goog-Api-Key': apiKey } },
+        { headers },
       );
       const mj = (await media.json().catch(() => ({}))) as Record<string, any>;
       const uri = mj?.photoUri;

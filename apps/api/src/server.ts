@@ -118,10 +118,7 @@ app.post<{ Body: { query?: string; refresh?: boolean } }>('/api/cars/sync', asyn
 /* ---- client import from a Google Business Profile link ---- */
 app.post<{ Body: { url?: string; query?: string } }>('/api/clients/gmb', async (req, reply) => {
   try {
-    const out = await importPlace(
-      { url: req.body?.url, query: req.body?.query, maxPhotos: 4 },
-      config.googleApiKey ?? '',
-    );
+    const out = await importPlace({ url: req.body?.url, query: req.body?.query, maxPhotos: 4 });
     return out;
   } catch (e) {
     const err = e as PlacesError;

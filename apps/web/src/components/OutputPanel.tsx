@@ -19,6 +19,8 @@ export function OutputPanel({
   promptOnly: boolean;
 }) {
   const [toast, setToast] = useState('');
+  // Accordion: at most one prompt part open at a time, all collapsed by default.
+  const [openPart, setOpenPart] = useState<number | null>(null);
 
   const copy = async (text: string, label: string) => {
     try {
@@ -86,21 +88,44 @@ export function OutputPanel({
           Pick your categories and fill in the dealer details to see the storyboard and master prompt.
         </div>
       ) : (
-        parts.map((p) => (
-          <div className="prompt-part" key={p.partNum}>
-            <div className="ph">
-              <span>
-                {p.totalParts > 1 ? `Part ${p.partNum} / ${p.totalParts}` : 'Master prompt'} · {p.duration}s
-                {p.isFirst ? ' · create' : ' · extend'}
-                {p.isLast && p.totalParts > 1 ? ' · final' : ''}
-              </span>
-              <button className="btn ghost small" onClick={() => copy(p.text, `Part ${p.partNum}`)}>
-                Copy
-              </button>
+        parts.map((p) => {
+          const open = openPart === p.partNum;
+          return (
+            <div className={`prompt-part${open ? ' open' : ''}`} key={p.partNum}>
+              <div
+                className="ph"
+                role="button"
+                tabIndex={0}
+                onClick={() => setOpenPart(open ? null : p.partNum)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setOpenPart(open ? null : p.partNum);
+                  }
+                }}
+              >
+                <span>
+                  <span className="ph-caret" aria-hidden>
+                    ▸
+                  </span>
+                  {p.totalParts > 1 ? `Part ${p.partNum} / ${p.totalParts}` : 'Master prompt'} · {p.duration}s
+                  {p.isFirst ? ' · create' : ' · continue'}
+                  {p.isLast && p.totalParts > 1 ? ' · final' : ''}
+                </span>
+                <button
+                  className="btn ghost small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    copy(p.text, `Part ${p.partNum}`);
+                  }}
+                >
+                  Copy
+                </button>
+              </div>
+              {open && <pre>{p.text}</pre>}
             </div>
-            <pre>{p.text}</pre>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );

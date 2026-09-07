@@ -112,41 +112,64 @@ export function planScenes(
     return w;
   });
   const weightSum = weights.reduce((a, b) => a + b, 0);
-  // No single scene may exceed the model's per-clip cap.
-  const durations = weights.map((w) => Math.min(maxChunk, (w / weightSum) * totalDuration));
+  const durations = weights.map((w) => (w / weightSum) * totalDuration);
 
-  // --- 3. SPLIT: as few segments as the per-clip cap allows, balanced by time.
-  //     Fewer segments means fewer paid calls and fewer cuts to hide. ---
-  const parts = Math.max(1, Math.min(fitted.length, Math.ceil(totalDuration / maxChunk)));
-  const partDuration = totalDuration / parts;
-
-  const groups: number[][] = Array.from({ length: parts }, () => []);
-  let running = 0;
-  fitted.forEach((_, i) => {
-    // Place a scene in the part its midpoint falls into, so parts stay even.
-    const mid = running + durations[i]! / 2;
-    const slot = Math.min(parts - 1, Math.floor(mid / partDuration));
-    groups[slot]!.push(i);
-    running += durations[i]!;
-  });
-  // A part must not be empty — pull a scene forward from the next one.
-  for (let p = 0; p < parts; p++) {
-    if (groups[p]!.length === 0) {
-      const donor = groups.slice(p + 1).find((g) => g.length > 1);
-      if (donor) groups[p]!.push(donor.shift()!);
+  // No single scene may exceed the model's per-clip cap. Anything clamped hands
+  // its overflow back to the scenes that still have headroom.
+  let overflow = 0;
+  for (let i = 0; i < durations.length; i++) {
+    if (durations[i]! > maxChunk) {
+      overflow += durations[i]! - maxChunk;
+      durations[i] = maxChunk;
+    }
+  }
+  if (overflow > 0.01) {
+    const headroom = durations.map((d) => Math.max(0, maxChunk - d));
+    const totalHeadroom = headroom.reduce((a, b) => a + b, 0);
+    if (totalHeadroom > 0) {
+      for (let i = 0; i < durations.length; i++) {
+        durations[i] = durations[i]! + (headroom[i]! / totalHeadroom) * Math.min(overflow, totalHeadroom);
+      }
     }
   }
 
-  // Rescale each part's scenes to fill exactly partDuration, so every segment
-  // is the same length and lands under the model's cap.
+  // --- 3. BUCKET whole scenes into segments. A scene is never split across a
+  //     segment boundary, so nothing is cut mid-action; segments vary in length,
+  //     filling up to the model's cap.
+  //     Two scenes that together overrun the cap only slightly are kept in one
+  //     segment and trimmed to fit — a 2% squeeze is imperceptible, whereas
+  //     spilling them into another segment costs a paid call and an extra cut.
+  const SQUEEZE = 1.09;
+  const groups: number[][] = [];
+  let current: number[] = [];
+  let currentLen = 0;
+  for (let i = 0; i < fitted.length; i++) {
+    const d = durations[i]!;
+    if (current.length && currentLen + d > maxChunk * SQUEEZE) {
+      groups.push(current);
+      current = [];
+      currentLen = 0;
+    }
+    current.push(i);
+    currentLen += d;
+  }
+  if (current.length) groups.push(current);
+
+  // Bring any squeezed segment back under the hard cap.
+  for (const g of groups) {
+    const len = g.reduce((a, i) => a + durations[i]!, 0);
+    if (len > maxChunk) {
+      const scale = maxChunk / len;
+      for (const i of g) durations[i] = durations[i]! * scale;
+    }
+  }
+
   const scenes: Scene[] = [];
   let clock = 0;
-  groups.filter((g) => g.length).forEach((group, gi) => {
-    const groupTotal = group.reduce((a, i) => a + durations[i]!, 0) || 1;
-    const scale = partDuration / groupTotal;
+  groups.forEach((group, gi) => {
     const partStart = clock;
     for (const i of group) {
-      const dur = durations[i]! * scale;
+      const dur = durations[i]!;
       scenes.push({
         beat: fitted[i]!,
         part: gi,
@@ -158,6 +181,7 @@ export function planScenes(
       clock += dur;
     }
   });
+  const partDuration = groups.length ? clock / groups.length : 0;
 
   const usedParts = new Set(scenes.map((x) => x.part)).size;
   return { parts: usedParts, partDuration: round1(partDuration), scenes, droppedBeats };

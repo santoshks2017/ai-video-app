@@ -916,3 +916,10 @@ code {
 .collapse-body > .card { border: none; box-shadow: none; margin: 0; border-radius: 0; }
 .collapse-body > .card > .head { background: transparent; padding-left: 0; padding-right: 0; }
 .collapse-body > .card > .body { padding-left: 0; padding-right: 0; }
+
+/* Prompt parts behave as an accordion — one open at a time. */
+.prompt-part .ph { cursor: pointer; user-select: none; }
+.prompt-part .ph:hover { background: var(--surface); }
+.ph-caret { display: inline-block; margin-right: 7px; transition: transform 0.12s; color: var(--ink-faint); }
+.prompt-part.open .ph-caret { transform: rotate(90deg); }
+.prompt-part.open { border-color: var(--accent); }

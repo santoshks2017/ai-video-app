@@ -57,6 +57,11 @@ Approach: NO extend — each segment an independent `create`; segments 2+ seeded
 - `/api/health?deep=1` confirms the container toolchain — ffmpeg present, footer/end-card art rasterises, `textRendered: true` proves fonts loaded.
 - NOTE: the three pre-history test generations (~₹714) aren't attributed to any project.
 
+## Done (overlay layout + client identity, 2026-09-08)
+- Text layout pass in `post.ts`: `textUnits`/`measure`/`wrap`/`fitText`/`tspans`. Footer ≤2 lines, end-card name ≤3, address ≤2, each with its own min size; an over-long single word falls back to `textLength`. End card laid out as a measured, vertically-centred stack.
+- `ClientProfile.displayName` (+ `suggestDisplayName()`, GMB pre-fill) and `ClientProfile.footerText` (+ `defaultFooterText()`, Suggest button, live preview). `composeBrief` uses displayName for the on-screen dealer identity and the client's footerText for the strip.
+- Verified live: `/api/health?deep=1` reports footer 720x69 (adaptive height), `textRendered: true`.
+
 ## Next steps
 - Test on Cloud Run: (a) a multi-part video (~24s, maxChunk 8 → 3 parts) to exercise `extend` + whether `previous_interaction_id` carries visual continuity; (b) a model-specific brief → Fetch from CarDekho → generate, and eyeball whether the reference images actually steer the car design.
 - Judge first-time-right quality vs the storyboard intent (>90% target); tune prompt assembly.

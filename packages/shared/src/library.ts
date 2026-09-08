@@ -204,7 +204,13 @@ export interface ProjectSummary {
 
 /* ---------- API providers & models ---------- */
 
-export type ProviderKind = 'google-gemini' | 'openai-compatible' | 'replicate' | 'fal' | 'custom';
+export type ProviderKind =
+  | 'google-gemini'
+  | 'byteplus-ark'
+  | 'openai-compatible'
+  | 'replicate'
+  | 'fal'
+  | 'custom';
 
 export interface ApiCredential {
   id: string;
@@ -270,8 +276,57 @@ export const OMNI_FLASH_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' 
   isDefault: true,
 };
 
+/**
+ * Dreamina Seedance, on BytePlus ModelArk.
+ *
+ * The headline difference from Omni Flash is clip length: 2.5 generates up to
+ * 30 seconds in a single pass with native audio, so most dealer videos come out
+ * of one call with no stitching and no cross-segment drift at all. Prices are
+ * BytePlus list at 720p and are editable per model — check them before a big run.
+ * Docs: https://docs.byteplus.com/en/docs/ModelArk/2607688
+ */
+export const SEEDANCE_25_DEFAULTS: Omit<
+  VideoModelProfile,
+  'id' | 'credentialId' | 'createdAt' | 'updatedAt'
+> = {
+  name: 'Dreamina Seedance 2.5',
+  modelId: 'dreamina-seedance-2-5-260628',
+  minClipSec: 4,
+  maxClipSec: 30,
+  resolutions: ['720p'],
+  aspects: ['9:16', '1:1', '16:9'],
+  supportsImageToVideo: true,
+  supportsReferenceImages: true,
+  // 30 images per request; we never send anywhere near that.
+  maxReferenceImages: 8,
+  usdPerSecond: 0.2312,
+  enabled: true,
+  isDefault: false,
+  notes: '30s in one call, native audio. Speech languages do not include Hindi.',
+};
+
+export const SEEDANCE_20_FAST_DEFAULTS: Omit<
+  VideoModelProfile,
+  'id' | 'credentialId' | 'createdAt' | 'updatedAt'
+> = {
+  name: 'Dreamina Seedance 2.0 fast',
+  modelId: 'dreamina-seedance-2-0-fast-260128',
+  minClipSec: 4,
+  maxClipSec: 15,
+  resolutions: ['720p'],
+  aspects: ['9:16', '1:1', '16:9'],
+  supportsImageToVideo: true,
+  supportsReferenceImages: true,
+  maxReferenceImages: 6,
+  usdPerSecond: 0.09,
+  enabled: true,
+  isDefault: false,
+  notes: 'Cheapest of the three; 15s per call, 480p/720p only.',
+};
+
 export const PROVIDER_LABELS: Record<ProviderKind, string> = {
   'google-gemini': 'Google — Gemini / Veo',
+  'byteplus-ark': 'BytePlus ModelArk — Dreamina Seedance',
   'openai-compatible': 'OpenAI-compatible endpoint',
   replicate: 'Replicate',
   fal: 'fal.ai',

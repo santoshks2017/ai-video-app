@@ -77,6 +77,20 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     models.find((m) => m.enabled !== false) ??
     null;
 
+  // Clip length is a capability of the model, not a taste decision, so switching
+  // model snaps it to that model's cap. This is what makes picking Seedance 2.5
+  // actually render a 30s video in one call instead of splitting it into four.
+  const modelCap = activeModel?.maxClipSec;
+  const modelFloor = activeModel?.minClipSec;
+  useEffect(() => {
+    if (!project || modelCap == null || modelFloor == null) return;
+    const want = Math.max(modelFloor, modelCap);
+    if (want !== project.spec.maxChunkSec) {
+      set({ spec: { ...project.spec, maxChunkSec: want } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeModel?.id, modelCap, modelFloor]);
+
   const cost = useMemo(
     () =>
       brief && !promptOnly

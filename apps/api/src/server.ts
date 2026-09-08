@@ -11,6 +11,7 @@ import {
 } from '@ava/shared';
 import { loadConfig } from './config.js';
 import { generateClip, downloadFile, OmniFlashError, type OmniRef } from './omniFlash.js';
+import { generateSeedanceClip, testSeedanceKey, SeedanceError, type SeedanceRef } from './seedance.js';
 import {
   saveJob,
   updateJob,
@@ -27,6 +28,12 @@ import { scrapeModel, getCarModel } from './scraper.js';
 import { composeFinal, lastFrame, posterFrame, selfTest, type BrandOverlay } from './post.js';
 import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './auth.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
+import {
+  OMNI_FLASH_DEFAULTS,
+  SEEDANCE_25_DEFAULTS,
+  SEEDANCE_20_FAST_DEFAULTS,
+  type ProviderKind,
+} from '@ava/shared';
 import { syncCarModel } from './carSync.js';
 import { importPlace, PlacesError } from './places.js';
 import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './credentials.js';
@@ -134,34 +141,73 @@ app.delete<{ Params: { id: string } }>('/api/credentials/:id/key', async (req) =
   return { ok: true, hasKey: false };
 });
 
-/** Seed the built-in Gemini credential + Omni Flash model on first run. */
+/** Check a saved key without spending anything on a generation. */
+app.post<{ Params: { id: string } }>('/api/credentials/:id/test', async (req, reply) => {
+  const cred = await getOne<Record<string, any>>('credentials', req.params.id);
+  if (!cred) return reply.code(404).send({ code: 'not-found', message: 'No such credential' });
+  const apiKey = cred.usesEnvKey ? config.googleApiKey : await getCredentialKey(cred.id);
+  if (!apiKey) return { ok: false, detail: 'No key saved for this connection yet.' };
+  if (cred.provider === 'byteplus-ark') return await testSeedanceKey(apiKey);
+  return { ok: true, detail: 'No free connection check for this provider — it is verified on first generate.' };
+});
+
+/**
+ * Register the built-in models. Additive and idempotent: it adds only what is
+ * missing, keyed on the provider's model id, so calling it again after a new
+ * model ships registers that one without disturbing anything already set up.
+ *
+ * BytePlus keys are NOT set here — the connection is created empty and the key
+ * is pasted into APIs & models, which writes it straight to the backend store.
+ */
 app.post('/api/models/seed', async () => {
-  const existing = await listAll<{ id: string }>('models');
-  if (existing.length) return { seeded: false, models: existing.length };
-  const cred = await upsert('credentials', {
+  const creds = await listAll<Record<string, any>>('credentials');
+  const models = await listAll<Record<string, any>>('models');
+  const added: string[] = [];
+
+  const credFor = async (
+    provider: ProviderKind,
+    fields: Record<string, unknown>,
+  ): Promise<{ id: string }> => {
+    const found = creds.find((c) => c.provider === provider);
+    if (found) return found as { id: string };
+    const made = (await upsert('credentials', { provider, ...fields })) as { id: string };
+    creds.push(made as Record<string, any>);
+    added.push(String(fields.name));
+    return made;
+  };
+
+  const addModel = async (
+    credentialId: string,
+    defaults: Record<string, unknown>,
+    extra: Record<string, unknown> = {},
+  ): Promise<void> => {
+    if (models.some((m) => m.modelId === defaults.modelId)) return;
+    await upsert('models', { ...defaults, ...extra, credentialId });
+    added.push(String(defaults.name));
+  };
+
+  const gemini = await credFor('google-gemini', {
     name: 'Gemini (deploy key)',
-    provider: 'google-gemini',
     hasKey: Boolean(config.googleApiKey),
     usesEnvKey: true,
     enabled: true,
     notes: 'Uses the GOOGLE_API_KEY set on the Cloud Run service.',
   });
-  const model = await upsert('models', {
-    credentialId: cred.id,
-    name: 'Gemini Omni Flash',
-    modelId: config.omniFlashModel,
-    minClipSec: 3,
-    maxClipSec: 10,
-    resolutions: ['720p'],
-    aspects: ['9:16', '16:9'],
-    supportsImageToVideo: true,
-    supportsReferenceImages: true,
-    maxReferenceImages: 2,
-    usdPerSecond: config.usdPerSecond,
-    enabled: true,
-    isDefault: true,
+  await addModel(gemini.id, { ...OMNI_FLASH_DEFAULTS, modelId: config.omniFlashModel }, {
+    isDefault: !models.some((m) => m.isDefault),
   });
-  return { seeded: true, credential: cred, model };
+
+  const byteplus = await credFor('byteplus-ark', {
+    name: 'BytePlus ModelArk',
+    hasKey: false,
+    enabled: true,
+    baseUrl: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+    notes: 'Paste the ModelArk API key below — it is stored server-side only.',
+  });
+  await addModel(byteplus.id, SEEDANCE_25_DEFAULTS);
+  await addModel(byteplus.id, SEEDANCE_20_FAST_DEFAULTS);
+
+  return { added, models: await listAll('models'), credentials: await listAll('credentials') };
 });
 
 /* ---- car library sync: Brand → Model → Variant → Colour ---- */
@@ -206,11 +252,14 @@ interface GenerateBody {
 }
 
 interface ResolvedModel {
+  provider: ProviderKind;
   modelId: string;
   apiKey: string;
   maxReferenceImages: number;
   usdPerSecond: number;
   supportsImageToVideo: boolean;
+  minClipSec: number;
+  maxClipSec: number;
   label: string;
 }
 
@@ -227,21 +276,25 @@ async function resolveModel(requestedId?: string): Promise<ResolvedModel | { err
     if (!config.googleApiKey)
       return { code: 'omni-flash-not-configured', error: 'No model configured and GOOGLE_API_KEY is not set.' };
     return {
+      provider: 'google-gemini',
       modelId: config.omniFlashModel,
       apiKey: config.googleApiKey,
       maxReferenceImages: 2,
       usdPerSecond: config.usdPerSecond,
       supportsImageToVideo: true,
+      minClipSec: 3,
+      maxClipSec: 10,
       label: config.omniFlashModel,
     };
   }
 
   const cred = await getOne<Record<string, any>>('credentials', chosen.credentialId);
   if (!cred) return { code: 'credential-missing', error: `Model "${chosen.name}" has no API credential.` };
-  if (cred.provider !== 'google-gemini') {
+  const provider = cred.provider as ProviderKind;
+  if (provider !== 'google-gemini' && provider !== 'byteplus-ark') {
     return {
       code: 'provider-not-implemented',
-      error: `${cred.provider} is registered but its video adapter isn't implemented yet — only Google Gemini generates today.`,
+      error: `${cred.provider} is registered but its video adapter isn't implemented yet — Google Gemini and BytePlus ModelArk generate today.`,
     };
   }
 
@@ -250,13 +303,85 @@ async function resolveModel(requestedId?: string): Promise<ResolvedModel | { err
     return { code: 'credential-no-key', error: `No API key saved for "${cred.name}". Add one in APIs & models.` };
 
   return {
+    provider,
     modelId: chosen.modelId,
     apiKey,
     maxReferenceImages: Number(chosen.maxReferenceImages ?? 2),
     usdPerSecond: Number(chosen.usdPerSecond ?? config.usdPerSecond),
     supportsImageToVideo: chosen.supportsImageToVideo !== false,
+    minClipSec: Number(chosen.minClipSec ?? 3),
+    maxClipSec: Number(chosen.maxClipSec ?? 10),
     label: chosen.name ?? chosen.modelId,
   };
+}
+
+/**
+ * Render one segment on whichever provider the project picked.
+ *
+ * Both adapters take the same thing — a prompt, the brief's aspect, a duration,
+ * optionally the previous segment's closing frame plus the brief's reference
+ * images — and return finished MP4 bytes, so the generate and refine loops stay
+ * provider-agnostic.
+ */
+async function renderSegment(
+  model: ResolvedModel,
+  req: {
+    prompt: string;
+    aspect: Brief['aspect'];
+    duration: number;
+    seedFrame?: Buffer;
+    references: OmniRef[];
+  },
+): Promise<{ bytes: Buffer; interactionId: string }> {
+  const seeded = Boolean(req.seedFrame) && model.supportsImageToVideo;
+
+  if (model.provider === 'byteplus-ark') {
+    const refs: SeedanceRef[] = [];
+    if (seeded) refs.push({ data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', role: 'first_frame' });
+    for (const r of req.references.slice(0, Math.max(0, model.maxReferenceImages - refs.length))) {
+      if (r.data) refs.push({ data: r.data, mimeType: r.mimeType, role: 'reference_image' });
+    }
+    const clip = await generateSeedanceClip(
+      {
+        prompt: req.prompt,
+        model: model.modelId,
+        aspect: req.aspect,
+        resolution: RES,
+        duration: req.duration,
+        minSec: model.minClipSec,
+        maxSec: model.maxClipSec,
+        references: refs.length ? refs : undefined,
+        generateAudio: true,
+      },
+      model.apiKey,
+    );
+    return { bytes: clip.bytes, interactionId: clip.taskId };
+  }
+
+  // Google Gemini (Omni Flash): the seed frame is frame 1, so the model
+  // continues the motion rather than restarting it.
+  const refs: OmniRef[] = [];
+  if (seeded) refs.push({ data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
+  refs.push(...req.references.slice(0, Math.max(0, model.maxReferenceImages - refs.length)));
+
+  const clip = await generateClip(
+    {
+      prompt: req.prompt,
+      aspect: req.aspect,
+      resolution: RES,
+      references: refs.length ? refs : undefined,
+      task: seeded ? 'image_to_video' : refs.length ? 'reference_to_video' : 'text_to_video',
+      model: model.modelId,
+    },
+    model.apiKey,
+  );
+  const bytes = clip.base64
+    ? Buffer.from(clip.base64, 'base64')
+    : clip.fileId
+      ? (await downloadFile(clip.fileId, model.apiKey)).bytes
+      : null;
+  if (!bytes) throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
+  return { bytes, interactionId: clip.interactionId };
 }
 
 /**
@@ -373,16 +498,11 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
 
   const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
 
-  // No `extend` — each segment is an independent `create`, seeded with the
-  // PREVIOUS segment's last frame as a reference image (+ any brief reference
-  // images) so the presenter / car / setting stay identical across the cut.
-  // All segments are ffmpeg-stitched into one final video.
-  async function pull(clip: Awaited<ReturnType<typeof generateClip>>): Promise<Buffer> {
-    if (clip.base64) return Buffer.from(clip.base64, 'base64');
-    if (clip.fileId) return (await downloadFile(clip.fileId, resolved.apiKey)).bytes;
-    throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
-  }
-
+  // No `extend` — each segment is an independent create, seeded with the
+  // PREVIOUS segment's last frame so the presenter / car / setting stay
+  // identical across the cut. All segments are ffmpeg-stitched into one video.
+  // On a model that renders the whole duration in one call (Seedance 2.5 does
+  // 30s) there is only ever one segment, and none of this applies.
   try {
     const segmentBytes: Buffer[] = [];
     let prevBytes: Buffer | null = null;
@@ -390,43 +510,18 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]!;
       const isFirst = i === 0;
+      const seedFrame = !isFirst && prevBytes ? ((await lastFrame(prevBytes)) ?? undefined) : undefined;
 
-      const refs: OmniRef[] = [];
-      let seededFromFrame = false;
-      if (!isFirst && prevBytes && resolved.supportsImageToVideo) {
-        const frame = await lastFrame(prevBytes);
-        if (frame) {
-          refs.push({ data: frame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
-          seededFromFrame = true;
-        }
-      }
-      if (seededFromFrame) {
-        // image_to_video caps the reference count (2 on Omni Flash): seed frame
-        // + as many car references as the model allows.
-        refs.push(...references.slice(0, Math.max(0, resolved.maxReferenceImages - 1)));
-      } else {
-        refs.push(...references); // part 1: all brief refs (reference_to_video)
-      }
+      const { bytes, interactionId } = await renderSegment(resolved, {
+        prompt: isFirst ? part.text : part.continuationText || part.text,
+        aspect: brief.aspect,
+        duration: part.duration,
+        seedFrame,
+        references,
+      });
 
-      const clip = await generateClip(
-        {
-          prompt: isFirst ? part.text : part.continuationText || part.text,
-          aspect: brief.aspect,
-          resolution: RES,
-          references: refs.length ? refs : undefined,
-          task: seededFromFrame
-            ? 'image_to_video' // prev frame is frame 1 → continue the motion
-            : refs.length
-              ? 'reference_to_video'
-              : 'text_to_video',
-          model: resolved.modelId,
-        },
-        resolved.apiKey,
-      );
-
-      const bytes = await pull(clip);
-      const storagePath = await uploadClip(jobId, part.partNum, bytes, clip.mimeType);
-      clips[i] = { ...clips[i]!, interactionId: clip.interactionId, storagePath, status: 'done' };
+      const storagePath = await uploadClip(jobId, part.partNum, bytes, 'video/mp4');
+      clips[i] = { ...clips[i]!, interactionId, storagePath, status: 'done' };
       await updateJob(jobId, { clips });
 
       segmentBytes.push(bytes);
@@ -474,7 +569,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       clips: clipsForClient(jobId, clips),
     };
   } catch (err) {
-    const e = err as OmniFlashError;
+    const e = err as OmniFlashError | SeedanceError;
     const failedIdx = clips.findIndex((c) => c.status === 'pending');
     if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
     await updateJob(jobId, { status: 'failed', error: e.message, clips }).catch(() => {});
@@ -490,7 +585,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     } catch {
       /* ignore */
     }
-    return reply.code(e instanceof OmniFlashError ? e.status : 502).send({
+    return reply.code(e instanceof OmniFlashError || e instanceof SeedanceError ? e.status : 502).send({
       code: e.code ?? 'generate-failed',
       message: e.message,
       jobId,
@@ -651,45 +746,22 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
             reused: true,
           };
         } else {
-          const model = resolved!;
           const isFirst = i === 0;
-          const refs: OmniRef[] = [];
-          let seededFromFrame = false;
           // Seed from whatever now precedes this segment — a re-used clip or a
           // freshly retaken one — so the retake still cuts against its neighbour.
-          if (!isFirst && prevBytes && model.supportsImageToVideo) {
-            const frame = await lastFrame(prevBytes);
-            if (frame) {
-              refs.push({ data: frame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
-              seededFromFrame = true;
-            }
-          }
-          refs.push(
-            ...(seededFromFrame ? references.slice(0, Math.max(0, model.maxReferenceImages - 1)) : references),
-          );
-
-          const clip = await generateClip(
-            {
-              prompt: applyFeedback(isFirst ? part.text : part.continuationText || part.text, feedback),
-              aspect: brief.aspect,
-              resolution: RES,
-              references: refs.length ? refs : undefined,
-              task: seededFromFrame ? 'image_to_video' : refs.length ? 'reference_to_video' : 'text_to_video',
-              model: model.modelId,
-            },
-            model.apiKey,
-          );
-          bytes = clip.base64
-            ? Buffer.from(clip.base64, 'base64')
-            : clip.fileId
-              ? (await downloadFile(clip.fileId, model.apiKey)).bytes
-              : (() => {
-                  throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
-                })();
+          const seedFrame = !isFirst && prevBytes ? ((await lastFrame(prevBytes)) ?? undefined) : undefined;
+          const rendered = await renderSegment(resolved!, {
+            prompt: applyFeedback(isFirst ? part.text : part.continuationText || part.text, feedback),
+            aspect: brief.aspect,
+            duration: part.duration,
+            seedFrame,
+            references,
+          });
+          bytes = rendered.bytes;
           clips[i] = {
             ...clips[i]!,
-            interactionId: clip.interactionId,
-            storagePath: await uploadClip(jobId, part.partNum, bytes, clip.mimeType),
+            interactionId: rendered.interactionId,
+            storagePath: await uploadClip(jobId, part.partNum, bytes, 'video/mp4'),
             status: 'done',
           };
         }
@@ -734,11 +806,11 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         clips: clipsForClient(jobId, clips),
       };
     } catch (err) {
-      const e = err as OmniFlashError;
+      const e = err as OmniFlashError | SeedanceError;
       const failedIdx = clips.findIndex((c) => c.status === 'pending');
       if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
       await updateJob(jobId, { status: 'failed', error: e.message, clips }).catch(() => {});
-      return reply.code(e instanceof OmniFlashError ? e.status : 502).send({
+      return reply.code(e instanceof OmniFlashError || e instanceof SeedanceError ? e.status : 502).send({
         code: e.code ?? 'refine-failed',
         message: e.message,
         jobId,

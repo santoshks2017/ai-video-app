@@ -47,13 +47,32 @@ export function ModelsSection() {
   const [keyInput, setKeyInput] = useState('');
   const [note, setNote] = useState('');
   const [seeding, setSeeding] = useState(false);
+  const [testing, setTesting] = useState(false);
 
-  // First run: create the built-in Gemini credential + Omni Flash model.
+  // First run: create the built-in credentials + models.
   useEffect(() => {
     if (models.length || credentials.length || seeding) return;
     setSeeding(true);
     post('/api/models/seed', {}).then(() => refresh());
   }, [models.length, credentials.length, seeding, refresh]);
+
+  const testKey = async () => {
+    if (!cred?.id) return;
+    setTesting(true);
+    const r = (await post(`/api/credentials/${cred.id}/test`, {})) as { ok?: boolean; detail?: string };
+    setTesting(false);
+    setNote(r?.detail ?? (r?.ok ? 'Key accepted.' : 'Test failed.'));
+  };
+
+  // Seeding is additive, so this also picks up models added after your install.
+  const addBuiltIns = async () => {
+    setSeeding(true);
+    const r = (await post('/api/models/seed', {})) as { added?: string[] };
+    await refresh();
+    setSeeding(false);
+    const added = Array.isArray(r?.added) ? r.added : [];
+    setNote(added.length ? `Added ${added.join(', ')}.` : 'Every built-in model is already registered.');
+  };
 
   const saveCred = async () => {
     if (!cred?.name.trim()) return setNote('Name the API connection first.');
@@ -193,11 +212,18 @@ export function ModelsSection() {
                       placeholder="https://api.example.com/v1"
                     />
                   </Field>
-                  <Banner kind="warn">
-                    Only Google Gemini has a video adapter today. You can register other platforms and their
-                    models now, but generating with them returns a clear "not implemented" until an adapter is
-                    added.
-                  </Banner>
+                  {cred.provider === 'byteplus-ark' ? (
+                    <Banner kind="ok">
+                      Dreamina Seedance runs through this connection. Paste your ModelArk key below, then pick
+                      Seedance as the model on a project.
+                    </Banner>
+                  ) : (
+                    <Banner kind="warn">
+                      Google Gemini and BytePlus ModelArk have video adapters today. You can register other
+                      platforms and their models now, but generating with them returns a clear "not implemented"
+                      until an adapter is added.
+                    </Banner>
+                  )}
                 </>
               )}
 
@@ -223,12 +249,20 @@ export function ModelsSection() {
                       Save key
                     </button>
                     {cred.hasKey && (
-                      <button className="btn ghost small" type="button" onClick={clearKey}>
-                        Remove
-                      </button>
+                      <>
+                        <button className="btn ghost small" type="button" disabled={testing} onClick={testKey}>
+                          {testing ? 'Testing…' : 'Test'}
+                        </button>
+                        <button className="btn ghost small" type="button" onClick={clearKey}>
+                          Remove
+                        </button>
+                      </>
                     )}
                   </div>
                   {!cred.id && <div className="hint">Save the connection first, then add its key.</div>}
+                  {cred.hasKey && (
+                    <div className="hint">Test is a free read — it checks the key without generating anything.</div>
+                  )}
                 </Field>
               )}
 
@@ -257,14 +291,19 @@ export function ModelsSection() {
             title="Video models"
             step={`${models.length}`}
             actions={
-              <button
-                className="btn small"
-                type="button"
-                disabled={!credentials.length}
-                onClick={() => { setModel(blankModel(credentials[0]!.id)); setNote(''); }}
-              >
-                Add model
-              </button>
+              <>
+                <button className="btn small" type="button" disabled={seeding} onClick={addBuiltIns}>
+                  Add built-ins
+                </button>
+                <button
+                  className="btn small"
+                  type="button"
+                  disabled={!credentials.length}
+                  onClick={() => { setModel(blankModel(credentials[0]!.id)); setNote(''); }}
+                >
+                  Add model
+                </button>
+              </>
             }
           >
             <div className="section-desc">

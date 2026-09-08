@@ -572,7 +572,24 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     const e = err as OmniFlashError | SeedanceError;
     const failedIdx = clips.findIndex((c) => c.status === 'pending');
     if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
-    await updateJob(jobId, { status: 'failed', error: e.message, clips }).catch(() => {});
+    // Bill what actually rendered, not what was planned. A run that dies on
+    // segment 2 of 3 was quoted the full duration up front; leaving that
+    // estimate on the record overstates the job in history and the project's
+    // spend total.
+    const billed = clips.filter((c) => c.status === 'done');
+    const spent = estimateSegmentsCost(
+      billed.reduce((a, c) => a + (c.seconds ?? 0), 0),
+      billed.length,
+      { usdPerSecond: resolved.usdPerSecond },
+    );
+    await updateJob(jobId, {
+      status: 'failed',
+      error: e.message,
+      clips,
+      costInr: spent.inr,
+      costUsd: spent.usd,
+      totalSeconds: spent.totalSeconds,
+    }).catch(() => {});
     // Salvage: if at least one run finished, stitch what we have so the user
     // still gets a (shorter) video plus the error.
     let finalUrl: string | undefined;

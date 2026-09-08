@@ -84,8 +84,19 @@ export async function generateSeedanceClip(
   input: SeedanceInput,
   apiKey: string,
 ): Promise<SeedanceClip> {
-  const refs = input.references ?? [];
-  const hasFirstFrame = refs.some((r) => r.role === 'first_frame');
+  const supplied = input.references ?? [];
+  const hasFirstFrame = supplied.some((r) => r.role === 'first_frame' || r.role === 'last_frame');
+
+  // ModelArk rejects a request that mixes the two kinds of input:
+  //   "first/last frame content cannot be mixed with reference media content"
+  // On a continuation segment the seed frame wins. It is what makes the cut
+  // seamless, and being the previous segment's closing frame it already carries
+  // the presenter, the car and the location — so the reference stills it
+  // displaces add little. (Seedance 2.5 fits 30s in one call, where there is no
+  // continuation segment and every reference image is sent.)
+  const refs = hasFirstFrame
+    ? supplied.filter((r) => r.role === 'first_frame' || r.role === 'last_frame')
+    : supplied;
 
   const content: unknown[] = [
     { type: 'text', text: input.prompt },

@@ -160,17 +160,23 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
           return (o?.dialogue ?? '').trim() && !(o?.phonetic ?? '').trim() && sc.beat.dialogue;
         }).length
       : 0;
+    const langName = brief.language?.name ?? 'Hindi';
     if (unscripted) {
+      const spoken = plan.scenes.filter((sc) => sc.beat.dialogue).length;
       checks.push({
         level: 'warn',
         code: 'no-spoken-script',
-        text: `${unscripted} of ${plan.scenes.length} scenes have no written line, so the model composes the Hindi itself — the usual cause of mangled pronunciation. Write the script in the storyboard and it speaks the words instead of inventing them.`,
+        text: `${
+          unscripted >= spoken
+            ? 'No scene has a written line'
+            : `${unscripted} of ${spoken} scenes have no written line`
+        }, so the model has to invent the ${langName} wording itself — the usual cause of mangled pronunciation. Open the storyboard below and press "Write the script": it fills every line and its pronunciation, costs a fraction of a rupee, and you can edit both before generating.`,
       });
     } else if (unspelled) {
       checks.push({
         level: 'warn',
         code: 'no-pronunciation-spelling',
-        text: `${unspelled} scene${unspelled > 1 ? 's have' : ' has'} a written line but no pronunciation spelling. Plain Hindi tells the model which words to say, not where the stress falls or how long the vowels are — which is what makes the delivery sound wrong. Rewrite the script to fill them in.`,
+        text: `${unspelled} scene${unspelled > 1 ? 's have' : ' has'} a written line but no pronunciation spelling. Plain ${langName} tells the model which words to say, not where the stress falls or how long the vowels are — which is what makes the delivery sound wrong. Press "Redo pronunciation" in the storyboard to fill them in without rewriting the copy.`,
       });
     } else {
       checks.push({
@@ -182,7 +188,6 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
 
     const langs = opts.model?.speechLanguages ?? [];
     const code = brief.language?.code ?? 'hi';
-    const langName = brief.language?.name ?? 'Hindi';
     if (langs.length && !langs.some((l) => l.toLowerCase().startsWith(code.toLowerCase().slice(0, 2)))) {
       checks.push({
         level: 'warn',

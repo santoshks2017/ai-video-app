@@ -106,6 +106,17 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeModel?.id, modelCap, modelFloor]);
 
+  // The script is a required step for a good result, and it lives inside the
+  // collapsed storyboard — so a project that is missing one opens it. Latched:
+  // once open it stays open, rather than snapping shut as the script lands.
+  const scriptMissing = Boolean(
+    preflight?.checks.some((c) => c.code === 'no-spoken-script' || c.code === 'no-pronunciation-spelling'),
+  );
+  const [storyboardOpen, setStoryboardOpen] = useState(false);
+  useEffect(() => {
+    if (scriptMissing) setStoryboardOpen(true);
+  }, [scriptMissing]);
+
   /** Fill every spoken scene with a real line, then let the designer edit them. */
   const writeScript = async (): Promise<string> => {
     if (!brief || !project) return 'Fill in the brief first.';
@@ -576,9 +587,14 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           {built?.scenePlan && built.scenePlan.scenes.length > 0 && (
             <Collapse
               title="Storyboard"
-              hint={`${built.scenePlan.scenes.length} scenes · ${built.scenePlan.parts} segment${
-                built.scenePlan.parts > 1 ? 's' : ''
-              } · edit any scene's script or shot`}
+              open={storyboardOpen}
+              hint={
+                scriptMissing
+                  ? 'Needs a script — open and press Write the script'
+                  : `${built.scenePlan.scenes.length} scenes · ${built.scenePlan.parts} segment${
+                      built.scenePlan.parts > 1 ? 's' : ''
+                    } · edit any scene's script or shot`
+              }
             >
               <Storyboard
                 scenePlan={built.scenePlan}

@@ -177,7 +177,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     });
 
   return (
-    <>
+    <div className="editor-page">
       <div className="crumbs">
         <button className="btn ghost small" type="button" onClick={() => go('projects', null)}>
           ← All projects
@@ -666,6 +666,6 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }

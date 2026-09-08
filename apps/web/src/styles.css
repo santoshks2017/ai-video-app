@@ -813,7 +813,7 @@ code {
 .layout {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
   gap: 0;
 }
 .layout.collapsed { grid-template-columns: 64px minmax(0, 1fr); }
@@ -863,7 +863,7 @@ code {
 .layout.collapsed .rail-item { justify-content: center; padding: 9px 0; }
 .layout.collapsed .rail-brand { justify-content: center; padding-left: 0; padding-right: 0; }
 
-.main { padding: 20px 22px 64px; max-width: 1420px; }
+.main { padding: 20px 22px 64px; max-width: 1420px; height: 100vh; overflow-y: auto; }
 
 @media (max-width: 820px) {
   .layout, .layout.collapsed { grid-template-columns: 1fr; }
@@ -874,7 +874,9 @@ code {
   .rail-brand { padding: 0 10px 0 4px; }
   .rail-nav { flex-direction: row; }
   .rail-foot { margin-top: 0; margin-left: auto; flex-direction: row; border-top: none; padding-top: 0; }
-  .main { padding: 16px; }
+  .main { padding: 16px; height: auto; overflow: visible; }
+  .layout, .layout.collapsed { height: auto; }
+  .editor-page { height: auto; }
 }
 
 /* ============ APIs & models ============ */
@@ -1026,3 +1028,29 @@ textarea.guide {
 .gloss-row input.mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
 .gloss-row .btn { padding: 6px 9px; }
 .script-bar-actions { display: flex; gap: 8px; flex: none; }
+
+/* ---- project editor: two working columns that scroll independently ----
+   The brief on the left is long and the prompt/preview on the right is longer.
+   On one shared page scroll, reading either dragged the other out of view and
+   the shorter column left a wall of blank space. Each column now owns its
+   scroll, with the crumbs bar pinned above both. */
+.editor-page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.editor-page > .crumbs { flex: none; }
+
+@media (min-width: 1081px) {
+  .editor-page > .grid {
+    flex: 1;
+    min-height: 0;
+    align-items: stretch;
+  }
+  .editor-page > .grid > * {
+    min-height: 0;
+    overflow-y: auto;
+    /* A column that hits its end must not hand the scroll to the page. */
+    overscroll-behavior: contain;
+    padding-right: 6px;
+  }
+  /* The editor owns the scrolling, so the page frame must not add its own. */
+  .main:has(.editor-page) { overflow: hidden; padding-bottom: 20px; }
+  .main:has(.editor-page) .foot-note { display: none; }
+}

@@ -12,7 +12,7 @@ import type {
   VideoModelProfile,
 } from '@ava/shared';
 import { collection, getToken, isApiError, session, setToken, type SessionUser } from '../lib/client.js';
-import { signInWithGoogle, signOutGoogle, watchGoogleAuth } from '../lib/firebase.js';
+import { completeRedirectSignIn, signInWithGoogle, signOutGoogle, watchGoogleAuth } from '../lib/firebase.js';
 
 export type Section =
   | 'projects'
@@ -127,6 +127,11 @@ export const useApp = create<AppState>()((set, get) => ({
   loading: false,
 
   init: async () => {
+    // A redirect sign-in lands back here mid-flight; finish it before deciding
+    // whether anybody is signed in, and surface anything it went wrong with.
+    const redirectError = await completeRedirectSignIn();
+    if (redirectError) set({ signInError: redirectError });
+
     // Firebase restores a session asynchronously, and refreshes the token every
     // hour, so the app follows that stream rather than checking once at startup.
     let settled = false;

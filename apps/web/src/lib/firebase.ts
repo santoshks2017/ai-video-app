@@ -12,9 +12,13 @@
 import { initializeApp } from 'firebase/app';
 import {
   GoogleAuthProvider,
+  browserLocalPersistence,
   getAuth,
+  getRedirectResult,
   onIdTokenChanged,
+  setPersistence,
   signInWithPopup,
+  signInWithRedirect,
   signOut as fbSignOut,
   type User,
 } from 'firebase/auth';
@@ -30,6 +34,23 @@ const app = initializeApp({
 
 export const auth = getAuth(app);
 
+// Survive a reload and the redirect round-trip. Without this a redirect sign-in
+// lands back on the page with nothing to show for it.
+void setPersistence(auth, browserLocalPersistence).catch(() => {});
+
+/**
+ * Finish a redirect sign-in. Harmless when there was no redirect, and the only
+ * place a redirect-flow error can surface at all.
+ */
+export async function completeRedirectSignIn(): Promise<string | null> {
+  try {
+    await getRedirectResult(auth);
+    return null;
+  } catch (e) {
+    return (e as { message?: string }).message ?? 'Google sign-in failed.';
+  }
+}
+
 let currentToken: string | null = null;
 export const googleToken = (): string | null => currentToken;
 
@@ -41,28 +62,51 @@ export function watchGoogleAuth(onChange: (user: User | null) => void): () => vo
   });
 }
 
+/**
+ * Sign in with Google.
+ *
+ * A popup is nicer when it works, but it is also the fragile path: blockers,
+ * third-party-cookie rules and stray clicks all kill it, and Firebase reports
+ * every one of those as a plain "closed" with nothing to show the user. So any
+ * popup failure falls through to a full-page redirect, which always works. The
+ * old code swallowed those errors and left the sign-in screen sitting there
+ * saying nothing, which looked exactly like a broken app.
+ */
 export async function signInWithGoogle(): Promise<{ ok: true } | { ok: false; message: string }> {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
+
   try {
     await signInWithPopup(auth, provider);
     return { ok: true };
   } catch (e) {
     const err = e as { code?: string; message?: string };
-    if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-      return { ok: false, message: '' };
-    }
+
     if (err.code === 'auth/operation-not-allowed') {
       return {
         ok: false,
         message:
-          'Google sign-in is not switched on for this project yet. An admin needs to enable it in Firebase Console → Authentication → Sign-in method → Google.',
+          'Google sign-in is not switched on for this project. An admin needs to enable it in Firebase Console → Authentication → Sign-in method → Google.',
       };
     }
     if (err.code === 'auth/unauthorized-domain') {
-      return { ok: false, message: `${location.hostname} is not an authorised domain in Firebase Authentication.` };
+      return {
+        ok: false,
+        message: `${location.hostname} is not an authorised domain in Firebase Authentication → Settings.`,
+      };
     }
-    return { ok: false, message: err.message ?? 'Google sign-in failed.' };
+
+    // Anything popup-shaped: take the redirect instead. The page navigates away
+    // to Google and comes back signed in, so there is nothing to return.
+    try {
+      await signInWithRedirect(auth, provider);
+      return { ok: true };
+    } catch (e2) {
+      return {
+        ok: false,
+        message: (e2 as { message?: string }).message ?? err.message ?? 'Google sign-in failed.',
+      };
+    }
   }
 }
 

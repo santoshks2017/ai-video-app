@@ -21,7 +21,7 @@
     ],
     "headers": [
       {
-        "source": "/index.html",
+        "source": "**",
         "headers": [
           {
             "key": "Cache-Control",
@@ -30,16 +30,7 @@
         ]
       },
       {
-        "source": "**/*.html",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "no-cache, max-age=0, must-revalidate"
-          }
-        ]
-      },
-      {
-        "source": "**/*.@(js|css)",
+        "source": "**/*.@(js|css|woff2|png|jpg|svg)",
         "headers": [
           {
             "key": "Cache-Control",

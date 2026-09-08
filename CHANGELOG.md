@@ -1,10 +1,18 @@
 # Changelog
 
-Current version: **1.13**
+Current version: **1.14**
 
 Minor bumps for every shipped change; the major number moves only for an
 overhaul of how the app works. Generated from `packages/shared/src/changelog.ts`
 — edit that, then run `npm run changelog`.
+
+## 1.14 — Stop over-pronouncing Hindi
+_2026-09-09_
+
+- The pronunciation pass was rewriting every word, which made most of a line sound wrong to fix the few that were. It is now a light touch: the line comes back mostly as written, with only the words a model actually says badly respelled.
+- English words, brand names, model names, place names and function words are left exactly as they are — "test drive" stays "test drive", not TEST DRAAIV, and Tata Punch stays Tata Punch.
+- The glossary now has two kinds of entry: leave in English (the safe default) and respell (for words you have heard come out wrong, plus prices). The 37 English terms that shipped as respellings have been flipped.
+- A "Load the built-in guide" button pulls an improved shipped guide over a saved one — languages already in your database never re-read their seed.
 
 ## 1.13 — Work on several projects at once
 _2026-09-09_

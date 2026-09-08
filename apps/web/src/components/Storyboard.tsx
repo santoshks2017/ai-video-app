@@ -78,8 +78,8 @@ export function Storyboard({
               </b>
               <span>
                 {scripted >= spokenScenes && spokenScenes > 0
-                  ? `The model performs the pronunciation spelling, not the ${languageName ?? 'plain'} line above it. Read both through before generating.`
-                  : `Plain ${languageName ?? 'Hindi'} is not enough — models put the stress in the wrong place. Each line needs a pronunciation spelling (AAJ hi TEST DRAAIV buk KEE-ji-ye) for the delivery to sound right.`}
+                  ? `The model performs the pronunciation line, not the ${languageName ?? 'plain'} one above it. Most of it should look untouched — respelling is only for words that come out wrong.`
+                  : `Each line needs a pronunciation pass — the line mostly as written, with only the few words a model says wrong respelled.`}
               </span>
               {scriptNote && <span className="script-note">{scriptNote}</span>}
             </div>
@@ -174,11 +174,11 @@ export function Storyboard({
                         {/* The respelling is what the video model performs — the
                             line above is only here so a human can read it. */}
                         <div className="sb-say">
-                          <label>Pronunciation — this is what the model says</label>
+                          <label>Pronunciation — what the model actually says</label>
                           <textarea
                             className={ov.phonetic?.trim() ? '' : 'unset'}
                             value={ov.phonetic ?? ''}
-                            placeholder="AAJ hi TEST DRAAIV buk KEE-ji-ye"
+                            placeholder="आज ही अपनी test drive book KEE-ji-ye"
                             onChange={(e) => editScene(String(gi), { phonetic: e.target.value })}
                           />
                         </div>

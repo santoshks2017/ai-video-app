@@ -217,8 +217,16 @@ export type ProviderKind =
 export interface GlossaryEntry {
   /** The word or phrase as it appears in a script, in either script system. */
   term: string;
-  /** Its locked spoken spelling — identical in every video, every time. */
+  /** Its locked spoken form — identical in every video, every time. */
   say: string;
+  /**
+   * How this term is handled. `english` means leave it in ordinary English
+   * spelling because the model already says it correctly — respelling it is what
+   * made "test drive" come out as TEST DRAAIV. `respell` is for the words a
+   * model genuinely gets wrong: prices, and Hindi words with a stress or vowel
+   * trap. Default is `respell`.
+   */
+  mode?: 'respell' | 'english';
   note?: string;
   /** Free-text grouping for the table, e.g. "Money", "EV". */
   group?: string;

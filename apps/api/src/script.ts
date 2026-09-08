@@ -40,7 +40,7 @@ export interface ScriptLanguage {
   /** The pronunciation rulebook, used verbatim as the pass-2 instruction. */
   spokenGuide: string;
   /** Locked spellings, applied before any rule is derived. */
-  glossary: { term: string; say: string; note?: string }[];
+  glossary: { term: string; say: string; mode?: 'respell' | 'english'; note?: string }[];
 }
 
 export interface ScriptRequest {
@@ -181,28 +181,48 @@ function phoneticInstruction(
   lines: { index: number; line: string }[],
   language: ScriptLanguage,
 ): string {
-  const glossary = language.glossary
-    .filter((g) => g.term?.trim() && g.say?.trim())
-    .map((g) => `  ${g.term} → ${g.say}${g.note ? `  (${g.note})` : ''}`);
+  const usable = language.glossary.filter((g) => g.term?.trim() && g.say?.trim());
+  const respell = usable.filter((g) => g.mode !== 'english');
+  const asEnglish = usable.filter((g) => g.mode === 'english');
 
   return [
-    `You convert ${language.name} ad copy into the spoken spelling an AI video model performs. Apply the standard below exactly.`,
+    `You repair the pronunciation of ${language.name} ad copy for an AI video model. You are given the finished line; you return the same line with a FEW words respelled where the model would otherwise say them wrong.`,
+    '',
+    'This is a light touch, not a conversion. Most of the line — usually all of it — comes back unchanged. Respelling a word that was already fine makes it worse, and respelling everything makes the whole line sound like a phrasebook being read aloud.',
     '',
     language.spokenGuide.trim(),
     '',
-    ...(glossary.length
+    ...(respell.length
       ? [
-          '## LOCKED SPELLINGS — use these exactly, do not re-derive them',
-          'Consistency across videos matters more than deriving a fresh spelling each time. If a word below appears in a line, spell it exactly as shown. Brand and dealership names in particular must sound identical in every video.',
-          ...glossary,
+          '## LOCKED SPELLINGS — always use these exact forms',
+          ...respell.map((g) => `  ${g.term} → ${g.say}${g.note ? `  (${g.note})` : ''}`),
           '',
         ]
       : []),
+    ...(asEnglish.length
+      ? [
+          '## LEAVE THESE IN ENGLISH — never respell them',
+          'The model already says these correctly. Write them exactly as shown.',
+          ...asEnglish.map((g) => `  ${g.term} → ${g.say}${g.note ? `  (${g.note})` : ''}`),
+          '',
+        ]
+      : []),
+    '## WORKED EXAMPLE',
+    'Line:  नई दिल्ली के Jasper Cars showroom का glass facade देखिए!',
+    'Right: नई दिल्ली के Jasper Cars showroom का glass facade देखिए!',
+    '       — nothing needed fixing. A place name, a dealership name and two English words all stay as they are.',
+    'Wrong: NYOO DEL-ee ke JAS-par KAARZ SHO-room ka GLAAS fa-SAAD DE-khi-ye!',
+    '       — every word mangled, including four that were already correct.',
+    '',
+    'Line:  दो लाख पच्चीस हज़ार रुपये तक का cash discount।',
+    'Right: दो LAAKH pach-CHEES ha-ZAAR ru-PAY-ye तक का cash discount।',
+    '       — only the price is respelled, because that is where models actually fail. "cash discount" stays in English.',
+    '',
     '## THE LINES',
-    'Convert each line. Keep the meaning and the word order identical — this is a spelling transform, not a rewrite. Do not add, drop or reorder words.',
+    'Return each line with the meaning and word order identical. Do not add, drop, reorder or translate words — only change the spelling of the few that need it.',
     ...lines.map((l) => `${l.index}: ${l.line}`),
     '',
-    'Return JSON only: an array of {"index": <the same index>, "say": "<the converted line>"}. One object per line, in order. No commentary.',
+    'Return JSON only: an array of {"index": <the same index>, "say": "<the line, mostly unchanged>"}. One object per line, in order. No commentary.',
   ].join('\n');
 }
 

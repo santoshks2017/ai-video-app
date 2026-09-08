@@ -18,10 +18,21 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '1.13';
+export const APP_VERSION = '1.14';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '1.14',
+    date: '2026-09-09',
+    title: 'Stop over-pronouncing Hindi',
+    changes: [
+      'The pronunciation pass was rewriting every word, which made most of a line sound wrong to fix the few that were. It is now a light touch: the line comes back mostly as written, with only the words a model actually says badly respelled.',
+      'English words, brand names, model names, place names and function words are left exactly as they are — "test drive" stays "test drive", not TEST DRAAIV, and Tata Punch stays Tata Punch.',
+      'The glossary now has two kinds of entry: leave in English (the safe default) and respell (for words you have heard come out wrong, plus prices). The 37 English terms that shipped as respellings have been flipped.',
+      'A "Load the built-in guide" button pulls an improved shipped guide over a saved one — languages already in your database never re-read their seed.',
+    ],
+  },
   {
     version: '1.13',
     date: '2026-09-09',

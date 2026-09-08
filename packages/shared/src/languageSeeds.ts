@@ -18,15 +18,39 @@ type LanguageSeed = Omit<LanguageProfile, 'id' | 'createdAt' | 'updatedAt'>;
  */
 const HINDI_SPOKEN = `# Hindi pronunciation standard for AI video / TTS voice generation
 
-You convert Hindi ad copy into a phonetic, stress-marked spelling that an AI
-video or speech model performs correctly. Apply these rules to ANY Hindi word,
-not only the ones listed.
+You repair the pronunciation of Hindi ad copy for an AI video or speech model.
 
-## 1. Why plain Hinglish text fails
+## 0. RESPELL SPARINGLY — this rule outranks every rule below
+
+Models say most Hindi correctly. Respelling a word that was already fine makes it
+WORSE, and respelling everything makes the whole line sound like a foreigner
+reading a phrasebook. The line you are given is the default; changing a word is
+the exception you have to justify.
+
+Respell a word ONLY if one of these is true:
+- It is in the locked-spellings list you are given.
+- It is a number, price or currency amount (the highest-stakes words in an ad).
+- It is a Hindi word with a real trap: a dropped schwa (करना is KAR-na, not
+  ka-ra-na), a long vowel that changes the word, or a stress that lands wrong.
+
+NEVER respell these — leave them exactly as written:
+- English words and phrases. Models read "test drive", "showroom", "glass
+  facade", "floor", "offer" correctly with English phonology. TEST DRAAIV,
+  SHO-room and GLAAS fa-SAAD are all wrong and all sound worse.
+- Brand, model, dealership and place names: Tata Punch, Jasper Cars, New Delhi,
+  Byte Vanta X. Models know these. TAA-taa PANCH and NYOO DEL-ee are wrong.
+- Function words: का की के, को, से, में, पर, और, तो, ही, अपनी, अपना.
+- Any Hindi word you are not confident is mispronounced by default.
+
+Expect to change only a handful of words in a line — often none at all. If you
+have respelled more than about a quarter of the words, you have gone too far:
+put the rest back.
+
+## 1. Why some Hindi text still fails
 
 | Failure | Cause | Fix |
 |---|---|---|
-| Wrong vowel length ("बात" read like "but", not "baat") | Roman \`a\` is ambiguous between अ (short) and आ (long) | Always mark long vowels: \`aa\`, \`ee\`, \`oo\` |
+| Wrong vowel length ("बात" read like "but", not "baat") | Roman \`a\` is ambiguous between अ (short) and आ (long) | When you do respell, mark long vowels: \`aa\`, \`ee\`, \`oo\` |
 | Flat or foreign stress, worst on numbers and offer words | English TTS applies English stress rules | Mark the stressed syllable in CAPS |
 | Over-pronounced words ("करता" as ka-ra-ta, 3 beats, not kar-ta, 2) | Devanagari does not mark that Hindi drops the inherent vowel in speech | Spell the word as SPOKEN, never as Devanagari is structured |
 
@@ -72,18 +96,21 @@ consonant by consonant from the spelling.
 - One clear stress point per phrase. Capitalising everything flattens emphasis
   as badly as capitalising nothing.
 
-### 2.5 One script per sentence
-Never mix Devanagari and Latin mid-sentence ("toh देर kis BAAT ki" is wrong —
-write "toh DER kis BAAT ki"). You cannot know which rendering path the model
-takes for the odd Devanagari word among Latin ones.
+### 2.5 The natural line is the base; respellings sit inside it
+Keep the sentence as it was written — Devanagari for the Hindi, ordinary English
+for the English words and names — and swap in a respelling only for the few words
+that need one. A line that is mostly untouched with two words fixed is the goal.
+Do NOT convert a whole sentence into Latin phonetics.
 
-### 2.6 English and brand words — decide the accent once, per word
-For each loanword or brand name, choose one and keep it for the whole script and
-every future script:
-- English-accented → leave in plain English spelling (SUV, EMI, ABS as letters).
-- Hindi-accented, matching the sentence rhythm → convert like any Hindi word
-  (TEST DRAAIV, dis-KAAUNT).
-Never spell the same brand two ways in one video.
+### 2.6 English and brand words — leave them in English
+The default, and almost always the right answer: write them exactly as they are
+normally spelled. Test drive, showroom, offer, EMI, SUV, Tata Punch, Jasper Cars.
+Models read these correctly, and respelling them is what makes a line sound
+wrong.
+
+The only exception is a specific word you have HEARD the model mispronounce. Add
+that one word to the locked-spellings list with its fix, so it is corrected the
+same way in every video — and leave every other English word alone.
 
 ## 3. Numbers and currency — the highest-stakes lines
 
@@ -113,13 +140,13 @@ Pattern: [number] LAAKH [number] ha-ZAAR ru-PAY-ye
 हर महीने → har ma-HEE-ne · डाउन पेमेंट → DAAUN PAY-ment · EMI → leave as letters
 
 ## 4. Output checklist
-- Every long vowel marked (aa / ee / oo); no ambiguous single vowels.
-- Every aspirated consonant keeps its h (kh, gh, chh, jh, th, dh, bh; फ as f).
-- No schwa written that is dropped in speech (KAR-na, not ka-ra-na).
-- One script per sentence — no Devanagari mixed into Latin.
-- Brand and model names spelled identically every time.
-- Stress on price and CTA words, not on filler.
-- Digits and the ₹ symbol never appear; numbers are always spoken words.`;
+- Most of the line came through unchanged. Fewer than a quarter of the words were
+  respelled; often none were.
+- No English word, brand name, model name or place name was respelled.
+- No function word was respelled.
+- In the words you DID respell: long vowels marked (aa / ee / oo), aspirated
+  consonants keep their h, and no schwa written that is dropped in speech.
+- Prices are spoken words in the Indian system, never digits or the ₹ symbol.`;
 
 const HINDI_WRITTEN = `# Hindi on-screen text rules
 
@@ -156,20 +183,20 @@ offer card entirely when overloaded.`;
 /** Section 4 of the guide, structured so the app can enforce it and grow it. */
 const HINDI_GLOSSARY: LanguageProfile['glossary'] = [
   // --- CTA and offer language ---
-  { term: 'Test Drive', say: 'TEST DRAAIV', group: 'CTA & offers' },
+  { term: 'Test Drive', say: 'test drive', mode: 'english', group: 'CTA & offers' },
   { term: 'Book kijiye / Book now', say: 'buk KEE-ji-ye', group: 'CTA & offers' },
-  { term: 'Booking', say: 'BUK-ing', group: 'CTA & offers' },
-  { term: 'Offer', say: 'AWF-ar', group: 'CTA & offers' },
-  { term: 'Discount (English)', say: 'dis-KAAUNT', group: 'CTA & offers' },
+  { term: 'Booking', say: 'booking', mode: 'english', group: 'CTA & offers' },
+  { term: 'Offer', say: 'offer', mode: 'english', group: 'CTA & offers' },
+  { term: 'Discount (English)', say: 'discount', mode: 'english', group: 'CTA & offers' },
   { term: 'Discount (छूट)', say: 'CHHOOT', group: 'CTA & offers' },
-  { term: 'Cash Discount', say: 'CASH dis-KAAUNT', group: 'CTA & offers' },
-  { term: 'Exchange Bonus', say: 'iks-CHENJ BO-nas', group: 'CTA & offers' },
-  { term: 'Finance', say: 'fai-NANS', group: 'CTA & offers' },
-  { term: 'Insurance', say: 'in-SHYU-rens', group: 'CTA & offers' },
-  { term: 'Limited Period', say: 'li-MI-ted PI-ri-yad', group: 'CTA & offers' },
+  { term: 'Cash Discount', say: 'cash discount', mode: 'english', group: 'CTA & offers' },
+  { term: 'Exchange Bonus', say: 'exchange bonus', mode: 'english', group: 'CTA & offers' },
+  { term: 'Finance', say: 'finance', mode: 'english', group: 'CTA & offers' },
+  { term: 'Insurance', say: 'insurance', mode: 'english', group: 'CTA & offers' },
+  { term: 'Limited Period', say: 'limited period', mode: 'english', group: 'CTA & offers' },
   { term: 'Aaj hi / today only', say: 'AAJ hi', group: 'CTA & offers' },
   { term: 'Jaldi karen / hurry', say: 'jal-DEE ka-REN', group: 'CTA & offers' },
-  { term: 'Visit', say: 'vi-ZIT', group: 'CTA & offers' },
+  { term: 'Visit', say: 'visit', mode: 'english', group: 'CTA & offers' },
   { term: 'Toh der kis baat ki', say: 'toh DER kis BAAT ki', group: 'CTA & offers' },
   { term: 'Aaiye / come', say: 'AA-i-ye', group: 'CTA & offers' },
   { term: 'Dekhiye / see', say: 'DE-khi-ye', group: 'CTA & offers' },
@@ -177,51 +204,51 @@ const HINDI_GLOSSARY: LanguageProfile['glossary'] = [
   { term: 'Samajhiye / understand', say: 'sam-JHI-ye', group: 'CTA & offers' },
 
   // --- product and showroom ---
-  { term: 'Showroom', say: 'SHO-room', group: 'Product & showroom' },
-  { term: 'Dealership', say: 'DEE-lar-ship', group: 'Product & showroom' },
-  { term: 'Features', say: 'FEE-charz', group: 'Product & showroom' },
-  { term: 'Variant', say: 'VE-ri-ant', group: 'Product & showroom' },
-  { term: 'Top Model', say: 'TOP MO-dal', group: 'Product & showroom' },
-  { term: 'Colour / colours', say: 'KA-lar / KA-larz', group: 'Product & showroom' },
-  { term: 'Sedan', say: 'si-DAAN', group: 'Product & showroom' },
-  { term: 'Hatchback', say: 'HACH-baik', group: 'Product & showroom' },
-  { term: 'SUV', say: 'SUV', note: 'Read as letters — leave in English.', group: 'Product & showroom' },
-  { term: 'Mileage', say: 'MAAI-lej', group: 'Product & showroom' },
-  { term: 'Warranty', say: 'WAA-ran-tee', group: 'Product & showroom' },
-  { term: 'Service', say: 'SAR-vis', group: 'Product & showroom' },
+  { term: 'Showroom', say: 'showroom', mode: 'english', group: 'Product & showroom' },
+  { term: 'Dealership', say: 'dealership', mode: 'english', group: 'Product & showroom' },
+  { term: 'Features', say: 'features', mode: 'english', group: 'Product & showroom' },
+  { term: 'Variant', say: 'variant', mode: 'english', group: 'Product & showroom' },
+  { term: 'Top Model', say: 'top model', mode: 'english', group: 'Product & showroom' },
+  { term: 'Colour / colours', say: 'colour / colours', mode: 'english', group: 'Product & showroom' },
+  { term: 'Sedan', say: 'sedan', mode: 'english', group: 'Product & showroom' },
+  { term: 'Hatchback', say: 'hatchback', mode: 'english', group: 'Product & showroom' },
+  { term: 'SUV', say: 'SUV', mode: 'english', note: 'Read as letters.', group: 'Product & showroom' },
+  { term: 'Mileage', say: 'mileage', mode: 'english', group: 'Product & showroom' },
+  { term: 'Warranty', say: 'warranty', mode: 'english', group: 'Product & showroom' },
+  { term: 'Service', say: 'service', mode: 'english', group: 'Product & showroom' },
   { term: 'Shaandaar / great', say: 'sha-aan-DAAR', group: 'Product & showroom' },
   { term: 'Faayde / benefits', say: 'FAA-y-de', group: 'Product & showroom' },
 
   // --- EV ---
-  { term: 'Electric Vehicle', say: 'i-LEK-trik VE-hi-kal', group: 'EV' },
-  { term: 'EV', say: 'EV', note: 'Read as letters — leave in English.', group: 'EV' },
-  { term: 'Battery', say: 'BAI-ta-ree', group: 'EV' },
-  { term: 'Range', say: 'RENJ', group: 'EV' },
-  { term: 'Charging', say: 'CHAAR-jing', group: 'EV' },
-  { term: 'Fast Charging', say: 'FAAST CHAAR-jing', group: 'EV' },
-  { term: 'Zero Emission', say: 'ZI-ro i-MI-shan', group: 'EV' },
+  { term: 'Electric Vehicle', say: 'electric vehicle', mode: 'english', group: 'EV' },
+  { term: 'EV', say: 'EV', mode: 'english', note: 'Read as letters.', group: 'EV' },
+  { term: 'Battery', say: 'battery', mode: 'english', group: 'EV' },
+  { term: 'Range', say: 'range', mode: 'english', group: 'EV' },
+  { term: 'Charging', say: 'charging', mode: 'english', group: 'EV' },
+  { term: 'Fast Charging', say: 'fast charging', mode: 'english', group: 'EV' },
+  { term: 'Zero Emission', say: 'zero emission', mode: 'english', group: 'EV' },
 
   // --- launch ---
-  { term: 'New Launch', say: 'NYOO LAWNCH', group: 'New launch' },
+  { term: 'New Launch', say: 'new launch', mode: 'english', group: 'New launch' },
   { term: 'Pesh hai / introducing', say: 'PESH hai', group: 'New launch' },
   { term: 'Pehli jhalak / first look', say: 'PEH-li jha-LAK', group: 'New launch' },
   { term: 'Ab uplabdh / now available', say: 'ab up-LABDH', group: 'New launch' },
 
   // --- delivery ---
-  { term: 'Delivery', say: 'di-LI-va-ree', group: 'Delivery' },
-  { term: 'Handover', say: 'HAND-o-var', group: 'Delivery' },
+  { term: 'Delivery', say: 'delivery', mode: 'english', group: 'Delivery' },
+  { term: 'Handover', say: 'handover', mode: 'english', group: 'Delivery' },
   { term: 'Badhaai / congratulations', say: 'ba-DHAA-ee', group: 'Delivery' },
-  { term: 'Customer', say: 'KAS-ta-mar', group: 'Delivery' },
+  { term: 'Customer', say: 'customer', mode: 'english', group: 'Delivery' },
   { term: 'Aap ki nayi gaadi', say: 'aap kee NA-yee GAA-dee', group: 'Delivery' },
 
   // --- testimonial ---
-  { term: 'Testimonial', say: 'tes-ti-MO-ni-al', group: 'Testimonial' },
+  { term: 'Testimonial', say: 'testimonial', mode: 'english', group: 'Testimonial' },
   { term: 'Anubhav / experience', say: 'a-nu-BHAV', group: 'Testimonial' },
   { term: 'Santusht / satisfied', say: 'san-TUSHT', group: 'Testimonial' },
   { term: 'Mujhe bahut pasand aayi', say: 'MU-jhe ba-HUT pa-SAND aa-yee', group: 'Testimonial' },
 
   // --- festival ---
-  { term: 'Festival', say: 'FES-ti-val', group: 'Festival' },
+  { term: 'Festival', say: 'festival', mode: 'english', group: 'Festival' },
   { term: 'Tyohaar', say: 'TYO-haar', group: 'Festival' },
   { term: 'Shubhkamnayein / wishes', say: 'shubh-kaam-NA-yen', group: 'Festival' },
   { term: 'Shubh / auspicious', say: 'SHUBH', group: 'Festival' },
@@ -233,8 +260,8 @@ const HINDI_GLOSSARY: LanguageProfile['glossary'] = [
   { term: 'Crore', say: 'ka-ROD', group: 'Money' },
   { term: 'Se shuru / starting from', say: 'se sha-ROO', group: 'Money' },
   { term: 'Har maheene / every month', say: 'har ma-HEE-ne', group: 'Money' },
-  { term: 'Down payment', say: 'DAAUN PAY-ment', group: 'Money' },
-  { term: 'EMI', say: 'EMI', note: 'Read as letters — leave in English.', group: 'Money' },
+  { term: 'Down payment', say: 'down payment', mode: 'english', group: 'Money' },
+  { term: 'EMI', say: 'EMI', mode: 'english', note: 'Read as letters.', group: 'Money' },
 ];
 
 const ENGLISH_WRITTEN = `# English on-screen text rules

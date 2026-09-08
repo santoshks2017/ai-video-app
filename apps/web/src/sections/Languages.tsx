@@ -81,6 +81,22 @@ export function LanguagesSection() {
     setNote(added.length ? `Added ${added.join(', ')}.` : 'Every built-in guide is already installed.');
   };
 
+  /**
+   * Pull the shipped guide back over a saved one. Needed whenever the built-in
+   * rules improve: a language already in the database never re-reads its seed.
+   */
+  const seed = LANGUAGE_SEEDS.find((l) => l.code === draft?.code.trim().toLowerCase());
+  const resetToBuiltIn = () => {
+    if (!seed) return;
+    set({
+      spokenGuide: seed.spokenGuide,
+      writtenGuide: seed.writtenGuide,
+      glossary: seed.glossary,
+      needsPhonetics: seed.needsPhonetics,
+    });
+    setNote(`Loaded the built-in ${seed.name} guide — review it, then Save.`);
+  };
+
   const setGlossary = (rows: GlossaryEntry[]) => set({ glossary: rows });
   const editRow = (i: number, p: Partial<GlossaryEntry>) =>
     setGlossary((draft?.glossary ?? []).map((g, gi) => (gi === i ? { ...g, ...p } : g)));
@@ -148,6 +164,18 @@ export function LanguagesSection() {
           }
         >
           {err && <Banner kind="bad">{err}</Banner>}
+          {note && <Banner kind="ok">{note}</Banner>}
+          {seed && (
+            <div className="toolbar" style={{ marginTop: 0 }}>
+              <button className="btn ghost small" type="button" onClick={resetToBuiltIn}>
+                Load the built-in {seed.name} guide
+              </button>
+              <span className="hint">
+                Replaces the rules and glossary below with the ones that ship with this version. Your edits are
+                overwritten, and nothing is saved until you press Save.
+              </span>
+            </div>
+          )}
           <div className="row2">
             <Field label="Name">
               <input value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder="Hindi" />
@@ -239,9 +267,10 @@ export function LanguagesSection() {
           {tab === 'glossary' && (
             <>
               <div className="section-desc" style={{ marginTop: 0 }}>
-                Locked spellings, checked before any rule is applied — consistency across videos matters more than
-                deriving a fresh spelling each time. Brand and dealership names belong here, so your own product
-                never gets said two ways.
+                Two lists in one. <b>Leave in English</b> is the safe default for anything the model already
+                says correctly — respelling those is what makes a line sound wrong. <b>Respell</b> is for the few
+                words you have actually heard come out badly, and for prices. Add a word here the moment you hear
+                it mispronounced, and it is fixed the same way in every video from then on.
               </div>
               <div className="gloss">
                 {(draft.glossary ?? []).map((g, i) => (
@@ -257,11 +286,14 @@ export function LanguagesSection() {
                       placeholder="TEST DRAAIV"
                       onChange={(e) => editRow(i, { say: e.target.value })}
                     />
-                    <input
-                      value={g.group ?? ''}
-                      placeholder="group"
-                      onChange={(e) => editRow(i, { group: e.target.value })}
-                    />
+                    <select
+                      value={g.mode === 'english' ? 'english' : 'respell'}
+                      onChange={(e) => editRow(i, { mode: e.target.value as GlossaryEntry['mode'] })}
+                      title="English: leave it exactly as written. Respell: force this spoken spelling."
+                    >
+                      <option value="english">leave in English</option>
+                      <option value="respell">respell</option>
+                    </select>
                     <button
                       className="btn ghost small"
                       type="button"

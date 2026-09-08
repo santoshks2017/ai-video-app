@@ -1027,7 +1027,8 @@ textarea.guide {
   font-size: 12px; line-height: 1.55; white-space: pre; overflow-wrap: normal; overflow-x: auto;
 }
 .gloss { display: grid; gap: 6px; max-height: 420px; overflow-y: auto; }
-.gloss-row { display: grid; grid-template-columns: 1.2fr 1.2fr 0.7fr auto; gap: 6px; align-items: center; }
+.gloss-row { display: grid; grid-template-columns: 1.1fr 1.1fr 0.85fr auto; gap: 6px; align-items: center; }
+.gloss-row select { padding: 6px 8px; font-size: 12px; }
 .gloss-row input { padding: 6px 8px; font-size: 12.5px; }
 .gloss-row input.mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
 .gloss-row .btn { padding: 6px 9px; }

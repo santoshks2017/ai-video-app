@@ -14,7 +14,7 @@ import {
   type Project,
   type ProjectVideoSpec,
 } from '@ava/shared';
-import { useApp, api } from '../state/appStore.js';
+import { useApp, api, projectTabId } from '../state/appStore.js';
 import { Field, Panel, ImageUpload, Thumb, Confirm, Banner, Collapse } from '../components/ui.js';
 import { isApiError } from '../lib/client.js';
 // `api` above is the library CRUD client; this one owns generation + scripting.
@@ -24,7 +24,8 @@ import { OutputPanel } from '../components/OutputPanel.js';
 import { GenerationPanel } from '../components/GenerationPanel.js';
 
 export function ProjectEditor({ projectId }: { projectId: string }) {
-  const { projects, clients, actors, cars, instructions, languages, models, refresh, go } = useApp();
+  const { projects, clients, actors, cars, instructions, languages, models, refresh, go, closeTab } =
+    useApp();
   const stored = projects.find((p) => p.id === projectId);
   const [project, setProject] = useState<Project | null>(stored ?? null);
   const [savedAt, setSavedAt] = useState<number>(0);
@@ -156,7 +157,30 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     [brief, promptOnly, activeModel],
   );
 
-  if (!project) return <Panel title="Project"><div className="hint">Loading…</div></Panel>;
+  if (!project) {
+    // A tab can outlive its project — deleted from another tab, say. Say so
+    // rather than sitting on a spinner forever.
+    const gone = projects.length > 0 && !stored;
+    return (
+      <Panel title="Project">
+        {gone ? (
+          <>
+            <div className="hint">This project no longer exists — it was deleted.</div>
+            <button
+              className="btn small"
+              type="button"
+              style={{ marginTop: 8 }}
+              onClick={() => closeTab(projectTabId(projectId))}
+            >
+              Close tab
+            </button>
+          </>
+        ) : (
+          <div className="hint">Loading…</div>
+        )}
+      </Panel>
+    );
+  }
 
   const fit = formatFit(project.spec.durationSec, project.spec.aspect);
   const parts = built?.parts ?? [];
@@ -189,7 +213,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           onConfirm={async () => {
             await api.projects.remove(project.id);
             await refresh();
-            go('projects', null);
+            closeTab(projectTabId(project.id));
           }}
         >
           Delete project

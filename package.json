@@ -18,7 +18,8 @@
     "dev:web": "npm run dev --workspace @ava/web",
     "dev:api": "npm run dev --workspace @ava/api",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "changelog": "npm run build --workspace @ava/shared && node scripts/changelog.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fmtTime, formatInr, type Brief, type PromptPart, type ScenePlan } from '@ava/shared';
+import { useApp } from '../state/appStore.js';
 import {
   api,
   isApiError,
@@ -55,6 +56,15 @@ export function GenerationPanel({
   const [refineConfirmed, setRefineConfirmed] = useState(false);
   /** Clips of jobs opened from history — the list payload doesn't carry them. */
   const [jobClips, setJobClips] = useState<Record<string, ClipView[]>>({});
+  // Tell the workspace this project is busy, so its tab says so from anywhere.
+  const setProjectBusy = useApp((s) => s.setProjectBusy);
+  const projectId = project?.id;
+  useEffect(() => {
+    if (!projectId) return;
+    const busy = status === 'running' || refineStatus === 'running';
+    setProjectBusy(projectId, busy);
+    return () => setProjectBusy(projectId, false);
+  }, [projectId, status, refineStatus, setProjectBusy]);
 
   const loadHistory = useCallback(async () => {
     if (!project?.id) return;

@@ -18,7 +18,8 @@ export type Section =
   | 'clients'
   | 'instructions'
   | 'languages'
-  | 'models';
+  | 'models'
+  | 'whatsnew';
 
 const actorsApi = collection<ActorProfile>('actors');
 const carsApi = collection<CarModelProfile>('cars');
@@ -40,13 +41,32 @@ export const api = {
   models: modelsApi,
 };
 
+/**
+ * One open workspace tab. The id is derived from what the tab shows, so opening
+ * the same project or section twice focuses the tab that already exists.
+ */
+export interface Tab {
+  id: string;
+  kind: 'section' | 'project';
+  /** Which rail item lights up — a project tab still belongs to Projects. */
+  section: Section;
+  projectId?: string;
+}
+
+export const sectionTabId = (section: Section): string => `section:${section}`;
+export const projectTabId = (projectId: string): string => `project:${projectId}`;
+
 interface AppState {
   /** null = still checking */
   signedIn: boolean | null;
   authEnabled: boolean;
   signInError: string;
-  section: Section;
-  openProjectId: string | null;
+  /** Every open tab stays mounted, so a generation running in one keeps running
+   *  while the designer works in another. */
+  tabs: Tab[];
+  activeTabId: string;
+  /** Projects with a generation in flight, so their tab can say so. */
+  busyProjects: Record<string, boolean>;
 
   actors: ActorProfile[];
   cars: CarModelProfile[];
@@ -61,16 +81,23 @@ interface AppState {
   init: () => Promise<void>;
   signIn: (password: string) => Promise<boolean>;
   signOut: () => void;
+  /** Open the tab for this section or project, or focus it if already open. */
   go: (section: Section, projectId?: string | null) => void;
+  focusTab: (id: string) => void;
+  closeTab: (id: string) => void;
+  setProjectBusy: (projectId: string, busy: boolean) => void;
   refresh: () => Promise<void>;
 }
+
+const HOME: Tab = { id: sectionTabId('projects'), kind: 'section', section: 'projects' };
 
 export const useApp = create<AppState>()((set, get) => ({
   signedIn: null,
   authEnabled: true,
   signInError: '',
-  section: 'projects',
-  openProjectId: null,
+  tabs: [HOME],
+  activeTabId: HOME.id,
+  busyProjects: {},
   actors: [],
   cars: [],
   clients: [],
@@ -106,6 +133,9 @@ export const useApp = create<AppState>()((set, get) => ({
   signOut: () => {
     setToken(null);
     set({
+      tabs: [HOME],
+      activeTabId: HOME.id,
+      busyProjects: {},
       signedIn: false,
       actors: [],
       cars: [],
@@ -118,7 +148,33 @@ export const useApp = create<AppState>()((set, get) => ({
     });
   },
 
-  go: (section, projectId = null) => set({ section, openProjectId: projectId }),
+  go: (section, projectId = null) => {
+    const tab: Tab = projectId
+      ? { id: projectTabId(projectId), kind: 'project', section: 'projects', projectId }
+      : { id: sectionTabId(section), kind: 'section', section };
+    set((s) => ({
+      tabs: s.tabs.some((t) => t.id === tab.id) ? s.tabs : [...s.tabs, tab],
+      activeTabId: tab.id,
+    }));
+  },
+
+  focusTab: (id) => set({ activeTabId: id }),
+
+  closeTab: (id) =>
+    set((s) => {
+      const i = s.tabs.findIndex((t) => t.id === id);
+      if (i < 0) return s;
+      const tabs = s.tabs.filter((t) => t.id !== id);
+      // Closing the last tab leaves the projects list rather than a blank screen.
+      if (!tabs.length) return { tabs: [HOME], activeTabId: HOME.id };
+      // Focus moves to the neighbour on the left, which is where the eye already is.
+      const activeTabId =
+        s.activeTabId === id ? (tabs[Math.max(0, i - 1)] ?? tabs[0])!.id : s.activeTabId;
+      return { tabs, activeTabId };
+    }),
+
+  setProjectBusy: (projectId, busy) =>
+    set((s) => ({ busyProjects: { ...s.busyProjects, [projectId]: busy } })),
 
   refresh: async () => {
     set({ loading: true });

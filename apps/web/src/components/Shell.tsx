@@ -1,15 +1,22 @@
 import { useState, type ReactNode } from 'react';
+import { APP_VERSION } from '@ava/shared';
 import { useApp, type Section } from '../state/appStore.js';
 
-const NAV: { id: Section; label: string; icon: string }[] = [
-  { id: 'projects', label: 'Projects', icon: '🎬' },
-  { id: 'clients', label: 'Clients', icon: '🏢' },
-  { id: 'cars', label: 'Cars', icon: '🚗' },
-  { id: 'actors', label: 'Actors', icon: '🎭' },
-  { id: 'instructions', label: 'Instructions', icon: '📐' },
-  { id: 'languages', label: 'Languages', icon: '🗣️' },
-  { id: 'models', label: 'APIs & models', icon: '🔌' },
-];
+export const SECTION_META: Record<Section, { label: string; icon: string }> = {
+  projects: { label: 'Projects', icon: '🎬' },
+  clients: { label: 'Clients', icon: '🏢' },
+  cars: { label: 'Cars', icon: '🚗' },
+  actors: { label: 'Actors', icon: '🎭' },
+  instructions: { label: 'Instructions', icon: '📐' },
+  languages: { label: 'Languages', icon: '🗣️' },
+  models: { label: 'APIs & models', icon: '🔌' },
+  whatsnew: { label: "What's new", icon: '✨' },
+};
+
+/** The rail. What's new is reached from the version in the foot instead. */
+const NAV = (['projects', 'clients', 'cars', 'actors', 'instructions', 'languages', 'models'] as Section[]).map(
+  (id) => ({ id, ...SECTION_META[id] }),
+);
 
 export function SignIn() {
   const signIn = useApp((s) => s.signIn);
@@ -48,7 +55,8 @@ export function SignIn() {
 }
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { section, go, signOut, authEnabled, loading, openProjectId } = useApp();
+  const { tabs, activeTabId, go, signOut, authEnabled, loading } = useApp();
+  const active = tabs.find((t) => t.id === activeTabId);
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -71,7 +79,7 @@ export function Shell({ children }: { children: ReactNode }) {
               type="button"
               title={n.label}
               className={`rail-item${
-                section === n.id && !(n.id === 'projects' && openProjectId) ? ' on' : ''
+                active?.kind === 'section' && active.section === n.id ? ' on' : ''
               }`}
               onClick={() => go(n.id, null)}
             >
@@ -85,6 +93,17 @@ export function Shell({ children }: { children: ReactNode }) {
 
         <div className="rail-foot">
           {loading && !collapsed && <div className="hint">Loading…</div>}
+          <button
+            className="rail-item version"
+            type="button"
+            onClick={() => go('whatsnew', null)}
+            title={`Version ${APP_VERSION} — what's new`}
+          >
+            <span className="rail-icon" aria-hidden>
+              ✨
+            </span>
+            {!collapsed && <span className="rail-label">v{APP_VERSION} · What&rsquo;s new</span>}
+          </button>
           {authEnabled && (
             <button className="rail-item" type="button" onClick={signOut} title="Sign out">
               <span className="rail-icon" aria-hidden>

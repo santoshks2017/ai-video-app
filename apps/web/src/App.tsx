@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
-import { useApp } from './state/appStore.js';
+import { useApp, type Tab } from './state/appStore.js';
 import { Shell, SignIn } from './components/Shell.js';
+import { Tabs } from './components/Tabs.js';
 import { ProjectsSection } from './sections/Projects.js';
 import { ProjectEditor } from './sections/ProjectEditor.js';
 import { ActorsSection } from './sections/Actors.js';
@@ -9,9 +10,32 @@ import { ClientsSection } from './sections/Clients.js';
 import { InstructionsSection } from './sections/Instructions.js';
 import { LanguagesSection } from './sections/Languages.js';
 import { ModelsSection } from './sections/Models.js';
+import { WhatsNewSection } from './sections/WhatsNew.js';
+
+function TabBody({ tab }: { tab: Tab }) {
+  if (tab.kind === 'project') return <ProjectEditor projectId={tab.projectId!} />;
+  switch (tab.section) {
+    case 'projects':
+      return <ProjectsSection />;
+    case 'actors':
+      return <ActorsSection />;
+    case 'cars':
+      return <CarsSection />;
+    case 'clients':
+      return <ClientsSection />;
+    case 'instructions':
+      return <InstructionsSection />;
+    case 'languages':
+      return <LanguagesSection />;
+    case 'models':
+      return <ModelsSection />;
+    case 'whatsnew':
+      return <WhatsNewSection />;
+  }
+}
 
 export default function App() {
-  const { signedIn, section, openProjectId, init } = useApp();
+  const { signedIn, tabs, activeTabId, init } = useApp();
 
   useEffect(() => {
     void init();
@@ -28,18 +52,14 @@ export default function App() {
 
   return (
     <Shell>
-      {section === 'projects' &&
-        (openProjectId ? <ProjectEditor projectId={openProjectId} /> : <ProjectsSection />)}
-      {section === 'actors' && <ActorsSection />}
-      {section === 'cars' && <CarsSection />}
-      {section === 'clients' && <ClientsSection />}
-      {section === 'instructions' && <InstructionsSection />}
-      {section === 'languages' && <LanguagesSection />}
-      {section === 'models' && <ModelsSection />}
-      <div className="foot-note">
-        All use cases generate video through the selected model. Each language&rsquo;s pronunciation and
-        on-screen text rules are injected into every prompt that uses it.
-      </div>
+      <Tabs />
+      {/* Every tab stays mounted: hiding rather than unmounting is what keeps a
+          generation running while the designer works somewhere else. */}
+      {tabs.map((t) => (
+        <div key={t.id} className="pane" hidden={t.id !== activeTabId}>
+          <TabBody tab={t} />
+        </div>
+      ))}
     </Shell>
   );
 }

@@ -31,9 +31,33 @@ export function estimateCost(brief: Brief, opts: CostEstimateOptions = {}): Cost
   const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks });
 
   // Each part is one create-or-extend API call. Billed on generated seconds.
-  const clipCount = Math.max(1, plan.parts);
-  const totalSeconds = ctx.totalDuration;
+  return secondsCost(ctx.totalDuration, Math.max(1, plan.parts), usdPerSecond, usdToInr);
+}
 
+/**
+ * Cost of generating an arbitrary number of seconds — used by the refine path,
+ * where only the segments a reviewer flagged are re-run and the rest of the
+ * video is re-used untouched. Redoing 1 segment of 4 costs a quarter.
+ */
+export function estimateSegmentsCost(
+  seconds: number,
+  clipCount: number,
+  opts: CostEstimateOptions = {},
+): CostEstimate {
+  return secondsCost(
+    Math.round(seconds * 10) / 10,
+    Math.max(0, clipCount),
+    opts.usdPerSecond ?? USD_PER_SECOND_720P,
+    opts.usdToInr ?? DEFAULT_USD_TO_INR,
+  );
+}
+
+function secondsCost(
+  totalSeconds: number,
+  clipCount: number,
+  usdPerSecond: number,
+  usdToInr: number,
+): CostEstimate {
   const usd = round2(totalSeconds * usdPerSecond);
   const inr = Math.round(usd * usdToInr);
 

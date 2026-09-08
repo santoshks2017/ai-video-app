@@ -47,6 +47,14 @@ export function GenerationPanel({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [history, setHistory] = useState<GenerationHistoryItem[]>([]);
   const [viewing, setViewing] = useState<string | null>(null);
+  // Refine: retake only the segments a reviewer flags, re-use the rest.
+  const [feedback, setFeedback] = useState('');
+  const [redo, setRedo] = useState<number[]>([]);
+  const [refineStatus, setRefineStatus] = useState<'idle' | 'running'>('idle');
+  const [refineErr, setRefineErr] = useState('');
+  const [refineConfirmed, setRefineConfirmed] = useState(false);
+  /** Clips of jobs opened from history — the list payload doesn't carry them. */
+  const [jobClips, setJobClips] = useState<Record<string, ClipView[]>>({});
 
   const loadHistory = useCallback(async () => {
     if (!project?.id) return;
@@ -72,6 +80,9 @@ export function GenerationPanel({
     }
     setResult(r);
     setViewing(null);
+    setRedo([]);
+    setFeedback('');
+    setRefineErr('');
     setStatus(r.status === 'done' ? 'done' : 'running');
     onGenerated?.(r.jobId, r.finalUrl ?? null);
     void loadHistory();
@@ -95,6 +106,66 @@ export function GenerationPanel({
 
   const blocked = !canGenerate || parts.length === 0 || (needsCostConfirm && !confirmed);
   const failed = clips.filter((c) => c.status === 'failed');
+
+  /* ---- refine: retake the bad segments only ---- */
+  const activeJobId = viewing ?? result?.jobId ?? history.find((h) => h.finalUrl)?.jobId ?? null;
+  const activeClips: ClipView[] =
+    result?.jobId && result.jobId === activeJobId ? result.clips : (jobClips[activeJobId ?? ''] ?? []);
+
+  useEffect(() => {
+    if (!activeJobId || jobClips[activeJobId] || result?.jobId === activeJobId) return;
+    let live = true;
+    void api.job(activeJobId).then((j) => {
+      if (live && !isApiError(j)) setJobClips((m) => ({ ...m, [activeJobId]: j.clips }));
+    });
+    return () => {
+      live = false;
+    };
+  }, [activeJobId, jobClips, result?.jobId]);
+
+  // A retake splices new segments into the saved ones, so the plan has to be the
+  // same shape it was when they were made.
+  const canRefine =
+    Boolean(activeJobId) &&
+    parts.length > 0 &&
+    activeClips.filter((c) => c.status === 'done').length === parts.length;
+  const partSeconds = parts.reduce((a, p) => a + p.duration, 0);
+  const redoSeconds = Math.round(parts.filter((p) => redo.includes(p.partNum)).reduce((a, p) => a + p.duration, 0) * 10) / 10;
+  // Cost is linear in generated seconds, so the share of the full estimate is exact.
+  const refineInr = partSeconds > 0 ? Math.round((costInr * redoSeconds) / partSeconds) : 0;
+  const refineNeedsConfirm = refineInr > 500;
+
+  const toggleRedo = (partNum: number) =>
+    setRedo((r) => (r.includes(partNum) ? r.filter((n) => n !== partNum) : [...r, partNum].sort((a, b) => a - b)));
+
+  const runRefine = async () => {
+    if (!activeJobId) return;
+    setRefineStatus('running');
+    setRefineErr('');
+    const r = await api.refine(
+      activeJobId,
+      brief,
+      parts,
+      redo,
+      feedback,
+      refineNeedsConfirm ? refineInr : undefined,
+      modelId,
+      project,
+    );
+    setRefineStatus('idle');
+    if (isApiError(r)) {
+      setRefineErr(`${r.code}: ${r.message}`);
+      void loadHistory();
+      return;
+    }
+    setResult(r);
+    setViewing(null);
+    setStatus('done');
+    setRedo([]);
+    setRefineConfirmed(false);
+    onGenerated?.(r.jobId, r.finalUrl ?? null);
+    void loadHistory();
+  };
 
   return (
     <div className="card">
@@ -206,6 +277,101 @@ export function GenerationPanel({
           )
         )}
 
+        {finalSrc && activeJobId && status !== 'running' && (
+          <details className="refine">
+            <summary>Almost right? Fix a detail without paying for a full regenerate</summary>
+            <div className="refine-body">
+              {!canRefine ? (
+                <div className="check warn">
+                  <span className="icon">!</span>
+                  <span>
+                    The storyboard has changed since this video was made
+                    {activeClips.length ? ` (${activeClips.length} saved segments, ${parts.length} now)` : ''}, so its
+                    segments can no longer be re-used. Generate a fresh video instead.
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <textarea
+                    rows={3}
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                    placeholder={
+                      'What needs fixing? One point per line —\n' +
+                      'presenter should not point at the camera\n' +
+                      'park the car further from the entrance'
+                    }
+                  />
+                  <div className="refine-label">
+                    Which segments need the retake? Anything left unticked is re-used exactly as it is, and costs
+                    nothing.
+                  </div>
+                  <div className="refine-segs">
+                    {parts.map((p) => {
+                      const titles = (scenePlan?.scenes ?? [])
+                        .filter((sc) => sc.part === p.partNum - 1)
+                        .map((sc) => sc.beat.title);
+                      const on = redo.includes(p.partNum);
+                      return (
+                        <label key={p.partNum} className={`refine-seg${on ? ' on' : ''}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggleRedo(p.partNum)} />
+                          <span>
+                            <b>
+                              Segment {p.partNum} · {p.duration}s
+                            </b>
+                            <em>{titles.join(' → ') || `${fmtTime(p.start)}–${fmtTime(p.end)}`}</em>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="refine-cost">
+                    {redo.length === 0
+                      ? 'Nothing ticked — restitches the saved segments with the current footer, logos and end card. Free.'
+                      : `${redo.length} of ${parts.length} segment${parts.length > 1 ? 's' : ''} · ${redoSeconds}s to regenerate · ${formatInr(refineInr)} instead of ${formatInr(costInr)}.`}
+                  </div>
+                  {refineNeedsConfirm && (
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={refineConfirmed}
+                        onChange={(e) => setRefineConfirmed(e.target.checked)}
+                      />
+                      <span>Over ₹500 (est. ₹{refineInr.toLocaleString('en-IN')}) — confirm the spend.</span>
+                    </label>
+                  )}
+                  <div className="toolbar" style={{ marginTop: 8 }}>
+                    <button
+                      className="btn primary"
+                      disabled={refineStatus === 'running' || (refineNeedsConfirm && !refineConfirmed)}
+                      onClick={runRefine}
+                    >
+                      {refineStatus === 'running'
+                        ? 'Working…'
+                        : redo.length === 0
+                          ? 'Restitch — free'
+                          : `Retake ${redo.length} segment${redo.length > 1 ? 's' : ''}`}
+                    </button>
+                    {redo.length > 0 && !feedback.trim() && (
+                      <span className="hint">No note — the segment is simply rolled again.</span>
+                    )}
+                  </div>
+                  <div className="hint">
+                    The retake is seeded from the frame that precedes it and told to keep everything else identical, so
+                    it still cuts against its neighbours. The original stays in history either way.
+                  </div>
+                  {refineErr && (
+                    <div className="check bad" style={{ marginTop: 8 }}>
+                      <span className="icon">✕</span>
+                      <span>{refineErr}</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </details>
+        )}
+
         {history.length > 0 && (
           <div className="history">
             <div className="history-head">
@@ -240,9 +406,11 @@ export function GenerationPanel({
                         minute: '2-digit',
                       })}
                       {h.status !== 'done' && <span className={`badge s-${h.status}`}>{h.status}</span>}
+                      {h.parentJobId && <span className="badge retake">retake</span>}
                     </b>
                     <span>
                       {[
+                        h.parentJobId ? h.label : null,
                         h.totalSeconds ? `${h.totalSeconds}s` : null,
                         h.aspect,
                         h.resolution,

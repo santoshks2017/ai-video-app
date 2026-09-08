@@ -154,21 +154,43 @@ const tspans = (
     })
     .join('\n');
 
+/* ---------------------------------------------------------------------------
+ * Sizing. Everything below is measured against the frame's SHORT side, not its
+ * width. Sizing off the width meant a 16:9 frame (1280 wide, 720 tall) got type
+ * and bars scaled for a 1280-tall portrait frame: the footer alone ate a sixth
+ * of the picture and covered the action.
+ * ------------------------------------------------------------------------- */
+
+/** The bar may never take more than this fraction of the frame height. */
+const FOOTER_MAX_H = 0.085;
+/** Shared footprint for both corner logos, as a fraction of the short side. */
+const LOGO_BOX = { w: 0.26, h: 0.085 };
+
+const shortSide = (w: number, h: number): number => Math.min(w, h);
+
 /** Bottom strip: solid bar + centred contact detail, wrapped and fitted. */
-async function footerPng(text: string, w: number, ink: string): Promise<Buffer> {
-  const pad = Math.round(w * 0.05);
-  const maxWidth = w - pad * 2;
-  const fitted = fitText(text, maxWidth, {
-    start: Math.round(w * 0.036),
-    min: Math.round(w * 0.022),
-    maxLines: 2,
-  });
-  const h = Math.round(fitted.lineHeight * fitted.lines.length + w * 0.05);
+async function footerPng(text: string, W: number, H: number, ink: string): Promise<Buffer> {
+  const S = shortSide(W, H);
+  const pad = Math.round(W * 0.045);
+  const maxWidth = W - pad * 2;
+  const capH = Math.round(H * FOOTER_MAX_H);
+  const vPad = Math.round(S * 0.042);
+  const min = Math.max(10, Math.round(S * 0.019));
+  // A wide frame has room for the whole strip on one line; a tall one may need two.
+  const maxLines = W >= H ? 1 : 2;
+
+  let fitted = fitText(text, maxWidth, { start: Math.round(S * 0.034), min, maxLines });
+  let h = fitted.lineHeight * fitted.lines.length + vPad;
+  while (h > capH && fitted.fontSize > min) {
+    fitted = fitText(text, maxWidth, { start: fitted.fontSize - 1, min, maxLines });
+    h = fitted.lineHeight * fitted.lines.length + vPad;
+  }
+  h = Math.min(h, capH);
   const firstBaseline = Math.round((h - fitted.lineHeight * (fitted.lines.length - 1)) / 2 + fitted.fontSize * 0.35);
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-  <rect width="${w}" height="${h}" fill="${ink}" fill-opacity="0.92"/>
-  ${tspans(fitted, w / 2, firstBaseline, '#ffffff', 600, maxWidth)}
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${h}">
+  <rect width="${W}" height="${h}" fill="${ink}" fill-opacity="0.92"/>
+  ${tspans(fitted, W / 2, firstBaseline, '#ffffff', 600, maxWidth)}
 </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
@@ -181,26 +203,27 @@ async function endCardPng(
   accent: string,
   ink: string,
 ): Promise<Buffer> {
+  const S = shortSide(w, h);
   const [name, cta, ...rest] = spec.lines.map((l) => (l ?? '').trim()).filter(Boolean);
   const pad = Math.round(w * 0.08);
   const maxWidth = w - pad * 2;
 
   const nameFit = name
-    ? fitText(name, maxWidth, { start: Math.round(w * 0.075), min: Math.round(w * 0.036), maxLines: 3, bold: true })
+    ? fitText(name, maxWidth, { start: Math.round(S * 0.075), min: Math.round(S * 0.036), maxLines: 3, bold: true })
     : null;
   const ctaFit = cta
-    ? fitText(cta, maxWidth, { start: Math.round(w * 0.042), min: Math.round(w * 0.028), maxLines: 2 })
+    ? fitText(cta, maxWidth, { start: Math.round(S * 0.042), min: Math.round(S * 0.028), maxLines: 2 })
     : null;
   const restFits = rest.map((line) =>
-    fitText(line, maxWidth, { start: Math.round(w * 0.034), min: Math.round(w * 0.024), maxLines: 2 }),
+    fitText(line, maxWidth, { start: Math.round(S * 0.034), min: Math.round(S * 0.024), maxLines: 2 }),
   );
 
   // Lay the block out as a stack, then centre the whole thing vertically.
-  const gapAfterName = Math.round(w * 0.045);
-  const gapAfterCta = Math.round(w * 0.06);
-  const gapBetweenRest = Math.round(w * 0.012);
-  const logoH = spec.logo ? Math.round(h * 0.09) : 0;
-  const gapAfterLogo = spec.logo ? Math.round(w * 0.06) : 0;
+  const gapAfterName = Math.round(S * 0.045);
+  const gapAfterCta = Math.round(S * 0.06);
+  const gapBetweenRest = Math.round(S * 0.012);
+  const logoH = spec.logo ? Math.round(S * 0.11) : 0;
+  const gapAfterLogo = spec.logo ? Math.round(S * 0.06) : 0;
 
   const nameH = nameFit ? nameFit.lineHeight * nameFit.lines.length : 0;
   const ctaH = ctaFit ? ctaFit.lineHeight * ctaFit.lines.length : 0;
@@ -231,7 +254,7 @@ async function endCardPng(
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
   <rect width="${w}" height="${h}" fill="${ink}"/>
-  <rect x="0" y="0" width="${w}" height="${Math.round(h * 0.006)}" fill="${accent}"/>
+  <rect x="0" y="0" width="${w}" height="${Math.max(2, Math.round(S * 0.008))}" fill="${accent}"/>
   ${parts.join('\n')}
 </svg>`;
 
@@ -254,9 +277,60 @@ async function endCardPng(
   return base.png().toBuffer();
 }
 
-async function scaledLogo(src: Buffer, frameW: number): Promise<Buffer> {
-  return sharp(src)
-    .resize({ width: Math.round(frameW * 0.22), fit: 'inside', withoutEnlargement: false })
+/**
+ * Corner logo, normalised to a fixed footprint.
+ *
+ * Uploaded logos arrive at any pixel size, any aspect ratio and with any amount
+ * of blank canvas baked around the artwork. Scaling by width alone — what this
+ * did before — meant a tall square badge towered over a wide wordmark uploaded
+ * beside it. So: strip the padding, scale to a constant optical AREA rather than
+ * a constant width, clamp to a shared box, and return that box. Both corners
+ * then occupy exactly the same footprint whatever was uploaded.
+ */
+async function normalizedLogo(
+  src: Buffer,
+  W: number,
+  H: number,
+  align: 'left' | 'right',
+): Promise<Buffer> {
+  const S = shortSide(W, H);
+  const boxW = Math.round(S * LOGO_BOX.w);
+  const boxH = Math.round(S * LOGO_BOX.h);
+
+  // 1. Trim the blank margin so the artwork, not its canvas, sets the size.
+  //    (trim() throws on a completely uniform image — then there is nothing to trim.)
+  let art = src;
+  try {
+    art = await sharp(src).ensureAlpha().trim({ threshold: 12 }).png().toBuffer();
+  } catch {
+    art = await sharp(src).ensureAlpha().png().toBuffer();
+  }
+
+  const m = await sharp(art).metadata();
+  const aw = Math.max(1, m.width ?? boxW);
+  const ah = Math.max(1, m.height ?? boxH);
+
+  // 2. Equal optical weight: match ink area, then clamp so nothing overruns the box.
+  const targetArea = boxW * boxH * 0.6;
+  const scale = Math.min(Math.sqrt(targetArea / (aw * ah)), boxW / aw, boxH / ah);
+  const fitW = Math.max(1, Math.round(aw * scale));
+
+  const resized = await sharp(art)
+    .resize({ width: fitW, height: boxH, fit: 'inside', withoutEnlargement: false })
+    .png()
+    .toBuffer();
+  const rm = await sharp(resized).metadata();
+  const rw = Math.min(boxW, rm.width ?? fitW);
+  const rh = Math.min(boxH, rm.height ?? boxH);
+
+  // 3. Drop it into the shared box — vertically centred, pinned to the frame
+  //    edge — so left and right logos sit on an identical baseline.
+  return sharp({
+    create: { width: boxW, height: boxH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  })
+    .composite([
+      { input: resized, left: align === 'left' ? 0 : Math.max(0, boxW - rw), top: Math.max(0, Math.round((boxH - rh) / 2)) },
+    ])
     .png()
     .toBuffer();
 }
@@ -319,13 +393,13 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     };
 
     const footerIdx = overlay.footerText?.trim()
-      ? await addOverlayInput('footer.png', await footerPng(overlay.footerText.trim(), W, ink))
+      ? await addOverlayInput('footer.png', await footerPng(overlay.footerText.trim(), W, H, ink))
       : -1;
     const brandIdx = overlay.brandLogo
-      ? await addOverlayInput('brand.png', await scaledLogo(overlay.brandLogo, W))
+      ? await addOverlayInput('brand.png', await normalizedLogo(overlay.brandLogo, W, H, 'left'))
       : -1;
     const dealerIdx = overlay.dealerLogo
-      ? await addOverlayInput('dealer.png', await scaledLogo(overlay.dealerLogo, W))
+      ? await addOverlayInput('dealer.png', await normalizedLogo(overlay.dealerLogo, W, H, 'right'))
       : -1;
 
     // --- crossfade the clips together ---
@@ -346,13 +420,16 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     }
 
     // --- lay the brand furniture on top ---
+    // Both logo inputs are the same normalised box, so a single margin puts them
+    // on the same baseline however different the uploaded files were.
+    const margin = Math.round(shortSide(W, H) * 0.04);
     let vCur = vLast;
     if (brandIdx >= 0) {
-      parts.push(`[${vCur}][${brandIdx}:v]overlay=${Math.round(W * 0.04)}:${Math.round(W * 0.04)}[vb]`);
+      parts.push(`[${vCur}][${brandIdx}:v]overlay=${margin}:${margin}[vb]`);
       vCur = 'vb';
     }
     if (dealerIdx >= 0) {
-      parts.push(`[${vCur}][${dealerIdx}:v]overlay=W-w-${Math.round(W * 0.04)}:${Math.round(W * 0.04)}[vd]`);
+      parts.push(`[${vCur}][${dealerIdx}:v]overlay=W-w-${margin}:${margin}[vd]`);
       vCur = 'vd';
     }
     if (footerIdx >= 0) {
@@ -412,42 +489,71 @@ export async function lastFrame(clip: Buffer): Promise<Buffer | null> {
 
 /**
  * Verify the post-production toolchain without spending a generation: renders
- * the real footer + end-card art and probes ffmpeg. Surfaced on /api/health so
- * a broken container is obvious before a paid run, not after.
+ * the real footer + end-card art in BOTH orientations, normalises two
+ * deliberately mismatched logos, and probes ffmpeg. Surfaced on /api/health so a
+ * broken container — or a layout regression — is obvious before a paid run.
  */
 export async function selfTest(): Promise<{
   ok: boolean;
   ffmpeg?: string;
-  footerPx?: string;
+  portraitFooter?: string;
+  landscapeFooter?: string;
+  landscapeFooterPct?: string;
   endCardPx?: string;
+  logoBox?: string;
+  logosMatch?: boolean;
   textRendered?: boolean;
   error?: string;
 }> {
   try {
     const version = (await run('ffmpeg', ['-version'])).split('\n')[0] ?? '';
-    const footer = await footerPng('Sterling Hyundai  |  MG Road  |  98765 43210', 720, DEFAULT_INK);
-    const fm = await sharp(footer).metadata();
+    const strip = 'Sterling Hyundai  ·  MG Road, Bengaluru  ·  98765 43210';
+
+    const portrait = await footerPng(strip, 720, 1280, DEFAULT_INK);
+    const pm = await sharp(portrait).metadata();
+    const landscape = await footerPng(strip, 1280, 720, DEFAULT_INK);
+    const lm = await sharp(landscape).metadata();
+
     const end = await endCardPng(
       { lines: ['Sterling Hyundai', 'Book your test drive today', 'MG Road'], seconds: 3 },
-      720,
       1280,
+      720,
       DEFAULT_ACCENT,
       DEFAULT_INK,
     );
     const em = await sharp(end).metadata();
 
+    // Two logos of wildly different pixel size and shape must come out of the
+    // normaliser occupying the identical box — that is the whole point of it.
+    const tall = await sharp({
+      create: { width: 900, height: 900, channels: 4, background: { r: 20, g: 60, b: 160, alpha: 1 } },
+    })
+      .png()
+      .toBuffer();
+    const wide = await sharp({
+      create: { width: 240, height: 48, channels: 4, background: { r: 200, g: 40, b: 40, alpha: 1 } },
+    })
+      .png()
+      .toBuffer();
+    const a = await sharp(await normalizedLogo(tall, 720, 1280, 'left')).metadata();
+    const b = await sharp(await normalizedLogo(wide, 720, 1280, 'right')).metadata();
+
     // If fonts are missing the SVG rasterises to a flat bar — compare the text
     // band against the bar colour to prove glyphs actually drew.
-    const band = await sharp(footer)
-      .extract({ left: 60, top: Math.round((fm.height ?? 92) * 0.3), width: 600, height: 20 })
+    const band = await sharp(portrait)
+      .extract({ left: 60, top: Math.round((pm.height ?? 92) * 0.3), width: 600, height: 20 })
       .stats();
     const textRendered = (band.channels[0]?.stdev ?? 0) > 8;
 
     return {
       ok: true,
       ffmpeg: version,
-      footerPx: `${fm.width}x${fm.height}`,
+      portraitFooter: `${pm.width}x${pm.height}`,
+      landscapeFooter: `${lm.width}x${lm.height}`,
+      landscapeFooterPct: `${Math.round(((lm.height ?? 0) / 720) * 100)}%`,
       endCardPx: `${em.width}x${em.height}`,
+      logoBox: `${a.width}x${a.height}`,
+      logosMatch: a.width === b.width && a.height === b.height,
       textRendered,
     };
   } catch (e) {

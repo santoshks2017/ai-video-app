@@ -31,6 +31,8 @@ export interface JobClip {
   storagePath: string;
   status: 'pending' | 'done' | 'failed';
   error?: string;
+  /** Carried over from an earlier job rather than generated — costs nothing. */
+  reused?: boolean;
 }
 
 export interface JobRecord {
@@ -58,6 +60,13 @@ export interface JobRecord {
   /** The single finished video (a run's cumulative clip, or the ffmpeg-stitched result). */
   finalStoragePath?: string;
   error?: string;
+  /* ---- refinement: a partial re-run of an earlier job ---- */
+  /** The job this one was refined from — set only on refinements. */
+  parentJobId?: string;
+  /** Which part numbers were actually re-generated; the rest were re-used. */
+  refinedParts?: number[];
+  /** The reviewer's note that drove the retake. */
+  feedback?: string;
 }
 
 export async function saveJob(rec: JobRecord): Promise<void> {

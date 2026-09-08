@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
-import { isPromptOnly, estimateCost, overlayCopy, type Brief, type PromptPart } from '@ava/shared';
+import {
+  isPromptOnly,
+  estimateCost,
+  estimateSegmentsCost,
+  applyFeedback,
+  overlayCopy,
+  type Brief,
+  type PromptPart,
+} from '@ava/shared';
 import { loadConfig } from './config.js';
 import { generateClip, downloadFile, OmniFlashError, type OmniRef } from './omniFlash.js';
 import {
@@ -252,6 +260,53 @@ async function resolveModel(requestedId?: string): Promise<ResolvedModel | { err
 }
 
 /**
+ * Read the brief's attachments back out of Cloud Storage and sort them: image
+ * references get grounded into the model, logos are overlay assets that post
+ * composites (the model garbles any logo it tries to draw).
+ */
+async function loadBriefAssets(brief: Brief): Promise<{
+  references: OmniRef[];
+  dealerLogo?: Buffer;
+  brandLogo?: Buffer;
+}> {
+  const references: OmniRef[] = [];
+  let dealerLogo: Buffer | undefined;
+  let brandLogo: Buffer | undefined;
+  for (const a of brief.attachments ?? []) {
+    if (!a.storagePath) continue;
+    const obj = await readObject(a.storagePath).catch(() => null);
+    if (!obj) continue;
+    if (a.kind === 'logo') {
+      dealerLogo = obj.bytes;
+      continue;
+    }
+    if (a.kind === 'brand-logo') {
+      brandLogo = obj.bytes;
+      continue;
+    }
+    references.push({
+      data: obj.bytes.toString('base64'),
+      mimeType: obj.contentType || 'image/jpeg',
+      kind: 'image',
+    });
+  }
+  return { references, dealerLogo, brandLogo };
+}
+
+/** The deterministic brand furniture laid over the finished cut. */
+function buildOverlay(brief: Brief, dealerLogo?: Buffer, brandLogo?: Buffer): BrandOverlay {
+  const copy = overlayCopy(brief);
+  return {
+    footerText: copy.footerText,
+    dealerLogo,
+    brandLogo,
+    endCard:
+      brief.endCardOn && copy.endCardLines.length ? { lines: copy.endCardLines, seconds: 3 } : undefined,
+    transition: 0.5,
+  };
+}
+
+/**
  * P0.1 / P0.7 — generate the video by running the parts as a create-then-extend
  * chain on Omni Flash. Long-running (minutes): the Cloud Run request timeout is
  * raised in deploy config; progress is written to the Firestore job record so a
@@ -316,30 +371,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   };
   await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
 
-  // Ground the model with any uploaded / scraped reference images (P0.4 / P0.2):
-  // read the stored bytes and pass them inline as base64.
-  const references: OmniRef[] = [];
-  let dealerLogo: Buffer | undefined;
-  let brandLogo: Buffer | undefined;
-  for (const a of brief.attachments ?? []) {
-    if (!a.storagePath) continue;
-    const obj = await readObject(a.storagePath).catch(() => null);
-    if (!obj) continue;
-    // Logos are overlay assets, not things the model should try to draw.
-    if (a.kind === 'logo') {
-      dealerLogo = obj.bytes;
-      continue;
-    }
-    if (a.kind === 'brand-logo') {
-      brandLogo = obj.bytes;
-      continue;
-    }
-    references.push({
-      data: obj.bytes.toString('base64'),
-      mimeType: obj.contentType || 'image/jpeg',
-      kind: 'image',
-    });
-  }
+  const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
 
   // No `extend` — each segment is an independent `create`, seeded with the
   // PREVIOUS segment's last frame as a reference image (+ any brief reference
@@ -404,15 +436,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     // Post-production: crossfade the segments, append a real end card, and
     // overlay the footer bar + logos. Everything that must be legible is drawn
     // here rather than generated.
-    const copy = overlayCopy(brief);
-    const overlay: BrandOverlay = {
-      footerText: copy.footerText,
-      dealerLogo,
-      brandLogo,
-      endCard: brief.endCardOn && copy.endCardLines.length ? { lines: copy.endCardLines, seconds: 3 } : undefined,
-      transition: 0.5,
-    };
-    const finalBytes = await composeFinal(segmentBytes, overlay);
+    const finalBytes = await composeFinal(segmentBytes, buildOverlay(brief, dealerLogo, brandLogo));
     const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 
     // Thumbnail for the project's generation history.
@@ -486,6 +510,244 @@ app.get<{ Params: { jobId: string } }>('/api/generate/:jobId', async (req, reply
   };
 });
 
+/**
+ * Retake only what is wrong.
+ *
+ * A finished video is usually right apart from one or two details, and paying to
+ * regenerate all of it burns the segments that were already good. This re-runs
+ * just the segments named in `redo` — with the reviewer's note appended to their
+ * prompts — re-uses the rest of the stored clips byte for byte, and restitches.
+ * `redo: []` is the free path: no model call at all, just a fresh composite, so
+ * a footer, logo or end-card correction costs nothing.
+ */
+interface RefineBody {
+  brief: Brief;
+  parts: PromptPart[];
+  /** Part numbers to regenerate. Empty = restitch the stored segments only. */
+  redo?: number[];
+  feedback?: string;
+  modelId?: string;
+  projectId?: string;
+  projectName?: string;
+  confirmedCostInr?: number;
+}
+
+app.post<{ Params: { jobId: string }; Body: RefineBody }>(
+  '/api/generate/:jobId/refine',
+  async (req, reply) => {
+    const source = await getJob(req.params.jobId);
+    if (!source) return reply.code(404).send({ code: 'not-found', message: 'No such job to refine' });
+
+    const { brief, parts } = req.body ?? ({} as RefineBody);
+    if (!brief || !Array.isArray(parts) || parts.length === 0) {
+      return reply.code(400).send({ code: 'bad-request', message: 'brief and parts are required' });
+    }
+
+    const redo = [...new Set((req.body?.redo ?? []).map(Number))]
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b);
+    const feedback = (req.body?.feedback ?? '').trim();
+
+    // The stored clips only line up with the plan if the brief has not changed
+    // shape since that run. If it has, re-using them would splice a stale scene
+    // into a different edit — say so instead of quietly producing a mess.
+    const stored = new Map(
+      (source.clips ?? []).filter((c) => c.status === 'done' && c.storagePath).map((c) => [c.partNum, c]),
+    );
+    const stale = parts
+      .filter((p) => !redo.includes(p.partNum))
+      .filter((p) => {
+        const c = stored.get(p.partNum);
+        return !c || Math.abs((c.seconds ?? 0) - p.duration) > 0.6;
+      });
+    if (stale.length) {
+      return reply.code(409).send({
+        code: 'segments-stale',
+        message: `The storyboard has changed since that run, so segment${
+          stale.length > 1 ? 's' : ''
+        } ${stale.map((p) => p.partNum).join(', ')} no longer match what was saved. Generate a fresh video instead of refining.`,
+      });
+    }
+
+    // Only the re-run segments are billed. A restitch is free.
+    let resolved: ResolvedModel | null = null;
+    if (redo.length) {
+      const picked = await resolveModel(req.body?.modelId);
+      if ('error' in picked) return reply.code(503).send({ code: picked.code, message: picked.error });
+      resolved = picked;
+    }
+    const usdPerSecond = resolved?.usdPerSecond ?? source.usdPerSecond ?? config.usdPerSecond;
+    const redoSeconds = parts
+      .filter((p) => redo.includes(p.partNum))
+      .reduce((a, p) => a + p.duration, 0);
+    const cost = estimateSegmentsCost(redoSeconds, redo.length, { usdPerSecond });
+    if (cost.needsConfirmation && (req.body?.confirmedCostInr ?? 0) < cost.inr) {
+      return reply.code(428).send({
+        code: 'cost-confirmation-required',
+        message: `Estimated ₹${cost.inr} exceeds the ₹500 threshold — resubmit with confirmedCostInr.`,
+        cost,
+      });
+    }
+
+    const jobId = randomUUID();
+    const now = Date.now();
+    const clips: JobClip[] = parts.map((p) => ({
+      partNum: p.partNum,
+      totalParts: p.totalParts,
+      seconds: p.duration,
+      start: p.start,
+      end: p.end,
+      interactionId: '',
+      storagePath: '',
+      status: 'pending',
+    }));
+    const totalSeconds = parts.reduce((a, p) => a + p.duration, 0);
+    const record: JobRecord = {
+      jobId,
+      parentJobId: source.jobId,
+      refinedParts: redo,
+      feedback: feedback || undefined,
+      projectId: req.body?.projectId ?? source.projectId,
+      projectName: req.body?.projectName ?? source.projectName,
+      label: redo.length
+        ? `Retake · segment${redo.length > 1 ? 's' : ''} ${redo.join(', ')} of ${parts.length}`
+        : 'Restitch · overlays only',
+      modelName: resolved?.label ?? source.modelName,
+      status: 'running',
+      createdAt: now,
+      updatedAt: now,
+      categories: brief.categories,
+      dealerName: brief.dealer.dealerName,
+      aspect: brief.aspect,
+      resolution: RES,
+      totalSeconds: Math.round(totalSeconds * 10) / 10,
+      costInr: cost.inr,
+      costUsd: cost.usd,
+      usdPerSecond,
+      clips,
+    };
+    await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
+
+    const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+
+    try {
+      const segmentBytes: Buffer[] = [];
+      let prevBytes: Buffer | null = null;
+
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i]!;
+        let bytes: Buffer;
+
+        if (!redo.includes(part.partNum)) {
+          const from = stored.get(part.partNum)!;
+          const obj = await readObject(from.storagePath);
+          if (!obj) throw new OmniFlashError('segment-missing', `Saved segment ${part.partNum} is gone from storage.`);
+          bytes = obj.bytes;
+          clips[i] = {
+            ...clips[i]!,
+            interactionId: from.interactionId,
+            storagePath: await uploadClip(jobId, part.partNum, bytes, 'video/mp4'),
+            status: 'done',
+            reused: true,
+          };
+        } else {
+          const model = resolved!;
+          const isFirst = i === 0;
+          const refs: OmniRef[] = [];
+          let seededFromFrame = false;
+          // Seed from whatever now precedes this segment — a re-used clip or a
+          // freshly retaken one — so the retake still cuts against its neighbour.
+          if (!isFirst && prevBytes && model.supportsImageToVideo) {
+            const frame = await lastFrame(prevBytes);
+            if (frame) {
+              refs.push({ data: frame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
+              seededFromFrame = true;
+            }
+          }
+          refs.push(
+            ...(seededFromFrame ? references.slice(0, Math.max(0, model.maxReferenceImages - 1)) : references),
+          );
+
+          const clip = await generateClip(
+            {
+              prompt: applyFeedback(isFirst ? part.text : part.continuationText || part.text, feedback),
+              aspect: brief.aspect,
+              resolution: RES,
+              references: refs.length ? refs : undefined,
+              task: seededFromFrame ? 'image_to_video' : refs.length ? 'reference_to_video' : 'text_to_video',
+              model: model.modelId,
+            },
+            model.apiKey,
+          );
+          bytes = clip.base64
+            ? Buffer.from(clip.base64, 'base64')
+            : clip.fileId
+              ? (await downloadFile(clip.fileId, model.apiKey)).bytes
+              : (() => {
+                  throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
+                })();
+          clips[i] = {
+            ...clips[i]!,
+            interactionId: clip.interactionId,
+            storagePath: await uploadClip(jobId, part.partNum, bytes, clip.mimeType),
+            status: 'done',
+          };
+        }
+
+        await updateJob(jobId, { clips });
+        segmentBytes.push(bytes);
+        prevBytes = bytes;
+      }
+
+      // Overlay copy is rebuilt from the current brief, so a footer or end-card
+      // correction lands here even on the free restitch path.
+      const finalBytes = await composeFinal(segmentBytes, buildOverlay(brief, dealerLogo, brandLogo));
+      const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
+
+      let posterPath: string | undefined;
+      const poster = await posterFrame(finalBytes).catch(() => null);
+      if (poster) {
+        posterPath = (await putRef(`poster-${jobId}.jpg`, 'image/jpeg', poster).catch(() => null))?.storagePath;
+      }
+
+      await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath });
+
+      const projectId = req.body?.projectId ?? source.projectId;
+      if (projectId) {
+        const proj = await getOne<{ generationCount?: number; totalCostInr?: number }>('projects', projectId);
+        if (proj) {
+          await patch('projects', projectId, {
+            generationCount: (proj.generationCount ?? 0) + 1,
+            totalCostInr: (proj.totalCostInr ?? 0) + cost.inr,
+            lastJobId: jobId,
+            lastFinalUrl: `/api/clips/${jobId}/final`,
+            status: 'generated',
+          }).catch(() => {});
+        }
+      }
+
+      return {
+        jobId,
+        status: 'done',
+        cost,
+        finalUrl: `/api/clips/${jobId}/final`,
+        clips: clipsForClient(jobId, clips),
+      };
+    } catch (err) {
+      const e = err as OmniFlashError;
+      const failedIdx = clips.findIndex((c) => c.status === 'pending');
+      if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
+      await updateJob(jobId, { status: 'failed', error: e.message, clips }).catch(() => {});
+      return reply.code(e instanceof OmniFlashError ? e.status : 502).send({
+        code: e.code ?? 'refine-failed',
+        message: e.message,
+        jobId,
+        clips: clipsForClient(jobId, clips),
+      });
+    }
+  },
+);
+
 /** Every generation ever made for a project — nothing is overwritten. */
 app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req) => {
   const jobs = await listJobsForProject(req.params.id);
@@ -506,6 +768,9 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req)
       dealerName: j.dealerName,
       categories: j.categories,
       error: j.error,
+      parentJobId: j.parentJobId,
+      refinedParts: j.refinedParts,
+      feedback: j.feedback,
       finalUrl: j.finalStoragePath ? `/api/clips/${j.jobId}/final` : null,
       posterUrl: j.posterPath ? `/api/clips/${j.jobId}/poster` : null,
     })),

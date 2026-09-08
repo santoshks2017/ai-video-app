@@ -19,6 +19,8 @@ import {
   CATEGORY_BY_ID,
   filenameFromLabel,
   dedupeFilenames,
+  applyFeedback,
+  estimateSegmentsCost,
   type Brief,
 } from '@ava/shared';
 
@@ -149,4 +151,30 @@ test('attachment filenames are derived from labels and deduped', () => {
     { label: 'Front', filename: '', kind: 'car-model' },
   ]);
   assert.notEqual(out[0]!.filename, out[1]!.filename);
+});
+
+
+test('a retake prompt pins everything the note does not mention', () => {
+  const out = applyFeedback('SHOT: presenter beside the car.', 'she should not point at the camera\nbrighten the sky');
+  assert.ok(out.startsWith('SHOT: presenter beside the car.'), 'the original prompt is kept intact');
+  assert.match(out, /1\. she should not point at the camera/);
+  assert.match(out, /2\. brighten the sky/);
+  assert.match(out, /same person|same car|same location/);
+  // Bullet characters and numbering the reviewer types are stripped, not doubled.
+  assert.ok(!applyFeedback('X', '- fix the sky').includes('1. - fix'));
+  // No note means no retake block — an unchanged prompt, so nothing to re-read.
+  assert.equal(applyFeedback('X', '   '), 'X');
+});
+
+test('a retake is billed only for the seconds it regenerates', () => {
+  const full = estimateSegmentsCost(30, 4, { usdPerSecond: 0.15, usdToInr: 88 });
+  const one = estimateSegmentsCost(7.5, 1, { usdPerSecond: 0.15, usdToInr: 88 });
+  assert.equal(one.totalSeconds, 7.5);
+  assert.equal(one.clipCount, 1);
+  // Cost is linear in seconds, which is what lets the UI show the exact share.
+  assert.equal(Math.round(full.inr / 4), one.inr);
+  // A free restitch: no seconds, no calls, no spend, no confirmation gate.
+  const none = estimateSegmentsCost(0, 0, { usdPerSecond: 0.15, usdToInr: 88 });
+  assert.equal(none.inr, 0);
+  assert.equal(none.needsConfirmation, false);
 });

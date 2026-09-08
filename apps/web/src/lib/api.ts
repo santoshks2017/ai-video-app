@@ -38,6 +38,10 @@ export interface GenerationHistoryItem {
   error?: string;
   finalUrl: string | null;
   posterUrl: string | null;
+  /** Set when this run was a retake of an earlier one rather than a fresh video. */
+  parentJobId?: string;
+  refinedParts?: number[];
+  feedback?: string;
 }
 
 export interface GenerateResult {
@@ -106,6 +110,41 @@ export const api = {
       finalUrl: absolute(i.finalUrl),
       posterUrl: absolute(i.posterUrl),
     }));
+  },
+
+  /**
+   * Retake only the segments listed in `redo`, re-using the rest of that job's
+   * saved clips. `redo: []` restitches the stored segments with the current
+   * overlay copy — no model call, no cost.
+   */
+  async refine(
+    jobId: string,
+    brief: Brief,
+    parts: PromptPart[],
+    redo: number[],
+    feedback: string,
+    confirmedCostInr?: number,
+    modelId?: string,
+    project?: { id: string; name: string },
+  ) {
+    const r = await req<GenerateResult>(`/api/generate/${jobId}/refine`, {
+      method: 'POST',
+      body: JSON.stringify({
+        brief,
+        parts,
+        redo,
+        feedback,
+        confirmedCostInr,
+        modelId,
+        projectId: project?.id,
+        projectName: project?.name,
+      }),
+    });
+    if (isApiError(r)) {
+      r.clips = errorClips(r).map((c) => ({ ...c, url: absolute(c.url) }));
+      return r;
+    }
+    return hydrate(r);
   },
 
   async job(jobId: string) {

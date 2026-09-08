@@ -370,7 +370,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push(textLangLine(brief.textLang));
       C.push('One short headline plus at most one smaller sub-line per card. Never more than two text elements on screen at once.');
     } else {
-      C.push('No on-screen text cards in this segment. Only the persistent corner logos and the footer bar.');
+      C.push('No on-screen text cards in this segment — no text of any kind on screen.');
     }
     C.push(CLEAN_FRAME);
     if (mode.speaks) C.push('Same Hindi/Hinglish pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
@@ -396,4 +396,32 @@ export function joinPromptParts(parts: PromptPart[]): string {
   return parts
     .map((p) => (p.totalParts > 1 ? `===== PART ${p.partNum} / ${p.totalParts} =====\n\n${p.text}` : p.text))
     .join('\n\n\n');
+}
+
+
+/**
+ * Turn a reviewer's note into a retake instruction.
+ *
+ * A finished video is usually 90% right — one gesture, one colour, one bit of
+ * staging is off. Regenerating the whole thing pays for every good second again.
+ * Instead the offending segment alone is re-run with its original prompt plus
+ * this block, which pins everything else down so the retake still cuts against
+ * its neighbours.
+ */
+export function applyFeedback(prompt: string, feedback: string): string {
+  const notes = (feedback ?? '')
+    .split(/\r?\n|;/)
+    .map((n) => n.replace(/^[-*\u2022\d.)\s]+/, '').trim())
+    .filter(Boolean);
+  if (!notes.length) return prompt;
+
+  return [
+    prompt,
+    '',
+    '## RETAKE — THIS SHOT HAS ALREADY BEEN FILMED',
+    'Everything above was generated once and approved except for the corrections listed below. This is a retake of the SAME shot, not a new idea: same person with the same face, hair, wardrobe and expression, the same car in the same colour, trim and position, the same location and background, the same time of day and lighting, the same lens, framing and camera move, the same on-screen text, the same pacing and the same first and last frame composition.',
+    'Change ONLY these points:',
+    ...notes.map((n, i) => `${i + 1}. ${n}`),
+    'Change nothing else. Any difference other than the points listed above is a failed retake.',
+  ].join('\n');
 }

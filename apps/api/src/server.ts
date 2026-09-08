@@ -115,30 +115,26 @@ app.addHook('preHandler', async (req, reply) => {
   if (req.method === 'OPTIONS') return;
   const url = (req.raw.url ?? '').split('?')[0] ?? '';
   if (!url.startsWith('/api/')) return;
-  if (OPEN_PATHS.has(url)) return;
+  if (url === '/api/health') return;
   // Clips and reference images are fetched by <video>/<img>, which cannot send
   // an Authorization header. They are unguessable UUID paths.
   if (url.startsWith('/api/clips/') || url.startsWith('/api/refs/')) return;
 
+  // Identify the caller FIRST, for every guarded route and for /api/session.
+  // Session is open — it is how the browser asks "am I signed in?" — but it
+  // still needs the answer, so resolution has to happen before that exemption.
   const token = bearer(req.headers.authorization);
-
   if (token && looksLikeIdToken(token)) {
     const caller = await resolveIdToken(token);
-    if (!caller) {
-      return reply.code(401).send({ code: 'unauthorized', message: 'Sign in again — your session expired.' });
-    }
-    req.caller = caller;
+    if (caller) req.caller = caller;
   } else if (verifyToken(token)) {
     // The legacy shared password predates per-person sign-in. It still works and
     // acts as an admin, so a Google outage cannot lock the team out.
-    req.caller = {
-      uid: 'legacy',
-      email: '',
-      role: 'admin',
-      isOwner: false,
-      legacy: true,
-    };
-  } else {
+    req.caller = { uid: 'legacy', email: '', role: 'admin', isOwner: false, legacy: true };
+  }
+
+  if (OPEN_PATHS.has(url)) return;
+  if (!req.caller) {
     return reply.code(401).send({ code: 'unauthorized', message: 'Sign in to use this app.' });
   }
 

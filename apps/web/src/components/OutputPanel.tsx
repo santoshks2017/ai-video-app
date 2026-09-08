@@ -19,6 +19,7 @@ export function OutputPanel({
   promptOnly: boolean;
 }) {
   const [toast, setToast] = useState('');
+  const longest = parts.reduce((n, p) => Math.max(n, p.text.length), 0);
   // Accordion: at most one prompt part open at a time, all collapsed by default.
   const [openPart, setOpenPart] = useState<number | null>(null);
 
@@ -38,9 +39,20 @@ export function OutputPanel({
         <div>
           <h2>{promptOnly ? 'Master prompt (copy for Lumina)' : 'Master prompt'}</h2>
           <div className="prompt-meta">
-            {parts.length > 0
-              ? `${parts.length} part${parts.length > 1 ? 's' : ''}`
-              : 'Pick categories and fill the brief'}
+            {parts.length > 0 ? (
+              <>
+                {parts.length} part{parts.length > 1 ? 's' : ''} ·{' '}
+                {/* Size is shown because a bloated prompt is invisible otherwise:
+                    direction pasted here once grew to 54% of what the model read,
+                    and the footage collapsed with nothing on screen to explain it. */}
+                <span className={longest > 12000 ? 'bloat' : undefined}>
+                  {(longest / 1000).toFixed(1)}k characters
+                </span>
+                {longest > 12000 && ' — the shot direction is competing with the rules'}
+              </>
+            ) : (
+              'Pick categories and fill the brief'
+            )}
           </div>
         </div>
         {toast && <span className="toast">{toast}</span>}

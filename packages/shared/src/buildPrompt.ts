@@ -345,8 +345,21 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
 
     if (mode.speaks) {
       L.push('');
-      L.push('## PRONUNCIATION & DELIVERY RULES (apply to every spoken word in this clip)');
-      L.push(rulebookText(actor.gender));
+      if (hasScript) {
+        // The exact words AND their pronunciation are already fixed in the
+        // SPOKEN LINES block. Repeating 2.8KB of rules for saying numbers,
+        // abbreviations and currency then adds nothing — and every kilobyte the
+        // model does not need dilutes the shot direction it does.
+        L.push('## DELIVERY');
+        L.push(
+          `${brief.language?.name ?? 'Hindi/Hinglish'}, ${
+            actor.gender === 'male' ? 'masculine' : 'feminine'
+          } verb forms, natural unhurried pace with real pauses. The words and their pronunciation are fixed above — do not restyle, re-order or re-pronounce them.`,
+        );
+      } else {
+        L.push('## PRONUNCIATION & DELIVERY RULES (apply to every spoken word in this clip)');
+        L.push(rulebookText(actor.gender));
+      }
     }
 
     // Prompt for segments 2+. Each is an independent `create` call seeded with

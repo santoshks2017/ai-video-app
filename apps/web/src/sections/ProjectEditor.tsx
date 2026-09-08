@@ -88,9 +88,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const preflight = useMemo(
     () =>
       brief
-        ? runChecks(brief, { sceneOverrides: project?.sceneEdits ?? {}, model: activeModel })
+        ? runChecks(brief, { sceneOverrides: project?.sceneEdits ?? {}, model: activeModel, models })
         : null,
-    [brief, project?.sceneEdits, activeModel],
+    [brief, project?.sceneEdits, activeModel, models],
   );
 
   // Clip length is a capability of the model, not a taste decision, so switching

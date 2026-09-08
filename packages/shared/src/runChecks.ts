@@ -28,7 +28,9 @@ export interface RunChecksOptions {
   /** Storyboard edits, keyed by global scene index — where written lines live. */
   sceneOverrides?: Record<string, { dialogue?: string; phonetic?: string; shot?: string }>;
   /** The model this brief will actually run on, for capability checks. */
-  model?: { name?: string; speechLanguages?: string[] } | null;
+  model?: { name?: string; speechLanguages?: string[]; maxClipSec?: number } | null;
+  /** Every model available to pick, so a better fit for this duration can be named. */
+  models?: { name?: string; maxClipSec?: number; enabled?: boolean }[];
 }
 
 export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightResult {
@@ -139,6 +141,45 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
       code: 'beats-trimmed',
       text: `${plan.droppedBeats} beat${plan.droppedBeats > 1 ? 's were' : ' was'} left out so the rest have room at ${ctx.totalDuration}s. Lengthen the video or pick fewer use cases to keep them all.`,
     });
+  }
+
+  // Prompt budget. Global instructions and the project's own steer are pasted
+  // verbatim into the video prompt, and a video model reads all of it as
+  // direction for the film. A pronunciation document left switched on here once
+  // reached 54% of a 25,000-character prompt, and the footage collapsed into
+  // disconnected stock shots with garbled floating text. Nothing in the app said
+  // a word about it, so this is the check that would have caught it on day one.
+  const directionChars = (brief.extraDirection ?? []).join('\n').trim().length;
+  if (directionChars > 5000) {
+    checks.push({
+      level: 'bad',
+      code: 'direction-overwhelms-prompt',
+      text: `Your extra direction is ${directionChars.toLocaleString()} characters — far longer than the shot description, so it is most of what the video model reads. Long reference documents belong in Languages (spoken and on-screen rules) or in the storyboard, not here: the video model treats every line of this as an instruction for the film. Switch the long instruction off in Instructions, or cut it back.`,
+    });
+  } else if (directionChars > 1200) {
+    checks.push({
+      level: 'warn',
+      code: 'direction-long',
+      text: `Extra direction is ${directionChars.toLocaleString()} characters. Keep house rules short and visual — anything long competes with the shot description for the model's attention.`,
+    });
+  }
+
+  // A duration that needs splitting on this model but would fit one take on
+  // another. Every extra segment is another paid call and another chance for the
+  // presenter, car or lighting to drift across the cut.
+  if (plan.parts > 1) {
+    const better = (opts.models ?? [])
+      .filter((m) => m.enabled !== false && (m.maxClipSec ?? 0) >= ctx.totalDuration)
+      .sort((a, b) => (a.maxClipSec ?? 0) - (b.maxClipSec ?? 0))[0];
+    if (better?.name) {
+      checks.push({
+        level: 'warn',
+        code: 'model-forces-split',
+        text: `${opts.model?.name ?? 'This model'} caps at ${
+          opts.model?.maxClipSec ?? ctx.maxChunk
+        }s, so this ${ctx.totalDuration}s video is split into ${plan.parts} separate generations and stitched. ${better.name} renders all ${ctx.totalDuration}s in one take — no cuts to drift across. Worth switching before you pay for ${plan.parts} calls.`,
+      });
+    }
   }
 
   // Spoken script (the Hindi-pronunciation failure). The beats carry stage

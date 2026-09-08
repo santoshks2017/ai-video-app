@@ -145,6 +145,7 @@ function copyInstruction(req: ScriptRequest): string {
     `You write the spoken lines for short Indian car-dealership ad videos in ${lang}. The lines are performed to camera by a presenter and lip-synced by an AI video model, so each must be exactly what she or he says — no stage directions, no narration about the shot.`,
     '',
     'STYLE',
+    `- Write in ${lang}'s own script — Devanagari for Hindi. This line is what a person reads to check the meaning, so it must be readable ${lang}, never a phonetic respelling and never romanised.`,
     `- Everyday spoken ${lang} as people actually talk, not written or literary register.`,
     '- Keep the English words Indians use in English in English: test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, and all brand and model names.',
     `- ${verbs}`,

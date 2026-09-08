@@ -1106,3 +1106,5 @@ textarea.guide {
 .release ul { margin: 6px 0 0; padding-left: 17px; display: grid; gap: 4px; }
 .release li { font-size: 12.5px; line-height: 1.5; color: var(--ink-muted); }
 .release.current li { color: var(--ink); }
+
+.prompt-meta .bloat { color: var(--bad); font-weight: 600; }

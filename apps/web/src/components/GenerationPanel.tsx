@@ -123,6 +123,7 @@ export function GenerationPanel({
     };
   }, [activeJobId, jobClips, result?.jobId]);
 
+  const clipsLoading = Boolean(activeJobId) && result?.jobId !== activeJobId && !jobClips[activeJobId ?? ''];
   // A retake splices new segments into the saved ones, so the plan has to be the
   // same shape it was when they were made.
   const canRefine =
@@ -281,7 +282,9 @@ export function GenerationPanel({
           <details className="refine">
             <summary>Almost right? Fix a detail without paying for a full regenerate</summary>
             <div className="refine-body">
-              {!canRefine ? (
+              {clipsLoading ? (
+                <div className="hint">Checking which segments were saved…</div>
+              ) : !canRefine ? (
                 <div className="check warn">
                   <span className="icon">!</span>
                   <span>

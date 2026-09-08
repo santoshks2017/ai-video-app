@@ -1,4 +1,4 @@
-import { type ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import {
   fmtTime,
   wordBudget,
@@ -18,13 +18,18 @@ export function Storyboard({
   narration,
   onEditScene,
   onClearEdits,
+  onWriteScript,
 }: {
   scenePlan: ScenePlan | null;
   sceneEdits: Record<string, { dialogue?: string; shot?: string }>;
   narration: NarrationKey;
   onEditScene: (key: string, patch: { dialogue?: string; shot?: string }) => void;
   onClearEdits: () => void;
+  /** Fills every spoken scene with a real line. Resolves to a status message. */
+  onWriteScript?: () => Promise<string>;
 }) {
+  const [writing, setWriting] = useState(false);
+  const [scriptNote, setScriptNote] = useState('');
   const mode = narrationMode(narration);
   const editScene = onEditScene;
   const clearSceneEdits = onClearEdits;
@@ -34,6 +39,18 @@ export function Storyboard({
   }
 
   const editCount = Object.keys(sceneEdits).length;
+  const spokenScenes = mode.speaks ? scenePlan.scenes.filter((sc) => sc.beat.dialogue).length : 0;
+  const scripted = mode.speaks
+    ? scenePlan.scenes.filter((_, i) => (sceneEdits[String(i)]?.dialogue ?? '').trim()).length
+    : 0;
+
+  const writeScript = async () => {
+    if (!onWriteScript) return;
+    setWriting(true);
+    setScriptNote('');
+    setScriptNote(await onWriteScript());
+    setWriting(false);
+  };
 
   let lastPart = -1;
 
@@ -46,6 +63,24 @@ export function Storyboard({
         </span>
       </div>
       <div className="body tight" style={{ overflowX: 'auto' }}>
+        {mode.speaks && onWriteScript && (
+          <div className={`script-bar${scripted >= spokenScenes && spokenScenes > 0 ? ' done' : ''}`}>
+            <div>
+              <b>
+                {scripted}/{spokenScenes} scenes have a written line
+              </b>
+              <span>
+                {scripted >= spokenScenes && spokenScenes > 0
+                  ? 'The model speaks these words instead of composing its own — read them through before generating.'
+                  : 'Without a line the model invents the Hindi, pronounces it and lip-syncs to it all at once. Write the lines and it just reads them.'}
+              </span>
+              {scriptNote && <span className="script-note">{scriptNote}</span>}
+            </div>
+            <button className="btn primary small" type="button" disabled={writing} onClick={writeScript}>
+              {writing ? 'Writing…' : scripted ? 'Rewrite script' : 'Write the script'}
+            </button>
+          </div>
+        )}
         <div className="section-desc">
           Edit any scene’s script or shot below — changes flow straight into the master prompt on the right, no
           full rebuild of the brief.

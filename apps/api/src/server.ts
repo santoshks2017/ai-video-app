@@ -28,7 +28,12 @@ import { scrapeModel, getCarModel } from './scraper.js';
 import { composeFinal, lastFrame, posterFrame, selfTest, type BrandOverlay } from './post.js';
 import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './auth.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
+import { writeScript, ScriptError, type ScriptScene } from './script.js';
 import {
+  buildContext,
+  buildBeats,
+  planScenes,
+  CATEGORY_BY_ID,
   OMNI_FLASH_DEFAULTS,
   SEEDANCE_25_DEFAULTS,
   SEEDANCE_20_FAST_DEFAULTS,
@@ -139,6 +144,87 @@ app.delete<{ Params: { id: string } }>('/api/credentials/:id/key', async (req) =
   await deleteCredentialKey(req.params.id);
   await patch('credentials', req.params.id, { hasKey: false });
   return { ok: true, hasKey: false };
+});
+
+/**
+ * Turn the storyboard's stage directions into lines the presenter actually says.
+ *
+ * This is the fix for mangled Hindi: without it the video model is handed an
+ * English instruction ("open with a sincere greeting") and has to compose the
+ * Hindi, pronounce it and lip-sync to it all at once. Text generation costs a
+ * fraction of a rupee, so the script is written and approved before any paid
+ * video call.
+ */
+app.post<{ Body: { brief?: Brief } }>('/api/script', async (req, reply) => {
+  const brief = req.body?.brief;
+  if (!brief || !Array.isArray(brief.categories) || !brief.categories.length) {
+    return reply.code(400).send({ code: 'bad-request', message: 'A brief with at least one use case is required.' });
+  }
+
+  const ctx = buildContext(brief);
+  if (!ctx.mode.speaks) {
+    return reply.code(422).send({
+      code: 'no-speech',
+      message: 'This narration mode has no speech, so there is no script to write.',
+    });
+  }
+  const plan = planScenes(buildBeats(ctx), ctx.totalDuration, ctx.maxChunk, { speaks: true });
+  const scenes: ScriptScene[] = plan.scenes
+    .map((sc, index) => ({
+      index,
+      title: sc.beat.title,
+      direction: sc.beat.dialogue ?? '',
+      seconds: sc.duration,
+      words: Math.max(3, Math.round(sc.duration * 2.2)),
+      card: sc.beat.card,
+    }))
+    .filter((sc) => sc.direction);
+  if (!scenes.length) return { lines: [], model: '' };
+
+  // Whatever the designer filled into the category fields is quotable fact.
+  const facts: Record<string, string> = {};
+  for (const id of brief.categories) {
+    const cat = CATEGORY_BY_ID[id];
+    for (const [key, value] of Object.entries(brief.fieldValues[id] ?? {})) {
+      const label = cat?.fields.find((f) => f.id === key)?.label ?? key;
+      if (String(value ?? '').trim()) facts[label] = String(value);
+    }
+  }
+
+  // The script is written by Gemini regardless of which model renders the video
+  // — it is text, and it costs a rounding error next to a segment.
+  const creds = await listAll<Record<string, any>>('credentials');
+  const google = creds.find((c) => c.provider === 'google-gemini' && c.enabled !== false);
+  const apiKey = google?.usesEnvKey === false ? await getCredentialKey(google.id) : config.googleApiKey;
+  if (!apiKey) {
+    return reply
+      .code(503)
+      .send({ code: 'script-no-key', message: 'Writing the script needs a Google Gemini key. Add one in APIs & models.' });
+  }
+
+  try {
+    const out = await writeScript(
+      {
+        scenes,
+        gender: brief.actor?.gender === 'male' ? 'male' : 'female',
+        dealerName: ctx.brief.dealer.fictionalize
+          ? ctx.brief.dealer.fakeDealer || ctx.brief.dealer.dealerName
+          : ctx.brief.dealer.dealerName,
+        brandModel: ctx.brief.dealer.fictionalize
+          ? ctx.brief.dealer.fakeBrandModel || ctx.brief.dealer.brandModel
+          : ctx.brief.dealer.brandModel,
+        city: brief.dealer.city,
+        cta: brief.cta,
+        facts,
+        direction: (brief.extraDirection ?? []).join(' '),
+      },
+      apiKey,
+    );
+    return out;
+  } catch (e) {
+    const err = e as ScriptError;
+    return reply.code(err.status ?? 502).send({ code: err.code ?? 'script-failed', message: err.message });
+  }
 });
 
 /** Check a saved key without spending anything on a generation. */

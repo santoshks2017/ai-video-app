@@ -17,6 +17,8 @@ import {
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, ImageUpload, Thumb, Confirm, Banner, Collapse } from '../components/ui.js';
 import { isApiError } from '../lib/client.js';
+// `api` above is the library CRUD client; this one owns generation + scripting.
+import { api as genApi } from '../lib/api.js';
 import { Storyboard } from '../components/Storyboard.js';
 import { OutputPanel } from '../components/OutputPanel.js';
 import { GenerationPanel } from '../components/GenerationPanel.js';
@@ -66,7 +68,6 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     () => (brief ? buildPrompt(brief, { sceneOverrides: project?.sceneEdits ?? {} }) : null),
     [brief, project?.sceneEdits],
   );
-  const preflight = useMemo(() => (brief ? runChecks(brief) : null), [brief]);
   const promptOnly = project ? isPromptOnly(project.useCases) : false;
   const presenterPicked = (project?.useCases ?? []).filter(
     (id) => CATEGORIES.find((c) => c.id === id)?.mode === 'presenter',
@@ -76,6 +77,14 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     models.find((m) => m.isDefault && m.enabled !== false) ??
     models.find((m) => m.enabled !== false) ??
     null;
+
+  const preflight = useMemo(
+    () =>
+      brief
+        ? runChecks(brief, { sceneOverrides: project?.sceneEdits ?? {}, model: activeModel })
+        : null,
+    [brief, project?.sceneEdits, activeModel],
+  );
 
   // Clip length is a capability of the model, not a taste decision, so switching
   // model snaps it to that model's cap. This is what makes picking Seedance 2.5
@@ -90,6 +99,20 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeModel?.id, modelCap, modelFloor]);
+
+  /** Fill every spoken scene with a real line, then let the designer edit them. */
+  const writeScript = async (): Promise<string> => {
+    if (!brief || !project) return 'Fill in the brief first.';
+    const r = await genApi.script(brief);
+    if (isApiError(r)) return `${r.code}: ${r.message}`;
+    if (!r.lines.length) return 'No spoken scenes to write for.';
+    const next = { ...project.sceneEdits };
+    for (const { index, line } of r.lines) {
+      next[String(index)] = { ...next[String(index)], dialogue: line };
+    }
+    set({ sceneEdits: next });
+    return `Wrote ${r.lines.length} line${r.lines.length > 1 ? 's' : ''} with ${r.model}. Read them through and edit anything that sounds off.`;
+  };
 
   const cost = useMemo(
     () =>
@@ -519,6 +542,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   set({ sceneEdits: { ...project.sceneEdits, [key]: { ...project.sceneEdits[key], ...patch } } })
                 }
                 onClearEdits={() => set({ sceneEdits: {} })}
+                onWriteScript={writeScript}
               />
             </Collapse>
           )}

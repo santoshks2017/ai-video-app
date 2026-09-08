@@ -147,6 +147,14 @@ export const api = {
     return hydrate(r);
   },
 
+  /** Turn the storyboard's stage directions into lines the presenter says. */
+  async script(brief: Brief) {
+    return await req<{ model: string; lines: { index: number; line: string }[] }>('/api/script', {
+      method: 'POST',
+      body: JSON.stringify({ brief }),
+    });
+  },
+
   async job(jobId: string) {
     const r = await req<GenerateResult>(`/api/generate/${jobId}`);
     if (isApiError(r)) return r;

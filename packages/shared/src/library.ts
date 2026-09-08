@@ -253,6 +253,12 @@ export interface VideoModelProfile {
   /** Hard cap the provider enforces on reference images per call. */
   maxReferenceImages: number;
   usdPerSecond: number;
+  /**
+   * Languages the provider says the model can SPEAK, as ISO codes. Left unset
+   * when the provider publishes no list — pre-flight only warns on a stated
+   * restriction, never on silence.
+   */
+  speechLanguages?: string[];
   enabled: boolean;
   isDefault: boolean;
   notes?: string;
@@ -300,6 +306,8 @@ export const SEEDANCE_25_DEFAULTS: Omit<
   // 30 images per request; we never send anywhere near that.
   maxReferenceImages: 8,
   usdPerSecond: 0.2312,
+  // BytePlus publishes 11 speech languages for Seedance; Hindi is not one.
+  speechLanguages: ['zh', 'en', 'es', 'id', 'ms', 'th', 'ar', 'pt', 'vi', 'ja', 'ko'],
   enabled: true,
   isDefault: false,
   notes: '30s in one call, native audio. Speech languages do not include Hindi.',
@@ -319,6 +327,8 @@ export const SEEDANCE_20_FAST_DEFAULTS: Omit<
   supportsReferenceImages: true,
   maxReferenceImages: 6,
   usdPerSecond: 0.09,
+  // BytePlus publishes 11 speech languages for Seedance; Hindi is not one.
+  speechLanguages: ['zh', 'en', 'es', 'id', 'ms', 'th', 'ar', 'pt', 'vi', 'ja', 'ko'],
   enabled: true,
   isDefault: false,
   notes: 'Cheapest of the three; 15s per call, 480p/720p only.',

@@ -23,6 +23,11 @@ import { rulebookText } from './rulebook.js';
 const CLEAN_FRAME =
   'Leave the frame CLEAN of any branding furniture: no bottom footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, no lower third, no channel bug, no subtitles and no end card. Those are added afterwards in post. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so overlays can sit there.';
 
+const SPOKEN_LOCK = [
+  '## SPOKEN LINES — SAY THESE EXACTLY',
+  'Anything in {curly braces} above is the presenter\'s exact wording. Speak it word for word as written, in Hindi/Hinglish, with the English words inside it kept in English. Do not translate it, re-word it, shorten it, extend it or "correct" it, and do not read the scene descriptions aloud. Lip movement must match these words. Keep a natural, unhurried pace — never speed up the delivery to fit the time.',
+].join('\n');
+
 export function wordBudget(seconds: number): number {
   return Math.max(3, Math.round(seconds * WORDS_PER_SECOND));
 }
@@ -196,6 +201,16 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       }`,
     );
 
+    // A written line is the single biggest lever on spoken quality, so the lock
+    // stands on its own rather than riding along with the on-screen text block.
+    const hasScript = scenes.some((sc) =>
+      (overrides[String(plan.scenes.indexOf(sc))]?.dialogue ?? '').trim(),
+    );
+    if (mode.speaks && hasScript) {
+      L.push('');
+      L.push(SPOKEN_LOCK);
+    }
+
     const strings = collectStrings(scenes);
     if (strings.length) {
       L.push('');
@@ -241,9 +256,17 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       const shotText = ov.shot?.trim() || baseShot;
       if (shotText) L.push(`Shot: ${shotText}`);
-      const dialogue = ov.dialogue?.trim() || sc.beat.dialogue;
-      if (mode.speaks && dialogue) {
-        L.push(`Spoken (Hindi/Hinglish), max ~${wordBudget(sc.duration)} words: ${dialogue}`);
+      const scripted = ov.dialogue?.trim();
+      const dialogue = scripted || sc.beat.dialogue;
+      if (mode.speaks && scripted) {
+        // Braces are Seedance's dialogue marker and read as an exact quote to
+        // every other model — the difference between reading a line and
+        // inventing one, which is where Hindi pronunciation falls apart.
+        L.push(`Says, word for word: {${scripted}}`);
+      } else if (mode.speaks && dialogue) {
+        L.push(
+          `Speaks in Hindi/Hinglish, at most ~${wordBudget(sc.duration)} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it in natural Devanagari Hindi: ${dialogue}`,
+        );
       } else if (dialogue) {
         L.push(`Story beat, told visually with no speech: ${dialogue}`);
       }
@@ -348,12 +371,15 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push(`Scene ${i + 1} (~${sc.duration}s) — ${sc.beat.title}`);
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       if (ov.shot?.trim() || baseShot) C.push(`  Shot: ${ov.shot?.trim() || baseShot}`);
-      const d = ov.dialogue?.trim() || sc.beat.dialogue;
+      const scriptedC = ov.dialogue?.trim();
+      const d = scriptedC || sc.beat.dialogue;
       if (d) {
         C.push(
-          mode.speaks
-            ? `  Spoken (Hindi/Hinglish, ~${wordBudget(sc.duration)} words): ${d}`
-            : `  Told visually, no speech: ${d}`,
+          !mode.speaks
+            ? `  Told visually, no speech: ${d}`
+            : scriptedC
+              ? `  Says, word for word: {${scriptedC}}`
+              : `  Speaks Hindi/Hinglish, ~${wordBudget(sc.duration)} words, composed from this intent: ${d}`,
         );
       }
       if (sc.beat.card) C.push(`  On-screen card: "${sc.beat.card}"${sc.beat.cardSub ? ` / "${sc.beat.cardSub}"` : ''}`);
@@ -361,6 +387,10 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     });
     const contStrings = collectStrings(scenes);
     C.push('');
+    if (ctx.mode.speaks && scenes.some((sc) => (overrides[String(plan.scenes.indexOf(sc))]?.dialogue ?? '').trim())) {
+      C.push(SPOKEN_LOCK);
+      C.push('');
+    }
     C.push('## ON-SCREEN TEXT — EXACT STRINGS (do not render anything else as text)');
     if (contStrings.length) {
       C.push(

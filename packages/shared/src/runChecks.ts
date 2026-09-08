@@ -24,7 +24,14 @@ export interface PreflightResult {
   promptOnly: boolean;
 }
 
-export function runChecks(brief: Brief): PreflightResult {
+export interface RunChecksOptions {
+  /** Storyboard edits, keyed by global scene index — where written lines live. */
+  sceneOverrides?: Record<string, { dialogue?: string; shot?: string }>;
+  /** The model this brief will actually run on, for capability checks. */
+  model?: { name?: string; speechLanguages?: string[] } | null;
+}
+
+export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightResult {
   const checks: Check[] = [];
 
   if (brief.categories.length === 0) {
@@ -132,6 +139,39 @@ export function runChecks(brief: Brief): PreflightResult {
       code: 'beats-trimmed',
       text: `${plan.droppedBeats} beat${plan.droppedBeats > 1 ? 's were' : ' was'} left out so the rest have room at ${ctx.totalDuration}s. Lengthen the video or pick fewer use cases to keep them all.`,
     });
+  }
+
+  // Spoken script (the Hindi-pronunciation failure). The beats carry stage
+  // directions, not lines — so with nothing written the model has to invent the
+  // Hindi, pronounce it and lip-sync to it from an English brief, which is where
+  // the delivery falls apart. Written lines turn that into reading aloud.
+  if (mode.speaks && plan.scenes.length) {
+    const overrides = opts.sceneOverrides ?? {};
+    const unscripted = plan.scenes.filter(
+      (sc, i) => !(overrides[String(i)]?.dialogue ?? '').trim() && sc.beat.dialogue,
+    ).length;
+    if (unscripted) {
+      checks.push({
+        level: 'warn',
+        code: 'no-spoken-script',
+        text: `${unscripted} of ${plan.scenes.length} scenes have no written line, so the model composes the Hindi itself — the usual cause of mangled pronunciation. Write the script in the storyboard and it speaks the words instead of inventing them.`,
+      });
+    } else {
+      checks.push({
+        level: 'ok',
+        code: 'script-written',
+        text: 'Every spoken scene has a written line, so the model reads rather than improvises.',
+      });
+    }
+
+    const langs = opts.model?.speechLanguages ?? [];
+    if (langs.length && !langs.some((l) => /^hi/i.test(l))) {
+      checks.push({
+        level: 'warn',
+        code: 'speech-language-unsupported',
+        text: `${opts.model?.name ?? 'This model'} does not list Hindi among the languages it can speak (${langs.join(', ')}). A written Devanagari script helps, but the delivery may still be mispronounced — judge it on a short run before committing to a long one.`,
+      });
+    }
   }
 
   // On-screen card load (Premier Motors reference dropped a card when overloaded).

@@ -214,6 +214,43 @@ export type ProviderKind =
   | 'fal'
   | 'custom';
 
+/**
+ * What a signed-in person may do.
+ *
+ * `viewer` is the default for anyone who signs in: they can read the libraries
+ * and watch finished videos, but cannot spend money or touch credentials.
+ * `creator` adds the paid actions — generating, retaking, writing scripts — and
+ * editing the libraries those draw on. `admin` adds API credentials, models and
+ * the roles themselves.
+ */
+export type Role = 'viewer' | 'creator' | 'admin';
+
+export const ROLE_ORDER: Record<Role, number> = { viewer: 0, creator: 1, admin: 2 };
+
+export const ROLE_LABELS: Record<Role, string> = {
+  viewer: 'Viewer — can look, cannot spend',
+  creator: 'Creator — can generate videos and edit the libraries',
+  admin: 'Admin — everything, including API keys and roles',
+};
+
+/** True when `role` is at least `needed`. */
+export const roleAllows = (role: Role | undefined, needed: Role): boolean =>
+  ROLE_ORDER[role ?? 'viewer'] >= ROLE_ORDER[needed];
+
+export interface AppUser {
+  /** Firebase UID. */
+  id: string;
+  email: string;
+  name?: string;
+  photo?: string;
+  role: Role;
+  /** Set on the account that bootstrapped the app; it can never be demoted. */
+  isOwner?: boolean;
+  lastSeenAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface GlossaryEntry {
   /** The word or phrase as it appears in a script, in either script system. */
   term: string;

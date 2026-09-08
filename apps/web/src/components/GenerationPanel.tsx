@@ -58,6 +58,7 @@ export function GenerationPanel({
   const [jobClips, setJobClips] = useState<Record<string, ClipView[]>>({});
   // Tell the workspace this project is busy, so its tab says so from anywhere.
   const setProjectBusy = useApp((s) => s.setProjectBusy);
+  const canGenerateRole = useApp((s) => s.can('creator'));
   const projectId = project?.id;
   useEffect(() => {
     if (!projectId) return;
@@ -114,7 +115,7 @@ export function GenerationPanel({
     if (videoRef.current) videoRef.current.currentTime = Math.max(0, t);
   };
 
-  const blocked = !canGenerate || parts.length === 0 || (needsCostConfirm && !confirmed);
+  const blocked = !canGenerateRole || !canGenerate || parts.length === 0 || (needsCostConfirm && !confirmed);
   const failed = clips.filter((c) => c.status === 'failed');
 
   /* ---- refine: retake the bad segments only ---- */
@@ -185,6 +186,16 @@ export function GenerationPanel({
         <span className="step">{modelLabel ?? 'default model'}</span>
       </div>
       <div className="body tight">
+        {!canGenerateRole && (
+          <div className="check warn" style={{ marginBottom: 10 }}>
+            <span className="icon">!</span>
+            <span>
+              Your account can watch videos but not generate them — generating spends real money. Ask an admin
+              to make you a creator in People.
+            </span>
+          </div>
+        )}
+
         {needsCostConfirm && status === 'idle' && (
           <label className="check-row">
             <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
@@ -356,7 +367,7 @@ export function GenerationPanel({
                   <div className="toolbar" style={{ marginTop: 8 }}>
                     <button
                       className="btn primary"
-                      disabled={refineStatus === 'running' || (refineNeedsConfirm && !refineConfirmed)}
+                      disabled={!canGenerateRole || refineStatus === 'running' || (refineNeedsConfirm && !refineConfirmed)}
                       onClick={runRefine}
                     >
                       {refineStatus === 'running'

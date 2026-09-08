@@ -11,6 +11,7 @@ import { InstructionsSection } from './sections/Instructions.js';
 import { LanguagesSection } from './sections/Languages.js';
 import { ModelsSection } from './sections/Models.js';
 import { WhatsNewSection } from './sections/WhatsNew.js';
+import { UsersSection } from './sections/Users.js';
 
 function TabBody({ tab }: { tab: Tab }) {
   if (tab.kind === 'project') return <ProjectEditor projectId={tab.projectId!} />;
@@ -29,6 +30,8 @@ function TabBody({ tab }: { tab: Tab }) {
       return <LanguagesSection />;
     case 'models':
       return <ModelsSection />;
+    case 'users':
+      return <UsersSection />;
     case 'whatsnew':
       return <WhatsNewSection />;
   }

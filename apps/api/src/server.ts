@@ -27,6 +27,15 @@ import {
 import { scrapeModel, getCarModel } from './scraper.js';
 import { composeFinal, lastFrame, posterFrame, selfTest, type BrandOverlay } from './post.js';
 import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './auth.js';
+import {
+  resolveIdToken,
+  looksLikeIdToken,
+  listUsers,
+  setUserRole,
+  removeUser,
+  allows,
+  type Caller,
+} from './users.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
 import { writeScript, addPhonetics, ScriptError, type ScriptScene, type ScriptLanguage } from './script.js';
 import {
@@ -39,6 +48,7 @@ import {
   SEEDANCE_25_DEFAULTS,
   SEEDANCE_20_FAST_DEFAULTS,
   type ProviderKind,
+  type Role,
 } from '@ava/shared';
 import { syncCarModel } from './carSync.js';
 import { importPlace, PlacesError } from './places.js';
@@ -67,6 +77,40 @@ app.get<{ Querystring: { deep?: string } }>('/api/health', async (req) => ({
 
 const OPEN_PATHS = new Set(['/api/health', '/api/session']);
 
+declare module 'fastify' {
+  interface FastifyRequest {
+    caller?: Caller;
+  }
+}
+
+/**
+ * Routes that spend money or expose secrets, and the role each needs. Anything
+ * not listed is readable by any signed-in person: the libraries and finished
+ * videos are safe to look at, and looking is what a viewer is for.
+ */
+function requiredRole(method: string, url: string): Role | null {
+  // API credentials and roles are the keys to the kingdom — admin only.
+  if (url.startsWith('/api/credentials') || url.startsWith('/api/users')) return 'admin';
+  if (url.startsWith('/api/models/seed')) return 'admin';
+  if (url.startsWith('/api/models') && method !== 'GET') return 'admin';
+
+  // Everything that costs money, or changes what a paid run will produce.
+  if (
+    url.startsWith('/api/generate') ||
+    url.startsWith('/api/script') ||
+    url.startsWith('/api/scrape') ||
+    url.startsWith('/api/refs') ||
+    url.startsWith('/api/cars/sync') ||
+    url.startsWith('/api/clients/gmb')
+  ) {
+    return method === 'GET' ? null : 'creator';
+  }
+
+  // Library records: read freely, change only as a creator.
+  if (method !== 'GET' && method !== 'HEAD') return 'creator';
+  return null;
+}
+
 app.addHook('preHandler', async (req, reply) => {
   if (req.method === 'OPTIONS') return;
   const url = (req.raw.url ?? '').split('?')[0] ?? '';
@@ -75,12 +119,82 @@ app.addHook('preHandler', async (req, reply) => {
   // Clips and reference images are fetched by <video>/<img>, which cannot send
   // an Authorization header. They are unguessable UUID paths.
   if (url.startsWith('/api/clips/') || url.startsWith('/api/refs/')) return;
-  if (!verifyToken(bearer(req.headers.authorization))) {
-    return reply.code(401).send({ code: 'unauthorized', message: 'Sign in with the team password.' });
+
+  const token = bearer(req.headers.authorization);
+
+  if (token && looksLikeIdToken(token)) {
+    const caller = await resolveIdToken(token);
+    if (!caller) {
+      return reply.code(401).send({ code: 'unauthorized', message: 'Sign in again — your session expired.' });
+    }
+    req.caller = caller;
+  } else if (verifyToken(token)) {
+    // The legacy shared password predates per-person sign-in. It still works and
+    // acts as an admin, so a Google outage cannot lock the team out.
+    req.caller = {
+      uid: 'legacy',
+      email: '',
+      role: 'admin',
+      isOwner: false,
+      legacy: true,
+    };
+  } else {
+    return reply.code(401).send({ code: 'unauthorized', message: 'Sign in to use this app.' });
+  }
+
+  const needed = requiredRole(req.method, url);
+  if (needed && !allows(req.caller ?? null, needed)) {
+    return reply.code(403).send({
+      code: 'forbidden',
+      message:
+        needed === 'admin'
+          ? 'Only an admin can change API connections, models or roles.'
+          : 'Your account can view this app but not generate videos or change the libraries. Ask an admin for creator access.',
+      role: req.caller?.role,
+      needed,
+    });
   }
 });
 
-app.get('/api/session', async () => ({ authEnabled: authEnabled() }));
+/** Who am I, and what may I do? The client shapes itself around this. */
+app.get('/api/session', async (req) => ({
+  authEnabled: authEnabled(),
+  signedIn: Boolean(req.caller),
+  user: req.caller
+    ? {
+        id: req.caller.uid,
+        email: req.caller.email,
+        name: req.caller.name,
+        photo: req.caller.photo,
+        role: req.caller.role,
+        isOwner: req.caller.isOwner,
+        legacy: req.caller.legacy,
+      }
+    : null,
+}));
+
+/* ---- user administration (admin only, enforced in the preHandler) ---- */
+
+app.get('/api/users', async () => ({ items: await listUsers() }));
+
+app.patch<{ Params: { id: string }; Body: { role?: Role } }>('/api/users/:id', async (req, reply) => {
+  const role = req.body?.role;
+  if (role !== 'viewer' && role !== 'creator' && role !== 'admin') {
+    return reply.code(400).send({ code: 'bad-request', message: 'role must be viewer, creator or admin' });
+  }
+  const updated = await setUserRole(req.params.id, role);
+  if (!updated) return reply.code(404).send({ code: 'not-found', message: 'No such user' });
+  return updated;
+});
+
+app.delete<{ Params: { id: string } }>('/api/users/:id', async (req, reply) => {
+  if (req.params.id === req.caller?.uid) {
+    return reply.code(400).send({ code: 'bad-request', message: 'You cannot remove your own account.' });
+  }
+  const ok = await removeUser(req.params.id);
+  if (!ok) return reply.code(400).send({ code: 'owner-protected', message: 'The owner account cannot be removed.' });
+  return { ok: true };
+});
 
 app.post<{ Body: { password?: string } }>('/api/session', async (req, reply) => {
   if (!authEnabled()) return { token: 'open', authEnabled: false };

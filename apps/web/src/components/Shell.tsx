@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { APP_VERSION } from '@ava/shared';
+import { APP_VERSION, type Role } from '@ava/shared';
 import { useApp, type Section } from '../state/appStore.js';
 
 export const SECTION_META: Record<Section, { label: string; icon: string }> = {
@@ -10,19 +10,33 @@ export const SECTION_META: Record<Section, { label: string; icon: string }> = {
   instructions: { label: 'Instructions', icon: '📐' },
   languages: { label: 'Languages', icon: '🗣️' },
   models: { label: 'APIs & models', icon: '🔌' },
+  users: { label: 'People', icon: '👥' },
   whatsnew: { label: "What's new", icon: '✨' },
 };
 
 /** The rail. What's new is reached from the version in the foot instead. */
-const NAV = (['projects', 'clients', 'cars', 'actors', 'instructions', 'languages', 'models'] as Section[]).map(
-  (id) => ({ id, ...SECTION_META[id] }),
-);
+/** Rail entries, with the role each needs. What's new lives in the foot. */
+const NAV: { id: Section; label: string; icon: string; needs?: Role }[] = (
+  ['projects', 'clients', 'cars', 'actors', 'instructions', 'languages', 'models', 'users'] as Section[]
+).map((id) => ({
+  id,
+  ...SECTION_META[id],
+  needs: id === 'models' || id === 'users' ? ('admin' as Role) : undefined,
+}));
 
 export function SignIn() {
   const signIn = useApp((s) => s.signIn);
+  const signInGoogle = useApp((s) => s.signInGoogle);
   const error = useApp((s) => s.signInError);
   const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const google = async () => {
+    setBusy(true);
+    await signInGoogle();
+    setBusy(false);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +47,7 @@ export function SignIn() {
 
   return (
     <div className="signin-wrap">
-      <form className="card signin" onSubmit={submit}>
+      <div className="card signin">
         <div className="brand" style={{ marginBottom: 14 }}>
           <div className="mark">AV</div>
           <div>
@@ -41,21 +55,48 @@ export function SignIn() {
             <div className="sub">CarDekho design team</div>
           </div>
         </div>
-        <div className="field">
-          <label htmlFor="pw">Team password</label>
-          <input id="pw" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus />
-        </div>
-        {error && <div className="check bad"><span className="icon">✕</span><span>{error}</span></div>}
-        <button className="btn primary" type="submit" disabled={busy || !pw} style={{ width: '100%', marginTop: 6 }}>
-          {busy ? 'Signing in…' : 'Sign in'}
+
+        <button className="btn google" type="button" disabled={busy} onClick={google}>
+          <span className="g" aria-hidden>
+            G
+          </span>
+          {busy ? 'Signing in…' : 'Continue with Google'}
         </button>
-      </form>
+        <div className="hint" style={{ marginTop: 8 }}>
+          Sign in with your work Google account. New accounts can look around; an admin grants access to
+          generate videos.
+        </div>
+
+        {error && (
+          <div className="check bad" style={{ marginTop: 12 }}>
+            <span className="icon">✕</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="divider" />
+        {showPassword ? (
+          <form onSubmit={submit}>
+            <div className="field">
+              <label htmlFor="pw">Team password</label>
+              <input id="pw" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus />
+            </div>
+            <button className="btn" type="submit" disabled={busy || !pw} style={{ width: '100%', marginTop: 6 }}>
+              {busy ? 'Signing in…' : 'Sign in with the password'}
+            </button>
+          </form>
+        ) : (
+          <button className="btn ghost small" type="button" onClick={() => setShowPassword(true)}>
+            Use the team password instead
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { tabs, activeTabId, go, signOut, authEnabled, loading } = useApp();
+  const { tabs, activeTabId, go, signOut, authEnabled, loading, me, can } = useApp();
   const active = tabs.find((t) => t.id === activeTabId);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -73,7 +114,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="rail-nav">
-          {NAV.map((n) => (
+          {NAV.filter((n) => !n.needs || can(n.needs)).map((n) => (
             <button
               key={n.id}
               type="button"
@@ -93,6 +134,19 @@ export function Shell({ children }: { children: ReactNode }) {
 
         <div className="rail-foot">
           {loading && !collapsed && <div className="hint">Loading…</div>}
+          {me && !collapsed && (
+            <div className="rail-me" title={`${me.email} · ${me.role}`}>
+              {me.photo ? (
+                <img src={me.photo} alt="" referrerPolicy="no-referrer" />
+              ) : (
+                <span className="rail-me-ph">{(me.name || me.email || '?').slice(0, 1).toUpperCase()}</span>
+              )}
+              <span>
+                <b>{me.name || me.email || 'Team password'}</b>
+                <em>{me.legacy ? 'shared password · admin' : me.role}</em>
+              </span>
+            </div>
+          )}
           <button
             className="rail-item version"
             type="button"

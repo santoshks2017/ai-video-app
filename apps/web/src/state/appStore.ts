@@ -6,10 +6,13 @@ import type {
   ClientProfile,
   GlobalInstruction,
   LanguageProfile,
+  AppUser,
+  Role,
   Project,
   VideoModelProfile,
 } from '@ava/shared';
-import { collection, getToken, isApiError, session, setToken } from '../lib/client.js';
+import { collection, getToken, isApiError, session, setToken, type SessionUser } from '../lib/client.js';
+import { signInWithGoogle, signOutGoogle, watchGoogleAuth } from '../lib/firebase.js';
 
 export type Section =
   | 'projects'
@@ -19,6 +22,7 @@ export type Section =
   | 'instructions'
   | 'languages'
   | 'models'
+  | 'users'
   | 'whatsnew';
 
 const actorsApi = collection<ActorProfile>('actors');
@@ -26,6 +30,7 @@ const carsApi = collection<CarModelProfile>('cars');
 const clientsApi = collection<ClientProfile>('clients');
 const instructionsApi = collection<GlobalInstruction>('instructions');
 const languagesApi = collection<LanguageProfile>('languages');
+const usersApi = collection<AppUser>('users');
 const projectsApi = collection<Project>('projects');
 const credentialsApi = collection<ApiCredential>('credentials');
 const modelsApi = collection<VideoModelProfile>('models');
@@ -36,6 +41,7 @@ export const api = {
   clients: clientsApi,
   instructions: instructionsApi,
   languages: languagesApi,
+  users: usersApi,
   projects: projectsApi,
   credentials: credentialsApi,
   models: modelsApi,
@@ -61,6 +67,10 @@ interface AppState {
   signedIn: boolean | null;
   authEnabled: boolean;
   signInError: string;
+  /** Who is signed in, and what they may do. Null while still checking. */
+  me: SessionUser | null;
+  /** Convenience: does the signed-in person clear this bar? */
+  can: (needed: Role) => boolean;
   /** Every open tab stays mounted, so a generation running in one keeps running
    *  while the designer works in another. */
   tabs: Tab[];
@@ -73,6 +83,7 @@ interface AppState {
   clients: ClientProfile[];
   instructions: GlobalInstruction[];
   languages: LanguageProfile[];
+  users: AppUser[];
   projects: Project[];
   credentials: ApiCredential[];
   models: VideoModelProfile[];
@@ -80,6 +91,7 @@ interface AppState {
 
   init: () => Promise<void>;
   signIn: (password: string) => Promise<boolean>;
+  signInGoogle: () => Promise<boolean>;
   signOut: () => void;
   /** Open the tab for this section or project, or focus it if already open. */
   go: (section: Section, projectId?: string | null) => void;
@@ -95,6 +107,11 @@ export const useApp = create<AppState>()((set, get) => ({
   signedIn: null,
   authEnabled: true,
   signInError: '',
+  me: null,
+  can: (needed) => {
+    const order = { viewer: 0, creator: 1, admin: 2 } as const;
+    return order[get().me?.role ?? 'viewer'] >= order[needed];
+  },
   tabs: [HOME],
   activeTabId: HOME.id,
   busyProjects: {},
@@ -103,18 +120,42 @@ export const useApp = create<AppState>()((set, get) => ({
   clients: [],
   instructions: [],
   languages: [],
+  users: [],
   projects: [],
   credentials: [],
   models: [],
   loading: false,
 
   init: async () => {
-    const s = await session.status();
-    const authEnabled = isApiError(s) ? true : s.authEnabled;
-    const hasToken = !!getToken();
-    const signedIn = !authEnabled || hasToken;
-    set({ authEnabled, signedIn });
-    if (signedIn) await get().refresh();
+    // Firebase restores a session asynchronously, and refreshes the token every
+    // hour, so the app follows that stream rather than checking once at startup.
+    let settled = false;
+    watchGoogleAuth(async () => {
+      const s = await session.status();
+      if (isApiError(s)) {
+        set({ signedIn: false, me: null });
+        settled = true;
+        return;
+      }
+      set({ authEnabled: s.authEnabled, me: s.user, signedIn: s.signedIn });
+      if (s.signedIn) await get().refresh();
+      settled = true;
+    });
+    // No Firebase session and no legacy token means nothing will fire above.
+    setTimeout(() => {
+      if (!settled) set({ signedIn: false, me: null });
+    }, 2500);
+  },
+
+  signInGoogle: async () => {
+    set({ signInError: '' });
+    const r = await signInWithGoogle();
+    if (!r.ok) {
+      if (r.message) set({ signInError: r.message });
+      return false;
+    }
+    // watchGoogleAuth picks the token up and loads the session.
+    return true;
   },
 
   signIn: async (password) => {
@@ -131,17 +172,20 @@ export const useApp = create<AppState>()((set, get) => ({
   },
 
   signOut: () => {
+    void signOutGoogle().catch(() => {});
     setToken(null);
     set({
       tabs: [HOME],
       activeTabId: HOME.id,
       busyProjects: {},
       signedIn: false,
+      me: null,
       actors: [],
       cars: [],
       clients: [],
       instructions: [],
       languages: [],
+      users: [],
       projects: [],
       credentials: [],
       models: [],
@@ -178,16 +222,18 @@ export const useApp = create<AppState>()((set, get) => ({
 
   refresh: async () => {
     set({ loading: true });
-    const [actors, cars, clients, instructions, languages, projects, credentials, models] = await Promise.all([
+    const admin = get().can('admin');
+    const [actors, cars, clients, instructions, languages, projects, credentials, models, users] = await Promise.all([
       actorsApi.list(),
       carsApi.list(),
       clientsApi.list(),
       instructionsApi.list(),
       languagesApi.list(),
       projectsApi.list(),
-      credentialsApi.list(),
+      admin ? credentialsApi.list() : Promise.resolve([]),
       modelsApi.list(),
+      admin ? usersApi.list() : Promise.resolve([]),
     ]);
-    set({ actors, cars, clients, instructions, languages, projects, credentials, models, loading: false });
+    set({ actors, cars, clients, instructions, languages, projects, credentials, models, users, loading: false });
   },
 }));

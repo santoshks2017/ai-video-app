@@ -69,7 +69,7 @@ jobs:
             --concurrency 4 \
             --max-instances 3 \
             --set-secrets "GOOGLE_API_KEY=GOOGLE_API_KEY:${{ vars.GOOGLE_API_KEY_VERSION }},APP_PASSWORD=APP_PASSWORD:latest" \
-            --set-env-vars "ALLOW_ORIGIN=https://${{ vars.FIREBASE_PROJECT_ID }}.web.app" \
+            --set-env-vars "ALLOW_ORIGIN=https://${{ vars.FIREBASE_PROJECT_ID }}.web.app,OWNER_EMAILS=${{ vars.OWNER_EMAILS }}" \
             --quiet
           RUN_URL=$(gcloud run services describe ava-api \
             --project "${{ vars.GCP_PROJECT_ID }}" --region "${{ vars.GCP_REGION }}" \

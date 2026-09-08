@@ -16,6 +16,7 @@ import type {
   ProjectVideoSpec,
   StoredImage,
   CarAngle,
+  LanguageProfile,
 } from './library.js';
 import { emptyBrief } from './defaults.js';
 
@@ -60,6 +61,8 @@ export interface ComposeInputs {
   actor?: ActorProfile | null;
   car?: CarModelProfile | null;
   instructions?: GlobalInstruction[];
+  /** The project's chosen language — its rules travel with the brief. */
+  language?: LanguageProfile | null;
 }
 
 const ANGLE_ORDER: CarAngle[] = ['front', 'side', 'rear', 'interior'];
@@ -100,10 +103,18 @@ export function carReferenceImages(
 }
 
 export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brief {
-  const { client, actor, car, instructions } = inputs;
+  const { client, actor, car, instructions, language } = inputs;
   const b = emptyBrief();
   const s = project.spec;
 
+  if (language) {
+    b.language = {
+      code: language.code,
+      name: language.name,
+      needsPhonetics: language.needsPhonetics,
+      writtenGuide: language.writtenGuide,
+    };
+  }
   b.categories = project.useCases;
   b.narration = s.narration;
   b.durationSec = s.durationSec;

@@ -44,6 +44,12 @@ export interface GenerationHistoryItem {
   feedback?: string;
 }
 
+export interface ScriptLineView {
+  index: number;
+  line: string;
+  say: string;
+}
+
 export interface GenerateResult {
   jobId: string;
   status: 'running' | 'done' | 'failed';
@@ -148,10 +154,18 @@ export const api = {
   },
 
   /** Turn the storyboard's stage directions into lines the presenter says. */
-  async script(brief: Brief) {
-    return await req<{ model: string; lines: { index: number; line: string; say: string }[] }>('/api/script', {
+  async script(brief: Brief, languageId?: string) {
+    return await req<{ model: string; lines: ScriptLineView[] }>('/api/script', {
       method: 'POST',
-      body: JSON.stringify({ brief }),
+      body: JSON.stringify({ brief, languageId }),
+    });
+  },
+
+  /** Re-run only the pronunciation pass over copy that is already approved. */
+  async phonetics(lines: { index: number; line: string }[], languageId?: string) {
+    return await req<{ language: string; lines: ScriptLineView[] }>('/api/script/phonetics', {
+      method: 'POST',
+      body: JSON.stringify({ lines, languageId }),
     });
   },
 

@@ -19,6 +19,8 @@ export function Storyboard({
   onEditScene,
   onClearEdits,
   onWriteScript,
+  onRedoPhonetics,
+  languageName,
 }: {
   scenePlan: ScenePlan | null;
   sceneEdits: Record<string, { dialogue?: string; phonetic?: string; shot?: string }>;
@@ -27,6 +29,9 @@ export function Storyboard({
   onClearEdits: () => void;
   /** Fills every spoken scene with a real line. Resolves to a status message. */
   onWriteScript?: () => Promise<string>;
+  /** Re-applies the language's pronunciation guide to the existing copy. */
+  onRedoPhonetics?: () => Promise<string>;
+  languageName?: string;
 }) {
   const [writing, setWriting] = useState(false);
   const [scriptNote, setScriptNote] = useState('');
@@ -47,11 +52,10 @@ export function Storyboard({
       }).length
     : 0;
 
-  const writeScript = async () => {
-    if (!onWriteScript) return;
+  const runScriptAction = async (fn: () => Promise<string>) => {
     setWriting(true);
     setScriptNote('');
-    setScriptNote(await onWriteScript());
+    setScriptNote(await fn());
     setWriting(false);
   };
 
@@ -74,14 +78,32 @@ export function Storyboard({
               </b>
               <span>
                 {scripted >= spokenScenes && spokenScenes > 0
-                  ? 'The model performs the pronunciation spelling, not the Hindi above it. Read both through before generating.'
-                  : 'Plain Hindi is not enough — models put the stress in the wrong place. Each line needs a pronunciation spelling (AAJ hi TEST DRAAIV buk KEE-ji-ye) for the delivery to sound Indian.'}
+                  ? `The model performs the pronunciation spelling, not the ${languageName ?? 'plain'} line above it. Read both through before generating.`
+                  : `Plain ${languageName ?? 'Hindi'} is not enough — models put the stress in the wrong place. Each line needs a pronunciation spelling (AAJ hi TEST DRAAIV buk KEE-ji-ye) for the delivery to sound right.`}
               </span>
               {scriptNote && <span className="script-note">{scriptNote}</span>}
             </div>
-            <button className="btn primary small" type="button" disabled={writing} onClick={writeScript}>
-              {writing ? 'Writing…' : scripted ? 'Rewrite script' : 'Write the script'}
-            </button>
+            <div className="script-bar-actions">
+              {onRedoPhonetics && scripted > 0 && (
+                <button
+                  className="btn small"
+                  type="button"
+                  disabled={writing}
+                  onClick={() => runScriptAction(onRedoPhonetics)}
+                  title="Re-applies the language guide to the copy you already have"
+                >
+                  Redo pronunciation
+                </button>
+              )}
+              <button
+                className="btn primary small"
+                type="button"
+                disabled={writing}
+                onClick={() => runScriptAction(onWriteScript)}
+              >
+                {writing ? 'Working…' : scripted ? 'Rewrite script' : 'Write the script'}
+              </button>
+            </div>
           </div>
         )}
         <div className="section-desc">

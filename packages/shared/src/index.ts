@@ -15,3 +15,4 @@ export * from './defaults.js';
 export * from './samples.js';
 export * from './library.js';
 export * from './compose.js';
+export * from './languageSeeds.js';

@@ -144,8 +144,20 @@ export interface Dealer {
   photos: DealerPhoto[];
 }
 
+/** The language rules in force for this brief, resolved from the library. */
+export interface BriefLanguage {
+  code: string;
+  name: string;
+  /** True when lines must be respelled for pronunciation before generation. */
+  needsPhonetics?: boolean;
+  /** On-screen text rules, injected into the video prompt. */
+  writtenGuide?: string;
+}
+
 /** The structured brief — the single user input (P0.3). */
 export interface Brief {
+  /** Resolved from the project's chosen LanguageProfile. */
+  language?: BriefLanguage;
   categories: CategoryId[];
   narration: NarrationKey;
   /** Whether the video references a specific car model (triggers the scraper, P0.2). */

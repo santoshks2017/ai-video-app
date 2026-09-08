@@ -5,17 +5,26 @@ import type {
   CarModelProfile,
   ClientProfile,
   GlobalInstruction,
+  LanguageProfile,
   Project,
   VideoModelProfile,
 } from '@ava/shared';
 import { collection, getToken, isApiError, session, setToken } from '../lib/client.js';
 
-export type Section = 'projects' | 'actors' | 'cars' | 'clients' | 'instructions' | 'models';
+export type Section =
+  | 'projects'
+  | 'actors'
+  | 'cars'
+  | 'clients'
+  | 'instructions'
+  | 'languages'
+  | 'models';
 
 const actorsApi = collection<ActorProfile>('actors');
 const carsApi = collection<CarModelProfile>('cars');
 const clientsApi = collection<ClientProfile>('clients');
 const instructionsApi = collection<GlobalInstruction>('instructions');
+const languagesApi = collection<LanguageProfile>('languages');
 const projectsApi = collection<Project>('projects');
 const credentialsApi = collection<ApiCredential>('credentials');
 const modelsApi = collection<VideoModelProfile>('models');
@@ -25,6 +34,7 @@ export const api = {
   cars: carsApi,
   clients: clientsApi,
   instructions: instructionsApi,
+  languages: languagesApi,
   projects: projectsApi,
   credentials: credentialsApi,
   models: modelsApi,
@@ -42,6 +52,7 @@ interface AppState {
   cars: CarModelProfile[];
   clients: ClientProfile[];
   instructions: GlobalInstruction[];
+  languages: LanguageProfile[];
   projects: Project[];
   credentials: ApiCredential[];
   models: VideoModelProfile[];
@@ -64,6 +75,7 @@ export const useApp = create<AppState>()((set, get) => ({
   cars: [],
   clients: [],
   instructions: [],
+  languages: [],
   projects: [],
   credentials: [],
   models: [],
@@ -93,22 +105,33 @@ export const useApp = create<AppState>()((set, get) => ({
 
   signOut: () => {
     setToken(null);
-    set({ signedIn: false, actors: [], cars: [], clients: [], instructions: [], projects: [], credentials: [], models: [] });
+    set({
+      signedIn: false,
+      actors: [],
+      cars: [],
+      clients: [],
+      instructions: [],
+      languages: [],
+      projects: [],
+      credentials: [],
+      models: [],
+    });
   },
 
   go: (section, projectId = null) => set({ section, openProjectId: projectId }),
 
   refresh: async () => {
     set({ loading: true });
-    const [actors, cars, clients, instructions, projects, credentials, models] = await Promise.all([
+    const [actors, cars, clients, instructions, languages, projects, credentials, models] = await Promise.all([
       actorsApi.list(),
       carsApi.list(),
       clientsApi.list(),
       instructionsApi.list(),
+      languagesApi.list(),
       projectsApi.list(),
       credentialsApi.list(),
       modelsApi.list(),
     ]);
-    set({ actors, cars, clients, instructions, projects, credentials, models, loading: false });
+    set({ actors, cars, clients, instructions, languages, projects, credentials, models, loading: false });
   },
 }));

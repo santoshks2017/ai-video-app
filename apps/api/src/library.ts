@@ -13,6 +13,7 @@ export type Collection =
   | 'cars'
   | 'clients'
   | 'instructions'
+  | 'languages'
   | 'projects'
   | 'credentials'
   | 'models';

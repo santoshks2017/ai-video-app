@@ -24,7 +24,7 @@ import { OutputPanel } from '../components/OutputPanel.js';
 import { GenerationPanel } from '../components/GenerationPanel.js';
 
 export function ProjectEditor({ projectId }: { projectId: string }) {
-  const { projects, clients, actors, cars, instructions, models, refresh, go } = useApp();
+  const { projects, clients, actors, cars, instructions, languages, models, refresh, go } = useApp();
   const stored = projects.find((p) => p.id === projectId);
   const [project, setProject] = useState<Project | null>(stored ?? null);
   const [savedAt, setSavedAt] = useState<number>(0);
@@ -59,9 +59,15 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const actor = actors.find((a) => a.id === project?.actorId) ?? null;
   const car = cars.find((c) => c.id === project?.carId) ?? null;
 
+  const language =
+    languages.find((l) => l.id === project?.spec.languageId && l.enabled !== false) ??
+    languages.find((l) => l.isDefault && l.enabled !== false) ??
+    languages.find((l) => l.enabled !== false) ??
+    null;
+
   const brief = useMemo(
-    () => (project ? composeBrief(project, { client, actor, car, instructions }) : null),
-    [project, client, actor, car, instructions],
+    () => (project ? composeBrief(project, { client, actor, car, instructions, language }) : null),
+    [project, client, actor, car, instructions, language],
   );
 
   const built = useMemo(
@@ -103,7 +109,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   /** Fill every spoken scene with a real line, then let the designer edit them. */
   const writeScript = async (): Promise<string> => {
     if (!brief || !project) return 'Fill in the brief first.';
-    const r = await genApi.script(brief);
+    const r = await genApi.script(brief, language?.id);
     if (isApiError(r)) return `${r.code}: ${r.message}`;
     if (!r.lines.length) return 'No spoken scenes to write for.';
     const next = { ...project.sceneEdits };
@@ -112,6 +118,23 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     }
     set({ sceneEdits: next });
     return `Wrote ${r.lines.length} line${r.lines.length > 1 ? 's' : ''} with ${r.model}, each with its pronunciation spelling. Read them through and fix anything that sounds off.`;
+  };
+
+  /** Re-apply the current pronunciation guide without rewriting the copy. */
+  const redoPhonetics = async (): Promise<string> => {
+    if (!project) return 'Open a project first.';
+    const lines = Object.entries(project.sceneEdits)
+      .map(([k, v]) => ({ index: Number(k), line: (v.dialogue ?? '').trim() }))
+      .filter((l) => Number.isFinite(l.index) && l.line);
+    if (!lines.length) return 'No written lines yet — write the script first.';
+    const r = await genApi.phonetics(lines, language?.id);
+    if (isApiError(r)) return `${r.code}: ${r.message}`;
+    const next = { ...project.sceneEdits };
+    for (const { index, say } of r.lines) {
+      next[String(index)] = { ...next[String(index)], phonetic: say };
+    }
+    set({ sceneEdits: next });
+    return `Re-applied the ${r.language} guide to ${r.lines.length} line${r.lines.length > 1 ? 's' : ''}. The copy is unchanged.`;
   };
 
   const cost = useMemo(
@@ -300,6 +323,29 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   <option value="9:16">Vertical 9:16</option>
                   <option value="1:1">Square 1:1</option>
                   <option value="16:9">Horizontal 16:9</option>
+                </select>
+              </Field>
+              <Field
+                label="Language"
+                hint={
+                  language
+                    ? `Spoken and written in ${language.name}. Its rules live in the Languages section.`
+                    : 'No languages configured — add one in Languages.'
+                }
+              >
+                <select
+                  value={project.spec.languageId ?? ''}
+                  onChange={(e) => setSpec({ languageId: e.target.value || undefined })}
+                >
+                  <option value="">Default language</option>
+                  {languages
+                    .filter((l) => l.enabled !== false)
+                    .map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                        {l.isDefault ? ' (default)' : ''}
+                      </option>
+                    ))}
                 </select>
               </Field>
               <Field
@@ -543,6 +589,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 }
                 onClearEdits={() => set({ sceneEdits: {} })}
                 onWriteScript={writeScript}
+                onRedoPhonetics={language?.needsPhonetics === false ? undefined : redoPhonetics}
+                languageName={language?.name}
               />
             </Collapse>
           )}

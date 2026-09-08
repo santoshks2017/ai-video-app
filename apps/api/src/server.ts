@@ -28,12 +28,13 @@ import { scrapeModel, getCarModel } from './scraper.js';
 import { composeFinal, lastFrame, posterFrame, selfTest, type BrandOverlay } from './post.js';
 import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './auth.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
-import { writeScript, ScriptError, type ScriptScene } from './script.js';
+import { writeScript, addPhonetics, ScriptError, type ScriptScene, type ScriptLanguage } from './script.js';
 import {
   buildContext,
   buildBeats,
   planScenes,
   CATEGORY_BY_ID,
+  LANGUAGE_SEEDS,
   OMNI_FLASH_DEFAULTS,
   SEEDANCE_25_DEFAULTS,
   SEEDANCE_20_FAST_DEFAULTS,
@@ -91,7 +92,16 @@ app.post<{ Body: { password?: string } }>('/api/session', async (req, reply) => 
 
 /* ============================ library CRUD ============================ */
 
-const COLLECTIONS: Collection[] = ['actors', 'cars', 'clients', 'instructions', 'projects', 'credentials', 'models'];
+const COLLECTIONS: Collection[] = [
+  'actors',
+  'cars',
+  'clients',
+  'instructions',
+  'languages',
+  'projects',
+  'credentials',
+  'models',
+];
 
 for (const name of COLLECTIONS) {
   app.get(`/api/${name}`, async () => ({ items: await listAll(name) }));
@@ -155,7 +165,56 @@ app.delete<{ Params: { id: string } }>('/api/credentials/:id/key', async (req) =
  * fraction of a rupee, so the script is written and approved before any paid
  * video call.
  */
-app.post<{ Body: { brief?: Brief } }>('/api/script', async (req, reply) => {
+/** The language's rules, resolved from the library for a script pass. */
+async function resolveLanguage(languageId?: string): Promise<ScriptLanguage> {
+  const all = await listAll<Record<string, any>>('languages');
+  const chosen =
+    (languageId && all.find((l) => l.id === languageId)) ||
+    all.find((l) => l.isDefault && l.enabled !== false) ||
+    all.find((l) => l.enabled !== false);
+  return {
+    name: chosen?.name ?? 'Hindi',
+    code: chosen?.code ?? 'hi',
+    needsPhonetics: chosen ? chosen.needsPhonetics !== false : true,
+    spokenGuide: String(chosen?.spokenGuide ?? ''),
+    glossary: Array.isArray(chosen?.glossary) ? chosen.glossary : [],
+  };
+}
+
+/** The Gemini key that writes scripts, whichever model renders the video. */
+async function scriptKey(): Promise<string | undefined> {
+  const creds = await listAll<Record<string, any>>('credentials');
+  const google = creds.find((c) => c.provider === 'google-gemini' && c.enabled !== false);
+  return google && google.usesEnvKey === false ? await getCredentialKey(google.id) : config.googleApiKey;
+}
+
+/**
+ * Re-run the pronunciation pass alone, against the current language guide.
+ * Copy that is already approved keeps its wording; only the spoken spelling is
+ * rebuilt — so tuning a guide costs one cheap text call, not a rewrite.
+ */
+app.post<{ Body: { lines?: { index: number; line: string }[]; languageId?: string } }>(
+  '/api/script/phonetics',
+  async (req, reply) => {
+    const lines = (req.body?.lines ?? []).filter((l) => l && String(l.line ?? '').trim());
+    if (!lines.length) return reply.code(400).send({ code: 'bad-request', message: 'lines are required' });
+    const apiKey = await scriptKey();
+    if (!apiKey) {
+      return reply
+        .code(503)
+        .send({ code: 'script-no-key', message: 'This needs a Google Gemini key. Add one in APIs & models.' });
+    }
+    try {
+      const language = await resolveLanguage(req.body?.languageId);
+      return { language: language.name, lines: await addPhonetics(lines, language, apiKey) };
+    } catch (e) {
+      const err = e as ScriptError;
+      return reply.code(err.status ?? 502).send({ code: err.code ?? 'script-failed', message: err.message });
+    }
+  },
+);
+
+app.post<{ Body: { brief?: Brief; languageId?: string } }>('/api/script', async (req, reply) => {
   const brief = req.body?.brief;
   if (!brief || !Array.isArray(brief.categories) || !brief.categories.length) {
     return reply.code(400).send({ code: 'bad-request', message: 'A brief with at least one use case is required.' });
@@ -193,9 +252,7 @@ app.post<{ Body: { brief?: Brief } }>('/api/script', async (req, reply) => {
 
   // The script is written by Gemini regardless of which model renders the video
   // — it is text, and it costs a rounding error next to a segment.
-  const creds = await listAll<Record<string, any>>('credentials');
-  const google = creds.find((c) => c.provider === 'google-gemini' && c.enabled !== false);
-  const apiKey = google?.usesEnvKey === false ? await getCredentialKey(google.id) : config.googleApiKey;
+  const apiKey = await scriptKey();
   if (!apiKey) {
     return reply
       .code(503)
@@ -206,6 +263,7 @@ app.post<{ Body: { brief?: Brief } }>('/api/script', async (req, reply) => {
     const out = await writeScript(
       {
         scenes,
+        language: await resolveLanguage(req.body?.languageId),
         gender: brief.actor?.gender === 'male' ? 'male' : 'female',
         dealerName: ctx.brief.dealer.fictionalize
           ? ctx.brief.dealer.fakeDealer || ctx.brief.dealer.dealerName
@@ -283,6 +341,14 @@ app.post('/api/models/seed', async () => {
     isDefault: !models.some((m) => m.isDefault),
   });
 
+  // Languages ship with the same additive guarantee: only what is missing.
+  const languages = await listAll<Record<string, any>>('languages');
+  for (const seed of LANGUAGE_SEEDS) {
+    if (languages.some((l) => l.code === seed.code)) continue;
+    await upsert('languages', seed);
+    added.push(`${seed.name} language guide`);
+  }
+
   const byteplus = await credFor('byteplus-ark', {
     name: 'BytePlus ModelArk',
     hasKey: false,
@@ -293,7 +359,12 @@ app.post('/api/models/seed', async () => {
   await addModel(byteplus.id, SEEDANCE_25_DEFAULTS);
   await addModel(byteplus.id, SEEDANCE_20_FAST_DEFAULTS);
 
-  return { added, models: await listAll('models'), credentials: await listAll('credentials') };
+  return {
+    added,
+    models: await listAll('models'),
+    credentials: await listAll('credentials'),
+    languages: await listAll('languages'),
+  };
 });
 
 /* ---- car library sync: Brand → Model → Variant → Colour ---- */

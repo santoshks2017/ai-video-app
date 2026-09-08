@@ -1014,3 +1014,15 @@ code {
   background: var(--surface-2);
 }
 .sb-say textarea.unset { border-color: var(--warn); }
+
+/* ---- Languages: the guides are long documents, the glossary a table ---- */
+textarea.guide {
+  min-height: 340px; font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px; line-height: 1.55; white-space: pre; overflow-wrap: normal; overflow-x: auto;
+}
+.gloss { display: grid; gap: 6px; max-height: 420px; overflow-y: auto; }
+.gloss-row { display: grid; grid-template-columns: 1.2fr 1.2fr 0.7fr auto; gap: 6px; align-items: center; }
+.gloss-row input { padding: 6px 8px; font-size: 12.5px; }
+.gloss-row input.mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+.gloss-row .btn { padding: 6px 9px; }
+.script-bar-actions { display: flex; gap: 8px; flex: none; }

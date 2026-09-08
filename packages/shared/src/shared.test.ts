@@ -21,6 +21,7 @@ import {
   dedupeFilenames,
   applyFeedback,
   estimateSegmentsCost,
+  LANGUAGE_SEEDS,
   type Brief,
 } from '@ava/shared';
 
@@ -224,4 +225,45 @@ test('pre-flight separates "no line" from "line but no pronunciation"', () => {
   assert.ok(withModel(['en', 'ja']).includes('speech-language-unsupported'));
   assert.ok(!withModel(undefined).includes('speech-language-unsupported'));
   assert.ok(!withModel(['en', 'hi']).includes('speech-language-unsupported'));
+});
+
+
+test('language rules drive the prompt, not hard-coded Hindi', () => {
+  const hindi = LANGUAGE_SEEDS.find((l) => l.code === 'hi')!;
+  const english = LANGUAGE_SEEDS.find((l) => l.code === 'en')!;
+  const brief = (l: typeof hindi): Brief => ({
+    ...base({ categories: ['offer'], narration: 'presenter', durationSec: 15, maxChunkSec: 15 }),
+    language: { code: l.code, name: l.name, needsPhonetics: l.needsPhonetics, writtenGuide: l.writtenGuide },
+  });
+  const overrides = { '0': { dialogue: 'अब शानदार फायदे।', phonetic: 'ab sha-aan-DAAR FAA-y-de' } };
+
+  const hi = buildPrompt(brief(hindi), { sceneOverrides: overrides })!.parts[0]!.text;
+  const en = buildPrompt(brief(english), { sceneOverrides: overrides })!.parts[0]!.text;
+
+  // The language names itself, and its on-screen rules travel with the prompt.
+  assert.match(hi, /Spoken language: Hindi/);
+  assert.match(en, /Spoken language: English/);
+  assert.match(hi, /Hindi on-screen text rules/);
+  assert.match(en, /English on-screen text rules/);
+
+  // A language written the way it is said gets no respelling explainer, and
+  // pre-flight never nags it for a pronunciation spelling it does not need.
+  assert.match(hi, /HOW TO READ THE BRACES/);
+  assert.ok(!en.includes('HOW TO READ THE BRACES'));
+  // Every scene scripted but none respelled — the state that looks finished and
+  // is not. It only surfaces once nothing is entirely unwritten.
+  const sceneCount = buildPrompt(brief(hindi))!.scenePlan.scenes.length;
+  const written = Object.fromEntries(
+    Array.from({ length: sceneCount }, (_, i) => [String(i), { dialogue: 'a line, no respelling' }]),
+  );
+  const codes = (l: typeof hindi) =>
+    runChecks(brief(l), { sceneOverrides: written }).checks.map((c) => c.code);
+  assert.ok(codes(hindi).includes('no-pronunciation-spelling'));
+  assert.ok(!codes(english).includes('no-pronunciation-spelling'));
+
+  // The model-language warning follows the brief's language, not a fixed code.
+  const speech = (l: typeof hindi, speechLanguages: string[]) =>
+    runChecks(brief(l), { model: { name: 'M', speechLanguages } }).checks.map((c) => c.code);
+  assert.ok(speech(hindi, ['en', 'ja']).includes('speech-language-unsupported'));
+  assert.ok(!speech(english, ['en', 'ja']).includes('speech-language-unsupported'));
 });

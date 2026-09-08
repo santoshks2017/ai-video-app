@@ -23,19 +23,28 @@ import { rulebookText } from './rulebook.js';
 const CLEAN_FRAME =
   'Leave the frame CLEAN of any branding furniture: no bottom footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, no lower third, no channel bug, no subtitles and no end card. Those are added afterwards in post. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so overlays can sit there.';
 
-const SPOKEN_LOCK = [
-  '## SPOKEN LINES — SAY THESE EXACTLY',
-  "Anything in {curly braces} above is the presenter's exact wording. Speak it word for word. Do not translate it, re-word it, shorten it, extend it or \"correct\" it, and never read the scene descriptions aloud. Lip movement must match these words, at a natural unhurried pace.",
-  '',
-  'HOW TO READ THE BRACES — they are written as a pronunciation guide, not as ordinary text:',
-  '- The language is spoken Indian Hindi/Hinglish, respelled in Latin letters so the sounds are unambiguous. Read it as Hindi, not as English.',
-  '- A hyphen splits syllables of ONE word. Say the word smoothly as a single word — do not pause, stutter or spell it out. "KEE-ji-ye" is one word, "keejiye".',
-  '- CAPITALS mark the stressed syllable. Give it the stress; do not shout it, and do not treat capitals as an acronym to be spelled letter by letter.',
-  '- Doubled vowels are long vowels: "AAJ" is aaj, "DRAAIV" is drive, "ee" is a long e.',
-  '- An em dash is a short breath, not a spoken word.',
-  '- English loanwords are respelled the way an Indian presenter says them: "dis-KAAUNT" is discount, "MO-tarz" is Motors, "TEST DRAAIV" is test drive.',
-  '- CRITICAL: this respelling is for the VOICE ONLY. Never render any of it as on-screen text, a subtitle, a caption or a graphic. Nothing with hyphens or mid-word capitals may ever appear on screen. On-screen text comes only from the exact strings listed separately below.',
-].join('\n');
+function spokenLock(brief: Brief): string {
+  const lang = brief.language?.name ?? 'Hindi';
+  const respelled = brief.language?.needsPhonetics !== false;
+  const lines = [
+    '## SPOKEN LINES — SAY THESE EXACTLY',
+    `Anything in {curly braces} above is the presenter's exact wording, in ${lang}. Speak it word for word. Do not translate it, re-word it, shorten it, extend it or "correct" it, and never read the scene descriptions aloud. Lip movement must match these words, at a natural unhurried pace.`,
+  ];
+  if (respelled) {
+    lines.push(
+      '',
+      'HOW TO READ THE BRACES — they are written as a pronunciation guide, not as ordinary text:',
+      `- The language is spoken ${lang}, respelled in Latin letters so the sounds are unambiguous. Read it as ${lang}, not as English.`,
+      '- A hyphen splits syllables of ONE word. Say the word smoothly as a single word — do not pause, stutter or spell it out. "KEE-ji-ye" is one word, "keejiye".',
+      '- CAPITALS mark the stressed syllable. Give it the stress; do not shout it, and do not treat capitals as an acronym to be spelled letter by letter.',
+      '- Doubled vowels are long vowels: "AAJ" is aaj, "DRAAIV" is drive, "ee" is a long e.',
+      '- An em dash is a short breath, not a spoken word.',
+      '- English loanwords are respelled the way an Indian presenter says them: "dis-KAAUNT" is discount, "MO-tarz" is Motors, "TEST DRAAIV" is test drive.',
+      '- CRITICAL: this respelling is for the VOICE ONLY. Never render any of it as on-screen text, a subtitle, a caption or a graphic. Nothing with hyphens or mid-word capitals may ever appear on screen. On-screen text comes only from the exact strings listed separately below.',
+    );
+  }
+  return lines.join('\n');
+}
 
 export function wordBudget(seconds: number): number {
   return Math.max(3, Math.round(seconds * WORDS_PER_SECOND));
@@ -202,7 +211,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     L.push('## AUDIO');
     if (mode.speaks) {
       L.push(
-        'Spoken language: Hindi/Hinglish, following the Pronunciation & Delivery Rules at the end of this prompt.',
+        `Spoken language: ${brief.language?.name ?? 'Hindi/Hinglish'}, following the Pronunciation & Delivery Rules at the end of this prompt.`,
       );
       L.push(
         `Dialogue budget for this clip: about ${partWordBudget} words in total across ${scenes.length} scene${scenes.length > 1 ? 's' : ''}. Do not exceed it. Speak at a natural, unhurried pace with real pauses — if a line will not fit its scene, shorten the line rather than speeding up the delivery.`,
@@ -226,13 +235,16 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     );
     if (mode.speaks && hasScript) {
       L.push('');
-      L.push(SPOKEN_LOCK);
+      L.push(spokenLock(brief));
     }
 
     const strings = collectStrings(scenes);
     if (strings.length) {
       L.push('');
       L.push('## ON-SCREEN TEXT — EXACT STRINGS');
+      if (brief.language?.writtenGuide?.trim()) {
+        L.push(brief.language.writtenGuide.trim());
+      }
       L.push(
         "Render these strings EXACTLY as written: same spelling, spacing, punctuation, case and symbols. Do not paraphrase, translate, abbreviate, re-spell or 'correct' them. Misspelled on-screen text is the single most common failure in this format.",
       );
@@ -283,7 +295,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         L.push(`Says, word for word: {${scripted}}`);
       } else if (mode.speaks && dialogue) {
         L.push(
-          `Speaks in Hindi/Hinglish, at most ~${wordBudget(sc.duration)} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it in natural Devanagari Hindi: ${dialogue}`,
+          `Speaks in ${brief.language?.name ?? 'Hindi/Hinglish'}, at most ~${wordBudget(sc.duration)} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it naturally: ${dialogue}`,
         );
       } else if (dialogue) {
         L.push(`Story beat, told visually with no speech: ${dialogue}`);
@@ -397,7 +409,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
             ? `  Told visually, no speech: ${d}`
             : scriptedC
               ? `  Says, word for word: {${scriptedC}}`
-              : `  Speaks Hindi/Hinglish, ~${wordBudget(sc.duration)} words, composed from this intent: ${d}`,
+              : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(sc.duration)} words, composed from this intent: ${d}`,
         );
       }
       if (sc.beat.card) C.push(`  On-screen card: "${sc.beat.card}"${sc.beat.cardSub ? ` / "${sc.beat.cardSub}"` : ''}`);
@@ -412,7 +424,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         return (o?.phonetic ?? o?.dialogue ?? '').trim();
       })
     ) {
-      C.push(SPOKEN_LOCK);
+      C.push(spokenLock(brief));
       C.push('');
     }
     C.push('## ON-SCREEN TEXT — EXACT STRINGS (do not render anything else as text)');
@@ -427,7 +439,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push('No on-screen text cards in this segment — no text of any kind on screen.');
     }
     C.push(CLEAN_FRAME);
-    if (mode.speaks) C.push('Same Hindi/Hinglish pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
+    if (mode.speaks) C.push('Same pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
     if (isLast) C.push('This is the final segment — end cleanly on the last scene.');
 
     partsOut.push({

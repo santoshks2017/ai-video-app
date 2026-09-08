@@ -7,6 +7,7 @@ const NAV: { id: Section; label: string; icon: string }[] = [
   { id: 'cars', label: 'Cars', icon: '🚗' },
   { id: 'actors', label: 'Actors', icon: '🎭' },
   { id: 'instructions', label: 'Instructions', icon: '📐' },
+  { id: 'languages', label: 'Languages', icon: '🗣️' },
   { id: 'models', label: 'APIs & models', icon: '🔌' },
 ];
 

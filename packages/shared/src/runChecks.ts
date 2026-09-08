@@ -152,10 +152,14 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
       const o = overrides[String(i)];
       return !(o?.phonetic ?? o?.dialogue ?? '').trim() && sc.beat.dialogue;
     }).length;
-    const unspelled = plan.scenes.filter((sc, i) => {
-      const o = overrides[String(i)];
-      return (o?.dialogue ?? '').trim() && !(o?.phonetic ?? '').trim() && sc.beat.dialogue;
-    }).length;
+    // English needs no respelling, so only ask for one where the language says so.
+    const needsPhonetics = brief.language?.needsPhonetics !== false;
+    const unspelled = needsPhonetics
+      ? plan.scenes.filter((sc, i) => {
+          const o = overrides[String(i)];
+          return (o?.dialogue ?? '').trim() && !(o?.phonetic ?? '').trim() && sc.beat.dialogue;
+        }).length
+      : 0;
     if (unscripted) {
       checks.push({
         level: 'warn',
@@ -177,11 +181,13 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
     }
 
     const langs = opts.model?.speechLanguages ?? [];
-    if (langs.length && !langs.some((l) => /^hi/i.test(l))) {
+    const code = brief.language?.code ?? 'hi';
+    const langName = brief.language?.name ?? 'Hindi';
+    if (langs.length && !langs.some((l) => l.toLowerCase().startsWith(code.toLowerCase().slice(0, 2)))) {
       checks.push({
         level: 'warn',
         code: 'speech-language-unsupported',
-        text: `${opts.model?.name ?? 'This model'} does not list Hindi among the languages it can speak (${langs.join(', ')}). A written Devanagari script helps, but the delivery may still be mispronounced — judge it on a short run before committing to a long one.`,
+        text: `${opts.model?.name ?? 'This model'} does not list ${langName} among the languages it can speak (${langs.join(', ')}). A pronunciation spelling helps, but the delivery may still be wrong — judge it on a short run before committing to a long one.`,
       });
     }
   }

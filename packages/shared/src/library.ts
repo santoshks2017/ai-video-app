@@ -139,6 +139,8 @@ export interface GlobalInstruction {
 export interface ProjectVideoSpec {
   /** Which VideoModelProfile generates this video. Blank = the default model. */
   modelId?: string;
+  /** Which LanguageProfile the video is spoken and written in. Blank = the default. */
+  languageId?: string;
   durationSec: number;
   maxChunkSec: number;
   aspect: AspectRatio;
@@ -211,6 +213,47 @@ export type ProviderKind =
   | 'replicate'
   | 'fal'
   | 'custom';
+
+export interface GlossaryEntry {
+  /** The word or phrase as it appears in a script, in either script system. */
+  term: string;
+  /** Its locked spoken spelling — identical in every video, every time. */
+  say: string;
+  note?: string;
+  /** Free-text grouping for the table, e.g. "Money", "EV". */
+  group?: string;
+}
+
+/**
+ * Everything the pipeline needs to know about one language: how it must be
+ * SPOKEN (the pronunciation rulebook fed to the script pass) and how it must be
+ * WRITTEN on screen (fed to the video prompt), plus a glossary of locked
+ * spellings. Editing a guide here changes every future video in that language —
+ * the rules are data, not code.
+ */
+export interface LanguageProfile {
+  id: string;
+  /** Language code, matched against a model's declared speech languages. */
+  code: string;
+  name: string;
+  nativeName?: string;
+  /** Only enabled languages are offered on a project. */
+  enabled: boolean;
+  isDefault?: boolean;
+  /**
+   * Whether a line in this language has to be respelled for pronunciation before
+   * it reaches the video model. Hindi does; English does not.
+   */
+  needsPhonetics: boolean;
+  /** The pronunciation / delivery rulebook. Injected into the script pass. */
+  spokenGuide: string;
+  /** On-screen text rules for cards, footer and end card. Injected into the prompt. */
+  writtenGuide: string;
+  /** Locked spellings, checked before deriving a new one — consistency beats rules. */
+  glossary: GlossaryEntry[];
+  createdAt: number;
+  updatedAt: number;
+}
 
 export interface ApiCredential {
   id: string;

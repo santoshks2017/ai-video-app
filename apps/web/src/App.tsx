@@ -7,6 +7,7 @@ import { ActorsSection } from './sections/Actors.js';
 import { CarsSection } from './sections/Cars.js';
 import { ClientsSection } from './sections/Clients.js';
 import { InstructionsSection } from './sections/Instructions.js';
+import { LanguagesSection } from './sections/Languages.js';
 import { ModelsSection } from './sections/Models.js';
 
 export default function App() {
@@ -33,10 +34,11 @@ export default function App() {
       {section === 'cars' && <CarsSection />}
       {section === 'clients' && <ClientsSection />}
       {section === 'instructions' && <InstructionsSection />}
+      {section === 'languages' && <LanguagesSection />}
       {section === 'models' && <ModelsSection />}
       <div className="foot-note">
-        All use cases generate video through the selected model. The pronunciation &amp; delivery rulebook is
-        injected into every prompt that contains speech.
+        All use cases generate video through the selected model. Each language&rsquo;s pronunciation and
+        on-screen text rules are injected into every prompt that uses it.
       </div>
     </Shell>
   );

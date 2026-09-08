@@ -25,7 +25,16 @@ const CLEAN_FRAME =
 
 const SPOKEN_LOCK = [
   '## SPOKEN LINES — SAY THESE EXACTLY',
-  'Anything in {curly braces} above is the presenter\'s exact wording. Speak it word for word as written, in Hindi/Hinglish, with the English words inside it kept in English. Do not translate it, re-word it, shorten it, extend it or "correct" it, and do not read the scene descriptions aloud. Lip movement must match these words. Keep a natural, unhurried pace — never speed up the delivery to fit the time.',
+  "Anything in {curly braces} above is the presenter's exact wording. Speak it word for word. Do not translate it, re-word it, shorten it, extend it or \"correct\" it, and never read the scene descriptions aloud. Lip movement must match these words, at a natural unhurried pace.",
+  '',
+  'HOW TO READ THE BRACES — they are written as a pronunciation guide, not as ordinary text:',
+  '- The language is spoken Indian Hindi/Hinglish, respelled in Latin letters so the sounds are unambiguous. Read it as Hindi, not as English.',
+  '- A hyphen splits syllables of ONE word. Say the word smoothly as a single word — do not pause, stutter or spell it out. "KEE-ji-ye" is one word, "keejiye".',
+  '- CAPITALS mark the stressed syllable. Give it the stress; do not shout it, and do not treat capitals as an acronym to be spelled letter by letter.',
+  '- Doubled vowels are long vowels: "AAJ" is aaj, "DRAAIV" is drive, "ee" is a long e.',
+  '- An em dash is a short breath, not a spoken word.',
+  '- English loanwords are respelled the way an Indian presenter says them: "dis-KAAUNT" is discount, "MO-tarz" is Motors, "TEST DRAAIV" is test drive.',
+  '- CRITICAL: this respelling is for the VOICE ONLY. Never render any of it as on-screen text, a subtitle, a caption or a graphic. Nothing with hyphens or mid-word capitals may ever appear on screen. On-screen text comes only from the exact strings listed separately below.',
 ].join('\n');
 
 export function wordBudget(seconds: number): number {
@@ -47,7 +56,16 @@ export interface BuildPromptResult {
 }
 
 export interface SceneOverride {
+  /** The line in plain readable Hindi/Hinglish — for the designer to check the meaning. */
   dialogue?: string;
+  /**
+   * The same line respelled for pronunciation, which is what actually reaches
+   * the video model: syllables hyphenated, the stressed syllable capitalised
+   * ("do LAKH pach-CHEES ha-ZAAR ru-Pae tak ka CASH dis-KAAUNT"). Devanagari
+   * tells a model what the words are but not how an Indian presenter says them,
+   * which is where the delivery was breaking.
+   */
+  phonetic?: string;
   shot?: string;
 }
 
@@ -204,7 +222,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     // A written line is the single biggest lever on spoken quality, so the lock
     // stands on its own rather than riding along with the on-screen text block.
     const hasScript = scenes.some((sc) =>
-      (overrides[String(plan.scenes.indexOf(sc))]?.dialogue ?? '').trim(),
+      (overrides[String(plan.scenes.indexOf(sc))]?.phonetic ?? overrides[String(plan.scenes.indexOf(sc))]?.dialogue ?? '').trim(),
     );
     if (mode.speaks && hasScript) {
       L.push('');
@@ -256,7 +274,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       const shotText = ov.shot?.trim() || baseShot;
       if (shotText) L.push(`Shot: ${shotText}`);
-      const scripted = ov.dialogue?.trim();
+      const scripted = ov.phonetic?.trim() || ov.dialogue?.trim();
       const dialogue = scripted || sc.beat.dialogue;
       if (mode.speaks && scripted) {
         // Braces are Seedance's dialogue marker and read as an exact quote to
@@ -371,7 +389,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push(`Scene ${i + 1} (~${sc.duration}s) — ${sc.beat.title}`);
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       if (ov.shot?.trim() || baseShot) C.push(`  Shot: ${ov.shot?.trim() || baseShot}`);
-      const scriptedC = ov.dialogue?.trim();
+      const scriptedC = ov.phonetic?.trim() || ov.dialogue?.trim();
       const d = scriptedC || sc.beat.dialogue;
       if (d) {
         C.push(
@@ -387,7 +405,13 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     });
     const contStrings = collectStrings(scenes);
     C.push('');
-    if (ctx.mode.speaks && scenes.some((sc) => (overrides[String(plan.scenes.indexOf(sc))]?.dialogue ?? '').trim())) {
+    if (
+      ctx.mode.speaks &&
+      scenes.some((sc) => {
+        const o = overrides[String(plan.scenes.indexOf(sc))];
+        return (o?.phonetic ?? o?.dialogue ?? '').trim();
+      })
+    ) {
       C.push(SPOKEN_LOCK);
       C.push('');
     }

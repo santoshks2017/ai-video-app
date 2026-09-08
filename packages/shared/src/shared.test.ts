@@ -178,3 +178,50 @@ test('a retake is billed only for the seconds it regenerates', () => {
   assert.equal(none.inr, 0);
   assert.equal(none.needsConfirmation, false);
 });
+
+
+test('the pronunciation spelling is what the model is told to say', () => {
+  const brief = base({ categories: ['offer'], narration: 'presenter', durationSec: 15, maxChunkSec: 15 });
+  const overrides = {
+    '0': {
+      dialogue: 'अब Byte Premier Motors पर मिल रहे हैं शानदार फायदे।',
+      phonetic: 'aur ab BAAIT pre-MEER MO-tarz par mil ra-HE hain sha-aan-DAAR FAA-y-de',
+    },
+  };
+  const out = buildPrompt(brief, { sceneOverrides: overrides })!;
+  const text = out.parts[0]!.text;
+
+  // The respelling goes in the braces; the readable Devanagari stays out of the
+  // prompt entirely, so the model can't perform the unstressed version.
+  assert.match(text, /Says, word for word: \{aur ab BAAIT pre-MEER MO-tarz/);
+  assert.ok(!text.includes('शानदार फायदे'), 'the readable line is for humans, not the model');
+
+  // Hyphens and capitals are a pronunciation guide — the model must not voice
+  // them as punctuation or burn them on screen as a caption.
+  assert.match(text, /## SPOKEN LINES — SAY THESE EXACTLY/);
+  assert.match(text, /hyphen splits syllables/i);
+  assert.match(text, /Never render any of it as on-screen text/i);
+
+  // With no respelling the readable line is still better than nothing.
+  const fallback = buildPrompt(brief, { sceneOverrides: { '0': { dialogue: 'नमस्ते' } } })!;
+  assert.match(fallback.parts[0]!.text, /Says, word for word: \{नमस्ते\}/);
+
+  // And with nothing at all, the prompt says so rather than passing off the
+  // stage direction as a line.
+  assert.match(buildPrompt(brief)!.parts[0]!.text, /NO SCRIPT WAS WRITTEN/);
+});
+
+test('pre-flight separates "no line" from "line but no pronunciation"', () => {
+  const brief = base({ categories: ['offer'], narration: 'presenter', durationSec: 15, maxChunkSec: 15 });
+  const codes = (o: Record<string, { dialogue?: string; phonetic?: string }>) =>
+    runChecks(brief, { sceneOverrides: o }).checks.map((c) => c.code);
+
+  assert.ok(codes({}).includes('no-spoken-script'));
+  // A model that publishes its speech languages and omits Hindi gets flagged;
+  // one that publishes nothing never does.
+  const withModel = (speechLanguages?: string[]) =>
+    runChecks(brief, { model: { name: 'M', speechLanguages } }).checks.map((c) => c.code);
+  assert.ok(withModel(['en', 'ja']).includes('speech-language-unsupported'));
+  assert.ok(!withModel(undefined).includes('speech-language-unsupported'));
+  assert.ok(!withModel(['en', 'hi']).includes('speech-language-unsupported'));
+});

@@ -1002,3 +1002,15 @@ code {
 .script-bar span { font-size: 12px; color: var(--ink-muted); }
 .script-bar .script-note { color: var(--ink); }
 .script-bar button { flex: none; }
+
+/* ---- storyboard: the pronunciation spelling the model actually performs ---- */
+.sb-say { margin-top: 6px; display: grid; gap: 3px; }
+.sb-say label {
+  margin: 0; font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.sb-say textarea {
+  min-height: 46px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px;
+  background: var(--surface-2);
+}
+.sb-say textarea.unset { border-color: var(--warn); }

@@ -7,10 +7,17 @@
  * from an English brief. Gemini coped; Seedance does not, and Hindi is not even
  * on its published speech-language list.
  *
- * So the direction becomes a real line here, in Devanagari, before any paid
- * video call — the designer edits it in the storyboard, and the video model is
- * then reading rather than improvising. Text generation costs a fraction of a
- * rupee against Rs 100+ for a video segment.
+ * So the direction becomes a real line here, before any paid video call — the
+ * designer edits it in the storyboard, and the video model reads rather than
+ * improvises. Text generation costs a fraction of a rupee against Rs 100+ for a
+ * video segment.
+ *
+ * Each line comes back twice. `line` is plain readable Hindi/Hinglish so a human
+ * can check the meaning. `say` is the same line RESPELLED FOR PRONUNCIATION —
+ * syllables hyphenated, stressed syllable capitalised — and that is what reaches
+ * the video model. Devanagari alone tells a model which words to say but not how
+ * an Indian presenter says them, and the models get the stress and the vowel
+ * lengths wrong; the respelling is what fixes the delivery.
  */
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -82,26 +89,46 @@ export async function resolveTextModel(apiKey: string): Promise<string> {
 function buildInstruction(req: ScriptRequest): string {
   const verbs =
     req.gender === 'female'
-      ? 'The presenter is a woman — use feminine verb forms throughout (रही हूं, करती हूं, बताती हूं).'
-      : 'The presenter is a man — use masculine verb forms throughout (रहा हूं, करता हूं, बताता हूं).';
+      ? 'The presenter is a woman — use feminine verb forms throughout (रही हूं / ra-HEE hoon, करती हूं / kar-TEE hoon).'
+      : 'The presenter is a man — use masculine verb forms throughout (रहा हूं / ra-HAA hoon, करता हूं / kar-TAA hoon).';
 
   const facts = Object.entries(req.facts)
     .filter(([, v]) => String(v ?? '').trim())
     .map(([k, v]) => `- ${k}: ${v}`);
 
   return [
-    'You write the spoken lines for short Indian car-dealership ad videos. The lines are performed to camera by a presenter and then lip-synced by a video model, so they must be exactly what she or he says — no stage directions, no narration about the shot.',
+    'You write the spoken lines for short Indian car-dealership ad videos. The lines are performed to camera by a presenter and lip-synced by an AI video model, so they must be exactly what she or he says — no stage directions, no narration about the shot.',
+    '',
+    'For every scene you return TWO forms of the same line.',
+    '',
+    '1. "line" — the natural, readable version in everyday spoken Hindi, Devanagari script, with the English words Indians actually use in English kept in Latin script (test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, brand and model names). This is for a human to read and check the meaning.',
+    '',
+    '2. "say" — THE SAME LINE RESPELLED FOR PRONUNCIATION, in Latin letters. This is the one the video model performs, and it is the whole point of the exercise: models given plain Hindi put the stress in the wrong place and shorten the long vowels, and the delivery comes out sounding foreign. Respelling fixes that.',
+    '',
+    'RESPELLING RULES for "say":',
+    '- Latin letters only. Spell each word the way it SOUNDS, not the way it is normally romanised.',
+    '- Split every multi-syllable word into syllables with hyphens: KEE-ji-ye, ba-NAA-i-ye, sha-aan-DAAR.',
+    '- CAPITALISE the stressed syllable of each content word. A stressed single-syllable word goes fully capitalised: LAKH, AAJ, BAAT. Leave unstressed grammar words in lower case: ka, ki, hi, toh, aur, tak, ap-ni.',
+    '- Double a vowel to make it long: AAJ (आज), DRAAIV (drive), ha-ZAAR (हज़ार), AG-lee (अगली), VAN-taa.',
+    '- Respell English loanwords the way an Indian presenter says them, not the way they are spelled in English: discount is dis-KAAUNT, Motors is MO-tarz, Premier is pre-MEER, drive is DRAAIV, price is PRAAIS.',
+    '- Respell brand and dealership names phonetically too, so they are not read as English: Byte becomes BAAIT, Premier Motors becomes pre-MEER MO-tarz.',
+    '- Write every number as spoken words, respelled: "do LAKH pach-CHEES ha-ZAAR". Never digits, never the ₹ symbol, and never the word "rupees".',
+    '- Use an em dash ( — ) where the presenter takes a short breath.',
+    '- Well-known short acronyms stay as they are: SUV, EMI, ABS.',
+    '',
+    'WORKED EXAMPLES of the "say" form — match this style exactly:',
+    '  do LAKH pach-CHEES ha-ZAAR ru-Pae tak ka CASH dis-KAAUNT',
+    '  BAAIT VAN-taa EKS — AAJ hi TEST DRAAIV buk KEE-ji-ye',
+    '  toh DER kis BAAT ki — BAAIT VAN-taa EKS ko ba-NAA-i-ye ap-ni AG-lee SUV',
+    '  aur ab BAAIT pre-MEER MO-tarz par mil ra-HE hain sha-aan-DAAR FAA-y-de',
     '',
     'LANGUAGE',
-    '- Write in everyday spoken Hindi, in Devanagari script. This is Hinglish as people actually speak it: keep English words that Indians use in English — test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, model names and brand names — in Latin script, inside the Devanagari sentence.',
-    '- Avoid literary Hindi nobody says out loud (समय, सुविधा, जानकारी, कारण, रूचि). Use the plain English word instead.',
     `- ${verbs}`,
+    '- Everyday spoken Hindi. Avoid literary words nobody says out loud (समय, सुविधा, जानकारी, कारण, रूचि) — use the plain English word instead.',
     '- Short, natural sentences. One idea per line. No lists. Never repeat a phrase across lines.',
     '',
     'ACCURACY',
     '- Use only the facts given below. Never invent a price, EMI, discount, mileage, interest rate or waiting period.',
-    '- Write numbers as words, the way they are spoken (दो लाख पच्चीस हज़ार), never as digits.',
-    '- Never say the word "rupees" or the ₹ symbol out loud — just the number in words.',
     '',
     'CONTEXT',
     `- Dealership: ${req.dealerName}`,
@@ -112,7 +139,7 @@ function buildInstruction(req: ScriptRequest): string {
     ...(req.direction ? ['', 'EXTRA DIRECTION', req.direction] : []),
     '',
     'THE SCENES',
-    'Write one line per scene. Each line must fit its word budget when spoken at a natural, unhurried pace — going over means the delivery gets rushed and the lip-sync breaks.',
+    'Write one line per scene. Each must fit its word budget when spoken at a natural, unhurried pace — over budget means the delivery gets rushed and the lip-sync breaks.',
     ...req.scenes.map(
       (s) =>
         `Scene ${s.index} — "${s.title}" · ${s.seconds}s · at most ${s.words} words${
@@ -120,14 +147,14 @@ function buildInstruction(req: ScriptRequest): string {
         }\n  What this moment has to do: ${s.direction}`,
     ),
     '',
-    'Return JSON only: an array of objects {"index": <scene index>, "line": "<the spoken line>"}. One object per scene, in order. No commentary.',
+    'Return JSON only: an array of {"index": <scene index>, "line": "<readable Hindi>", "say": "<the same line respelled for pronunciation>"}. One object per scene, in order. No commentary.',
   ].join('\n');
 }
 
 export async function writeScript(
   req: ScriptRequest,
   apiKey: string,
-): Promise<{ model: string; lines: { index: number; line: string }[] }> {
+): Promise<{ model: string; lines: ScriptLine[] }> {
   if (!req.scenes.length) return { model: '', lines: [] };
   const model = await resolveTextModel(apiKey);
 
@@ -153,8 +180,16 @@ export async function writeScript(
   return { model, lines };
 }
 
+export interface ScriptLine {
+  index: number;
+  /** Readable Hindi/Hinglish, for the designer. */
+  line: string;
+  /** The respelled form the video model actually performs. */
+  say: string;
+}
+
 /** JSON mode is not guaranteed, so pull the array out of whatever came back. */
-function parseLines(text: string): { index: number; line: string }[] {
+function parseLines(text: string): ScriptLine[] {
   const attempt = (raw: string): unknown => {
     try {
       return JSON.parse(raw);
@@ -170,10 +205,13 @@ function parseLines(text: string): { index: number; line: string }[] {
 
   return parsed
     .map((row) => {
-      const r = row as { index?: unknown; line?: unknown; dialogue?: unknown };
+      const r = row as { index?: unknown; line?: unknown; dialogue?: unknown; say?: unknown };
       const index = Number(r.index);
       const line = String(r.line ?? r.dialogue ?? '').trim();
-      return Number.isFinite(index) && line ? { index, line } : null;
+      // If the respelling is missing, fall back to the readable line rather than
+      // dropping the scene — a plain line still beats no line at all.
+      const say = String(r.say ?? '').trim() || line;
+      return Number.isFinite(index) && line ? { index, line, say } : null;
     })
-    .filter((x): x is { index: number; line: string } => x !== null);
+    .filter((x): x is ScriptLine => x !== null);
 }

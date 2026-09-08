@@ -149,7 +149,7 @@ export const api = {
 
   /** Turn the storyboard's stage directions into lines the presenter says. */
   async script(brief: Brief) {
-    return await req<{ model: string; lines: { index: number; line: string }[] }>('/api/script', {
+    return await req<{ model: string; lines: { index: number; line: string; say: string }[] }>('/api/script', {
       method: 'POST',
       body: JSON.stringify({ brief }),
     });

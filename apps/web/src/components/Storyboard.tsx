@@ -21,9 +21,9 @@ export function Storyboard({
   onWriteScript,
 }: {
   scenePlan: ScenePlan | null;
-  sceneEdits: Record<string, { dialogue?: string; shot?: string }>;
+  sceneEdits: Record<string, { dialogue?: string; phonetic?: string; shot?: string }>;
   narration: NarrationKey;
-  onEditScene: (key: string, patch: { dialogue?: string; shot?: string }) => void;
+  onEditScene: (key: string, patch: { dialogue?: string; phonetic?: string; shot?: string }) => void;
   onClearEdits: () => void;
   /** Fills every spoken scene with a real line. Resolves to a status message. */
   onWriteScript?: () => Promise<string>;
@@ -41,7 +41,10 @@ export function Storyboard({
   const editCount = Object.keys(sceneEdits).length;
   const spokenScenes = mode.speaks ? scenePlan.scenes.filter((sc) => sc.beat.dialogue).length : 0;
   const scripted = mode.speaks
-    ? scenePlan.scenes.filter((_, i) => (sceneEdits[String(i)]?.dialogue ?? '').trim()).length
+    ? scenePlan.scenes.filter((_, i) => {
+        const o = sceneEdits[String(i)];
+        return (o?.phonetic ?? o?.dialogue ?? '').trim();
+      }).length
     : 0;
 
   const writeScript = async () => {
@@ -71,8 +74,8 @@ export function Storyboard({
               </b>
               <span>
                 {scripted >= spokenScenes && spokenScenes > 0
-                  ? 'The model speaks these words instead of composing its own — read them through before generating.'
-                  : 'Without a line the model invents the Hindi, pronounces it and lip-syncs to it all at once. Write the lines and it just reads them.'}
+                  ? 'The model performs the pronunciation spelling, not the Hindi above it. Read both through before generating.'
+                  : 'Plain Hindi is not enough — models put the stress in the wrong place. Each line needs a pronunciation spelling (AAJ hi TEST DRAAIV buk KEE-ji-ye) for the delivery to sound Indian.'}
               </span>
               {scriptNote && <span className="script-note">{scriptNote}</span>}
             </div>
@@ -144,7 +147,20 @@ export function Storyboard({
                       onChange={(e) => editScene(String(gi), { dialogue: e.target.value })}
                     />
                     {mode.speaks && (
-                      <div className="hint">~{wordBudget(sc.duration)} words max</div>
+                      <>
+                        <div className="hint">~{wordBudget(sc.duration)} words max</div>
+                        {/* The respelling is what the video model performs — the
+                            line above is only here so a human can read it. */}
+                        <div className="sb-say">
+                          <label>Pronunciation — this is what the model says</label>
+                          <textarea
+                            className={ov.phonetic?.trim() ? '' : 'unset'}
+                            value={ov.phonetic ?? ''}
+                            placeholder="AAJ hi TEST DRAAIV buk KEE-ji-ye"
+                            onChange={(e) => editScene(String(gi), { phonetic: e.target.value })}
+                          />
+                        </div>
+                      </>
                     )}
                   </td>
                   <td>

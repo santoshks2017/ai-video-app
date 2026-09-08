@@ -172,7 +172,7 @@ export interface Project {
   /** Per-category dynamic field values. */
   fieldValues: Partial<Record<CategoryId, Record<string, string>>>;
   /** Storyboard edits keyed by global scene index. */
-  sceneEdits: Record<string, { dialogue?: string; shot?: string }>;
+  sceneEdits: Record<string, { dialogue?: string; phonetic?: string; shot?: string }>;
   /** Extra reference images added on this project only. */
   extraRefs: StoredImage[];
   status: ProjectStatus;

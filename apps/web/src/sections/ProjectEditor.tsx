@@ -107,11 +107,11 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     if (isApiError(r)) return `${r.code}: ${r.message}`;
     if (!r.lines.length) return 'No spoken scenes to write for.';
     const next = { ...project.sceneEdits };
-    for (const { index, line } of r.lines) {
-      next[String(index)] = { ...next[String(index)], dialogue: line };
+    for (const { index, line, say } of r.lines) {
+      next[String(index)] = { ...next[String(index)], dialogue: line, phonetic: say };
     }
     set({ sceneEdits: next });
-    return `Wrote ${r.lines.length} line${r.lines.length > 1 ? 's' : ''} with ${r.model}. Read them through and edit anything that sounds off.`;
+    return `Wrote ${r.lines.length} line${r.lines.length > 1 ? 's' : ''} with ${r.model}, each with its pronunciation spelling. Read them through and fix anything that sounds off.`;
   };
 
   const cost = useMemo(

@@ -26,7 +26,7 @@ export interface PreflightResult {
 
 export interface RunChecksOptions {
   /** Storyboard edits, keyed by global scene index — where written lines live. */
-  sceneOverrides?: Record<string, { dialogue?: string; shot?: string }>;
+  sceneOverrides?: Record<string, { dialogue?: string; phonetic?: string; shot?: string }>;
   /** The model this brief will actually run on, for capability checks. */
   model?: { name?: string; speechLanguages?: string[] } | null;
 }
@@ -147,20 +147,32 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
   // the delivery falls apart. Written lines turn that into reading aloud.
   if (mode.speaks && plan.scenes.length) {
     const overrides = opts.sceneOverrides ?? {};
-    const unscripted = plan.scenes.filter(
-      (sc, i) => !(overrides[String(i)]?.dialogue ?? '').trim() && sc.beat.dialogue,
-    ).length;
+    // What counts is the pronunciation spelling — that is what the model performs.
+    const unscripted = plan.scenes.filter((sc, i) => {
+      const o = overrides[String(i)];
+      return !(o?.phonetic ?? o?.dialogue ?? '').trim() && sc.beat.dialogue;
+    }).length;
+    const unspelled = plan.scenes.filter((sc, i) => {
+      const o = overrides[String(i)];
+      return (o?.dialogue ?? '').trim() && !(o?.phonetic ?? '').trim() && sc.beat.dialogue;
+    }).length;
     if (unscripted) {
       checks.push({
         level: 'warn',
         code: 'no-spoken-script',
         text: `${unscripted} of ${plan.scenes.length} scenes have no written line, so the model composes the Hindi itself — the usual cause of mangled pronunciation. Write the script in the storyboard and it speaks the words instead of inventing them.`,
       });
+    } else if (unspelled) {
+      checks.push({
+        level: 'warn',
+        code: 'no-pronunciation-spelling',
+        text: `${unspelled} scene${unspelled > 1 ? 's have' : ' has'} a written line but no pronunciation spelling. Plain Hindi tells the model which words to say, not where the stress falls or how long the vowels are — which is what makes the delivery sound wrong. Rewrite the script to fill them in.`,
+      });
     } else {
       checks.push({
         level: 'ok',
         code: 'script-written',
-        text: 'Every spoken scene has a written line, so the model reads rather than improvises.',
+        text: 'Every spoken scene has a line and a pronunciation spelling, so the model performs a fixed reading rather than improvising one.',
       });
     }
 

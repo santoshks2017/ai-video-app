@@ -12,6 +12,7 @@
  */
 
 import { putRef } from './store.js';
+import { brandMatches } from '@ava/shared';
 import type {
   CarSpecs,
   VehicleKind, CarAngle, CarColour, CarModelProfile, CarVariant, StoredImage } from '@ava/shared';
@@ -36,7 +37,7 @@ export function resolveSlug(input: string): { slug: string; brand: string; model
 }
 
 const slugify = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-const title = (s: string): string => s.replace(/(^|[-\s])([a-z])/g, (_, p, c) => p + c.toUpperCase());
+export const title = (s: string): string => s.replace(/(^|[-\s])([a-z])/g, (_, p, c) => p + c.toUpperCase());
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const ANGLE_RE =
@@ -270,10 +271,26 @@ const SOURCES: Record<VehicleKind, VehicleSource> = {
   },
 };
 
-const get = (url: string): Promise<string> =>
-  fetch(url, { headers: { 'user-agent': UA } })
-    .then((r) => (r.ok ? r.text() : ''))
-    .catch(() => '');
+/**
+ * One retry, because a single dropped request reads to the user as "this brand
+ * does not exist" — which is the wrong conclusion to hand someone about a brand
+ * that is right there on the site.
+ */
+async function get(url: string): Promise<string> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(url, { headers: { 'user-agent': UA } });
+      if (r.ok) {
+        const text = await r.text();
+        if (text) return text;
+      }
+    } catch {
+      /* fall through to the retry */
+    }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
+  }
+  return '';
+}
 
 /**
  * Every current model a brand sells, as source slugs.
@@ -282,45 +299,68 @@ const get = (url: string): Promise<string> =>
  * "Honda Activa 125 [2019-2024]" beside current bikes, and a dealer cannot sell
  * either. CarDekho's `modelSlug` field is already the current set.
  */
-export async function listBrandModels(
-  brandSlug: string,
-  kind: VehicleKind,
-  brandName = brandSlug,
-  alsoPages: string[] = [],
-): Promise<{ slug: string; name: string }[]> {
-  const src = SOURCES[kind];
-  const pages = await Promise.all(
-    [brandName, ...alsoPages].map((n) => get(src.brandUrl(brandSlug, n))),
-  );
-  const html = pages.filter(Boolean).join('\n');
-  if (!html) return [];
+export interface BrandListing {
+  /** The slug the source actually uses — discovered, not guessed. */
+  slug: string;
+  items: { slug: string; name: string }[];
+}
 
-  const out = new Map<string, string>();
-  // Both listings carry other brands' models — the bike catalogue is global and
-  // a car brand page cites rivals in its comparison blocks, so Maruti's page
-  // offers Punch and Scorpio-N. Ownership is decided by the nearest preceding
-  // brandSlug rather than by "is the brand mentioned nearby", which a
-  // comparison block satisfies just as easily as the real owner.
+/**
+ * Every current model a brand sells, for ANY brand the source knows — not just
+ * the ones in the catalogue.
+ *
+ * The brand's real slug is read off the page rather than derived from what was
+ * typed, because the two often differ: "Suzuki" under cars is Maruti in India,
+ * and CarDekho serves exactly that. Ownership of each model is decided by the
+ * nearest preceding brandSlug, since a brand page cites rivals in its
+ * comparison blocks and the bike catalogue is global.
+ */
+export async function listBrandModels(
+  input: string,
+  kind: VehicleKind,
+  alsoPages: string[] = [],
+): Promise<BrandListing> {
+  const src = SOURCES[kind];
+  const typed = input.trim();
+  if (!typed) return { slug: '', items: [] };
+
+  // Bikes key the page on a slug, cars on the display name.
+  const asSlug = slugify(typed);
+  const names = kind === 'bike' ? [asSlug, ...alsoPages] : [typed, ...alsoPages];
+  const pages = await Promise.all(names.map((n) => get(src.brandUrl(slugify(n), n))));
+  const html = pages.filter(Boolean).join('\n');
+  if (!html) return { slug: asSlug, items: [] };
+
+  // Group every model by its owning brand, then choose whose page this is.
+  const owned = new Map<string, Map<string, string>>();
   for (const m of html.matchAll(/"modelSlug":"([a-z0-9-]+)"/g)) {
     const slug = m[1]!;
-    if (out.has(slug) || isRetired(slug)) continue;
-
+    if (isRetired(slug)) continue;
     const before = html.slice(Math.max(0, m.index! - 4000), m.index!);
     const owner = [...before.matchAll(/"brandSlug":"([a-z0-9-]+)"/g)].at(-1)?.[1];
-    if (owner !== brandSlug) continue;
+    if (!owner) continue;
 
-    // On sale only: a dealer cannot sell a concept or an unlaunched model.
     const window = html.slice(m.index!, m.index! + 1200);
     if (/"status":"Upcoming"|"upcoming":true|Alert Me When Launched|Expected Launch/i.test(window)) continue;
-
     const name =
       /"modelTitle":"([^"]{1,60})"/.exec(window)?.[1] ??
       /"modelText":"([^"]{1,60})"/.exec(window)?.[1] ??
       title(slug.replace(/-/g, ' '));
     if (isRetired(name)) continue;
-    out.set(slug, name);
+
+    const bucket = owned.get(owner) ?? new Map<string, string>();
+    if (!bucket.has(slug)) bucket.set(slug, name);
+    owned.set(owner, bucket);
   }
-  return [...out].map(([slug, name]) => ({ slug, name }));
+  if (!owned.size) return { slug: asSlug, items: [] };
+
+  // The owning slug must actually be the brand that was asked for. Falling back
+  // to "whichever group is biggest" looked reasonable and meant a typo returned
+  // somebody else's cars: "Nonexistentbrand" quietly came back as Maruti.
+  const match = [...owned.entries()].find(([owner]) => brandMatches(owner, typed));
+  if (!match) return { slug: asSlug, items: [] };
+  const [slug, models] = match;
+  return { slug, items: [...models].map(([s, name]) => ({ slug: s, name })) };
 }
 
 /** Dated or superseded entries — "[2019-2024]", "-bs4", "activa-3g", "2021-2026". */

@@ -32,6 +32,7 @@ export function CarsSection() {
   const [syncLog, setSyncLog] = useState<{ name: string; status: string; note?: string }[]>([]);
   const [brandBusy, setBrandBusy] = useState('');
   const [brandErr, setBrandErr] = useState('');
+  const [brandQuery, setBrandQuery] = useState('');
 
   const brands = BRAND_CATALOGUE.filter((b) => b.kind === kind);
 
@@ -42,7 +43,9 @@ export function CarsSection() {
     setSyncLog([]);
     setBrandErr('');
     setBrandBusy(`Reading ${b.name}…`);
-    const r = await get<{ items: { slug: string; name: string }[] }>(`/api/brands/models?brand=${b.slug}`);
+    const r = await get<{ brand: BrandEntry; items: { slug: string; name: string }[] }>(
+      `/api/brands/models?brand=${encodeURIComponent(b.slug)}&kind=${b.kind}`,
+    );
     setBrandBusy('');
     if (isApiError(r)) {
       setPreview(null);
@@ -58,7 +61,7 @@ export function CarsSection() {
     setSyncLog([]);
     const r = await post<{ found: number; results: { name: string; status: string; note?: string }[] }>(
       '/api/brands/sync',
-      { brand: b.slug, limit },
+      { brand: b.slug, kind: b.kind, limit },
     );
     setBrandBusy('');
     if (isApiError(r)) {
@@ -148,13 +151,32 @@ export function CarsSection() {
             <button
               key={b.slug}
               type="button"
-              className={`brandchip${brand?.slug === b.slug ? ' on' : ''}`}
+              className={`brandchip${brand?.slug.toLowerCase() === b.slug.toLowerCase() ? ' on' : ''}`}
               disabled={Boolean(brandBusy)}
               onClick={() => listModels(b)}
             >
               {b.name}
             </button>
           ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <input
+            value={brandQuery}
+            onChange={(e) => setBrandQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && brandQuery.trim()) listModels({ name: brandQuery.trim(), slug: brandQuery.trim(), kind });
+            }}
+            placeholder={kind === 'bike' ? 'Any other brand — e.g. Suzuki, Yamaha, KTM' : 'Any other brand — e.g. Kia, Toyota, Skoda'}
+          />
+          <button
+            className="btn small"
+            type="button"
+            disabled={!brandQuery.trim() || Boolean(brandBusy)}
+            onClick={() => listModels({ name: brandQuery.trim(), slug: brandQuery.trim(), kind })}
+          >
+            Find models
+          </button>
         </div>
 
         {brandBusy && <div className="hint" style={{ marginTop: 8 }}>{brandBusy}</div>}

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import {
+  brandMatches,
   isPromptOnly,
   estimateCost,
   estimateSegmentsCost,
@@ -52,8 +53,9 @@ import {
   SEEDANCE_20_FAST_DEFAULTS,
   type ProviderKind,
   type Role,
+  type VehicleKind,
 } from '@ava/shared';
-import { syncVehicleModel, listBrandModels } from './carSync.js';
+import { syncVehicleModel, listBrandModels, title } from './carSync.js';
 import { importPlace, PlacesError } from './places.js';
 import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './credentials.js';
 
@@ -527,12 +529,22 @@ app.get('/api/brands', async () => {
   };
 });
 
-/** Every current model a brand sells, without syncing anything. Cheap: one fetch. */
-app.get<{ Querystring: { brand?: string } }>('/api/brands/models', async (req, reply) => {
-  const b = BRAND_CATALOGUE.find((x) => x.slug === req.query?.brand);
-  if (!b) return reply.code(404).send({ code: 'not-found', message: 'Unknown brand' });
-  return { brand: b, items: await listBrandModels(b.slug, b.kind, b.name, b.alsoPages ?? []) };
-});
+/**
+ * Every current model a brand sells, without syncing anything. Cheap: one fetch.
+ * Any brand the source knows works, not only the catalogue — the catalogue just
+ * supplies extras like Maruti's second Nexa listing.
+ */
+app.get<{ Querystring: { brand?: string; kind?: VehicleKind } }>(
+  '/api/brands/models',
+  async (req, reply) => {
+    const typed = (req.query?.brand ?? '').trim();
+    if (!typed) return reply.code(400).send({ code: 'bad-request', message: 'brand is required' });
+    const known = BRAND_CATALOGUE.find((x) => x.slug === typed || brandMatches(x.name, typed));
+    const kind: VehicleKind = req.query?.kind ?? known?.kind ?? 'car';
+    const found = await listBrandModels(typed, kind, known?.alsoPages ?? []);
+    return { brand: { name: known?.name ?? typed, slug: found.slug, kind }, items: found.items };
+  },
+);
 
 /**
  * Pull a whole brand into the library.
@@ -541,13 +553,22 @@ app.get<{ Querystring: { brand?: string } }>('/api/brands/models', async (req, r
  * fetching, which is a request nobody should be holding open. `limit` exists so
  * a few models can be tried before committing to the whole line-up.
  */
-app.post<{ Body: { brand?: string; limit?: number; refresh?: boolean } }>(
+app.post<{ Body: { brand?: string; kind?: VehicleKind; limit?: number; refresh?: boolean } }>(
   '/api/brands/sync',
   async (req, reply) => {
-    const b = BRAND_CATALOGUE.find((x) => x.slug === req.body?.brand);
-    if (!b) return reply.code(400).send({ code: 'bad-request', message: 'brand must be one of the catalogue slugs' });
-
-    const models = await listBrandModels(b.slug, b.kind, b.name, b.alsoPages ?? []);
+    const typed = (req.body?.brand ?? '').trim();
+    if (!typed) return reply.code(400).send({ code: 'bad-request', message: 'brand is required' });
+    const known = BRAND_CATALOGUE.find((x) => x.slug === typed || brandMatches(x.name, typed));
+    const kind: VehicleKind = req.body?.kind ?? known?.kind ?? 'car';
+    const found = await listBrandModels(typed, kind, known?.alsoPages ?? []);
+    if (!found.items.length) {
+      return reply.code(404).send({
+        code: 'brand-not-found',
+        message: `No current models found for "${typed}" on ${kind === 'bike' ? 'BikeDekho' : 'CarDekho'}. Check the spelling, or try the name as the site writes it.`,
+      });
+    }
+    const b = { name: known?.name ?? title(typed), slug: found.slug, kind };
+    const models = found.items;
     const wanted = req.body?.limit ? models.slice(0, Math.max(1, req.body.limit)) : models;
     const existing = await listAll<Record<string, any>>('cars');
 

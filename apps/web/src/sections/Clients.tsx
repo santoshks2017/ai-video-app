@@ -174,6 +174,18 @@ export function ClientsSection() {
             </Field>
           </div>
           <Field
+            label="Sells"
+            hint="Honda, Suzuki and Hero badge both — without this, a car showroom's generic film can come back full of motorcycles."
+          >
+            <select
+              value={draft.vehicleKind ?? 'car'}
+              onChange={(e) => set({ vehicleKind: e.target.value as 'car' | 'bike' })}
+            >
+              <option value="car">Cars</option>
+              <option value="bike">Bikes &amp; scooters</option>
+            </select>
+          </Field>
+          <Field
             label="Display name"
             hint="The short name shown on screen — footer, end card, spoken lines. A full legal name won't fit."
           >

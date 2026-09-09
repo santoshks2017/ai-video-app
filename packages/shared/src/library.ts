@@ -69,6 +69,10 @@ export interface CarSpecs {
   power?: string;
   torque?: string;
   transmission?: string;
+  /** Bikes: top speed, kerb weight, seat height — the numbers a rider asks about. */
+  topSpeed?: string;
+  kerbWeight?: string;
+  seatHeight?: string;
   fuelTypes?: string[];
   mileage?: string;
   bootSpace?: string;
@@ -82,11 +86,47 @@ export interface CarSpecs {
   rating?: string;
 }
 
+/** Cars come from cardekho.com, bikes and scooters from bikedekho.com. */
+export type VehicleKind = 'car' | 'bike';
+
+export interface BrandEntry {
+  /** Display name, and what the CarDekho brand page is keyed on. */
+  name: string;
+  kind: VehicleKind;
+  /**
+   * The slug that appears in model paths and in the source's own brandSlug
+   * field — "maruti", not "maruti-suzuki". They are not always the same as the
+   * display name, which is why both are stored.
+   */
+  slug: string;
+  /**
+   * Extra source listings to merge. Maruti sells through Arena and Nexa and
+   * CarDekho splits them, so the main page alone misses Grand Vitara, Jimny,
+   * XL6, Invicto and Ciaz.
+   */
+  alsoPages?: string[];
+}
+
+/** The brands the team actually sells for. Editable in the app later if needed. */
+export const BRAND_CATALOGUE: BrandEntry[] = [
+  { name: 'Maruti Suzuki', kind: 'car', slug: 'maruti', alsoPages: ['Nexa'] },
+  { name: 'Hyundai', kind: 'car', slug: 'hyundai' },
+  { name: 'Tata', kind: 'car', slug: 'tata' },
+  { name: 'Mahindra', kind: 'car', slug: 'mahindra' },
+  { name: 'Hero', kind: 'bike', slug: 'hero' },
+  { name: 'Honda', kind: 'bike', slug: 'honda' },
+  { name: 'Bajaj', kind: 'bike', slug: 'bajaj' },
+  { name: 'TVS', kind: 'bike', slug: 'tvs' },
+  { name: 'Royal Enfield', kind: 'bike', slug: 'royal-enfield' },
+];
+
 export interface CarModelProfile {
   id: string;
+  /** Cars and bikes share this shape; only the source and the specs differ. */
+  kind?: VehicleKind;
   brand: string;
   model: string;
-  /** cardekho slug, e.g. "hyundai/creta" */
+  /** Source-site slug, e.g. "hyundai/creta" or "royal-enfield/classic-350". */
   slug: string;
   year?: string;
   bodyType?: string;
@@ -123,6 +163,14 @@ export interface ClientProfile {
   displayName?: string;
   /** Brand(s) the dealer sells, e.g. "Hyundai". */
   brand: string;
+  /**
+   * Does this dealer sell cars or two-wheelers?
+   *
+   * Honda, Suzuki and Hero all put their badge on both, so brand alone is not
+   * enough: a car dealership asked for a generic film and got motorcycles in it.
+   * Defaults to cars, which is what most of these dealerships are.
+   */
+  vehicleKind?: VehicleKind;
   city?: string;
   address?: string;
   phone?: string;

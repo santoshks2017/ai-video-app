@@ -45,6 +45,7 @@ import {
   buildBeats,
   planScenes,
   CATEGORY_BY_ID,
+  BRAND_CATALOGUE,
   LANGUAGE_SEEDS,
   OMNI_FLASH_DEFAULTS,
   SEEDANCE_25_DEFAULTS,
@@ -52,7 +53,7 @@ import {
   type ProviderKind,
   type Role,
 } from '@ava/shared';
-import { syncCarModel } from './carSync.js';
+import { syncVehicleModel, listBrandModels } from './carSync.js';
 import { importPlace, PlacesError } from './places.js';
 import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './credentials.js';
 
@@ -94,6 +95,7 @@ function requiredRole(method: string, url: string): Role | null {
   // API credentials and roles are the keys to the kingdom — admin only.
   if (url.startsWith('/api/credentials') || url.startsWith('/api/users')) return 'admin';
   if (url.startsWith('/api/activity')) return 'admin';
+  if (url.startsWith('/api/brands') && method !== 'GET') return 'creator';
   if (url.startsWith('/api/models/seed')) return 'admin';
   if (url.startsWith('/api/models') && method !== 'GET') return 'admin';
 
@@ -512,19 +514,87 @@ app.post('/api/models/seed', async () => {
   };
 });
 
-/* ---- car library sync: Brand → Model → Variant → Colour ---- */
-app.post<{ Body: { query?: string; refresh?: boolean } }>('/api/cars/sync', async (req, reply) => {
-  const query = req.body?.query?.trim();
-  if (!query) return reply.code(400).send({ code: 'bad-request', message: 'query required (e.g. "Hyundai Creta")' });
-  try {
-    const profile = await syncCarModel(query);
-    const existing = await getOne<{ createdAt?: number }>('cars', profile.id);
-    const saved = await upsert('cars', { ...profile, createdAt: existing?.createdAt ?? profile.createdAt });
-    return saved;
-  } catch (e) {
-    return reply.code(502).send({ code: 'car-sync-failed', message: (e as Error).message });
-  }
+/* ---- vehicle library sync: Brand → Model → Variant → Colour ---- */
+
+/** The brands the team sells for, with how much of each is already in the library. */
+app.get('/api/brands', async () => {
+  const cars = await listAll<Record<string, any>>('cars');
+  return {
+    items: BRAND_CATALOGUE.map((b) => ({
+      ...b,
+      synced: cars.filter((c) => (c.kind ?? 'car') === b.kind && String(c.brand ?? '').toLowerCase().startsWith(b.slug.split('-')[0]!)).length,
+    })),
+  };
 });
+
+/** Every current model a brand sells, without syncing anything. Cheap: one fetch. */
+app.get<{ Querystring: { brand?: string } }>('/api/brands/models', async (req, reply) => {
+  const b = BRAND_CATALOGUE.find((x) => x.slug === req.query?.brand);
+  if (!b) return reply.code(404).send({ code: 'not-found', message: 'Unknown brand' });
+  return { brand: b, items: await listBrandModels(b.slug, b.kind, b.name, b.alsoPages ?? []) };
+});
+
+/**
+ * Pull a whole brand into the library.
+ *
+ * One brand per request: nine brands is 176 models and roughly half an hour of
+ * fetching, which is a request nobody should be holding open. `limit` exists so
+ * a few models can be tried before committing to the whole line-up.
+ */
+app.post<{ Body: { brand?: string; limit?: number; refresh?: boolean } }>(
+  '/api/brands/sync',
+  async (req, reply) => {
+    const b = BRAND_CATALOGUE.find((x) => x.slug === req.body?.brand);
+    if (!b) return reply.code(400).send({ code: 'bad-request', message: 'brand must be one of the catalogue slugs' });
+
+    const models = await listBrandModels(b.slug, b.kind, b.name, b.alsoPages ?? []);
+    const wanted = req.body?.limit ? models.slice(0, Math.max(1, req.body.limit)) : models;
+    const existing = await listAll<Record<string, any>>('cars');
+
+    const results: { slug: string; name: string; status: string; note?: string }[] = [];
+    for (const m of wanted) {
+      // Must match the id syncVehicleModel writes, or the skip never fires and
+      // an existing library is re-fetched from scratch every time.
+      const id = (b.kind === 'car' ? '' : `${b.kind}__`) + `${b.slug}__${m.slug}`;
+      if (!req.body?.refresh && existing.some((c) => c.id === id)) {
+        results.push({ slug: m.slug, name: m.name, status: 'already in library' });
+        continue;
+      }
+      try {
+        const profile = await syncVehicleModel(`${b.slug}/${m.slug}`, { kind: b.kind });
+        const prior = existing.find((c) => c.id === profile.id);
+        await upsert('cars', { ...profile, createdAt: prior?.createdAt ?? profile.createdAt });
+        results.push({
+          slug: m.slug,
+          name: m.name,
+          status: profile.syncStatus,
+          note: `${Object.keys(profile.images).length} angles, ${profile.colours.length} colours, ${
+            profile.variants.length
+          } variants, ${Object.keys(profile.specs ?? {}).length} specs`,
+        });
+      } catch (e) {
+        results.push({ slug: m.slug, name: m.name, status: 'failed', note: (e as Error).message });
+      }
+    }
+    return { brand: b, found: models.length, synced: results.length, results };
+  },
+);
+
+app.post<{ Body: { query?: string; kind?: 'car' | 'bike'; refresh?: boolean } }>(
+  '/api/cars/sync',
+  async (req, reply) => {
+    const query = req.body?.query?.trim();
+    if (!query) return reply.code(400).send({ code: 'bad-request', message: 'query required (e.g. "Hyundai Creta")' });
+    try {
+      const profile = await syncVehicleModel(query, { kind: req.body?.kind ?? 'car' });
+      const existing = await getOne<{ createdAt?: number }>('cars', profile.id);
+      const saved = await upsert('cars', { ...profile, createdAt: existing?.createdAt ?? profile.createdAt });
+      return saved;
+    } catch (e) {
+      return reply.code(502).send({ code: 'car-sync-failed', message: (e as Error).message });
+    }
+  },
+);
 
 /* ---- client import from a Google Business Profile link ---- */
 app.post<{ Body: { url?: string; query?: string } }>('/api/clients/gmb', async (req, reply) => {

@@ -4,11 +4,12 @@
  * named account, which a shared password could never be.
  */
 
-import { googleToken } from './firebase.js';
+import { freshToken, googleToken } from './firebase.js';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
 export const apiBase = BASE;
+/** Synchronous best-effort, for callers that cannot await. */
 export const getToken = (): string | null => googleToken();
 
 export interface ApiError {
@@ -31,7 +32,7 @@ export const abs = (p: string | null | undefined): string | null => (p ? `${BASE
 
 export async function req<T>(path: string, init: RequestInit = {}): Promise<T | ApiError> {
   try {
-    const token = getToken();
+    const token = await freshToken();
     const res = await fetch(`${BASE}${path}`, {
       ...init,
       headers: {

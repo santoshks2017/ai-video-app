@@ -154,8 +154,25 @@ export interface BriefLanguage {
   writtenGuide?: string;
 }
 
+/**
+ * The brand's current line-up, used when no single model was chosen.
+ *
+ * Without it a model-agnostic brief left the video model free to invent a car,
+ * and it reliably reached for an older generation it had seen more of. Naming
+ * the real range keeps it inside what the dealer actually sells.
+ */
+export interface BrandLineup {
+  brand: string;
+  /** Cars or two-wheelers — the same badge sells both. */
+  kind: 'car' | 'bike';
+  /** Model names as the library holds them, e.g. "Punch", "Nexon". */
+  models: string[];
+}
+
 /** The structured brief — the single user input (P0.3). */
 export interface Brief {
+  /** Set when the brief names no specific model. */
+  lineup?: BrandLineup;
   /** Resolved from the project's chosen LanguageProfile. */
   language?: BriefLanguage;
   categories: CategoryId[];

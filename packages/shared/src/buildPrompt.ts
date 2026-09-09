@@ -176,9 +176,27 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     );
 
     // Reference images by filename (PRD P0.4) + car model reference (P0.2).
-    if (isFirst && (attachments.length || brief.modelSpecific)) {
+    if (isFirst && (attachments.length || brief.modelSpecific || brief.lineup)) {
       L.push('');
       L.push('## REFERENCE IMAGES');
+      if (!brief.modelSpecific && brief.lineup?.models.length) {
+        // Naming the range is the whole point: left open, the model reaches for
+        // an older generation it has seen more of, and the dealer gets a film
+        // advertising a car they no longer sell.
+        const noun = brief.lineup.kind === 'bike' ? 'motorcycle or scooter' : 'car';
+        const plural = brief.lineup.kind === 'bike' ? 'motorcycles and scooters' : 'cars';
+        L.push(
+          `No single model is the subject. This is a ${brief.lineup.brand} ${plural} dealership. Every vehicle on screen must be a current ${brief.lineup.brand} ${noun} the dealer sells today, from this range and nothing else: ${brief.lineup.models.join(', ')}.`,
+        );
+        L.push(
+          `Show two or three of them, matching the current generation exactly as in the supplied reference images — the current face, lamps, wheels and proportions. Do not show an older generation, a different brand, or a ${brief.lineup.brand} that is not on that list.`,
+        );
+        L.push(
+          brief.lineup.kind === 'bike'
+            ? 'This showroom sells two-wheelers. No cars anywhere in the film, including in the background.'
+            : `This showroom sells cars. No motorcycles or scooters anywhere in the film, including in the background — ${brief.lineup.brand} badges both, and the wrong one on screen makes the film unusable.`,
+        );
+      }
       if (brief.modelSpecific && brief.carModel) {
         L.push(
           `Car model: ${brief.carModel}. Match the current-generation ${brief.carModel} exactly as shown in the supplied car-model reference set — body shape, face, lamps, wheels and proportions. Do not substitute an older generation or invent a design.`,

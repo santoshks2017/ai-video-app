@@ -54,6 +54,27 @@ export async function completeRedirectSignIn(): Promise<string | null> {
 let currentToken: string | null = null;
 export const googleToken = (): string | null => currentToken;
 
+/**
+ * The token to send with a request, right now.
+ *
+ * Caching the one handed to us at sign-in looked fine and then failed an hour
+ * later with a 401 that read like "sign in to use this app" on a page where the
+ * user plainly was signed in. getIdToken() returns the cached token while it is
+ * valid and silently refreshes it when it is not, which is the only way to be
+ * sure the token leaving the browser is still good.
+ */
+export async function freshToken(): Promise<string | null> {
+  const user = auth.currentUser;
+  if (!user) return currentToken;
+  try {
+    const t = await user.getIdToken();
+    currentToken = t;
+    return t;
+  } catch {
+    return currentToken;
+  }
+}
+
 /** Fires on sign-in, sign-out and every silent hourly refresh. */
 export function watchGoogleAuth(onChange: (user: User | null) => void): () => void {
   return onIdTokenChanged(auth, async (user) => {

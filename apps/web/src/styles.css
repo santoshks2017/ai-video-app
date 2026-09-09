@@ -1162,3 +1162,22 @@ textarea.guide {
 .act-what b { text-transform: capitalize; color: var(--ink); font-weight: 600; }
 .act-cost { color: var(--accent); font-weight: 600; font-variant-numeric: tabular-nums; }
 .act-login .act-what b { color: var(--ink-muted); }
+
+/* ---- brand sync ---- */
+.brandgrid { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.brandchip {
+  border: 1px solid var(--line-strong); background: var(--surface); border-radius: 999px;
+  padding: 6px 13px; font-size: 12.5px; cursor: pointer; color: var(--ink);
+}
+.brandchip:hover:not(:disabled) { border-color: var(--accent); }
+.brandchip.on { background: var(--accent-wash); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.brandchip:disabled { opacity: 0.55; cursor: default; }
+.brandpreview { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.modellist { font-size: 12px; color: var(--ink-muted); line-height: 1.6; margin-top: 5px; }
+.synclog { display: grid; gap: 3px; margin-top: 10px; max-height: 260px; overflow-y: auto; }
+.syncrow { display: grid; grid-template-columns: 150px 1fr; gap: 10px; font-size: 12px; padding: 5px 8px; border-radius: 5px; }
+.syncrow b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.syncrow span { color: var(--ink-muted); }
+.syncrow.ok { background: var(--good-wash); }
+.syncrow.warn { background: var(--warn-wash); }
+.syncrow.bad { background: var(--bad-wash); }

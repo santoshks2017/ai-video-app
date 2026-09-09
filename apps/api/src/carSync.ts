@@ -13,7 +13,8 @@
 
 import { putRef } from './store.js';
 import type {
-  CarSpecs, CarAngle, CarColour, CarModelProfile, CarVariant, StoredImage } from '@ava/shared';
+  CarSpecs,
+  VehicleKind, CarAngle, CarColour, CarModelProfile, CarVariant, StoredImage } from '@ava/shared';
 
 const UA = 'Mozilla/5.0 (compatible; ai-video-app/1)';
 
@@ -23,7 +24,10 @@ export function resolveSlug(input: string): { slug: string; brand: string; model
   const q = input.trim();
   if (q.includes('/')) {
     const [b, ...rest] = q.toLowerCase().split('/');
-    return { slug: q.toLowerCase(), brand: title(b ?? ''), model: title(rest.join('/')) };
+    // A slug path is words joined by hyphens: "royal-enfield/classic-350" is
+    // Royal Enfield Classic 350, not Royal-Enfield Classic-350.
+    const words = (x: string): string => title(x.replace(/-/g, ' '));
+    return { slug: q.toLowerCase(), brand: words(b ?? ''), model: words(rest.join('/')) };
   }
   const multi = BRANDS.find((b) => q.toLowerCase().startsWith(b.toLowerCase() + ' '));
   const brand = multi ?? q.split(/\s+/)[0] ?? '';
@@ -219,20 +223,197 @@ export function parseSpecs(modelHtml: string, specsHtml: string): { specs: CarSp
   return { specs, highlights: highlights.slice(0, 10) };
 }
 
+
+/* =============================== sources =====================================
+ * Cars come from cardekho.com, bikes and scooters from bikedekho.com — same
+ * group, different sites, and genuinely different HTML. The differences worth
+ * knowing:
+ *   - images: stimg.cardekho.com with the angle IN the filename
+ *             (front-left-side-47.jpg) vs cdn.bikedekho.com with opaque hashes,
+ *             so bike shots can only be taken in source order.
+ *   - specs:  a flat summary + schema.org "Car" vs a grouped specification
+ *             table + schema.org "Motorcycle", which also carries the colours.
+ *   - models: "modelSlug":"nexon" on a brand page vs an OEM-scoped catalogue
+ *             keyed "MS", which includes discontinued bikes we filter out.
+ * ========================================================================== */
+
+interface VehicleSource {
+  host: string;
+  modelUrl: (slug: string) => string;
+  picturesUrl: (slug: string) => string;
+  specsUrl: (slug: string) => string;
+  /** Cars key the page on the display name, bikes on the slug. */
+  brandUrl: (slug: string, name: string) => string;
+  imageRe: RegExp;
+  ldType: string;
+}
+
+const SOURCES: Record<VehicleKind, VehicleSource> = {
+  car: {
+    host: 'https://www.cardekho.com',
+    modelUrl: (s) => `https://www.cardekho.com/${s}`,
+    picturesUrl: (s) => `https://www.cardekho.com/${s}/pictures`,
+    specsUrl: (s) => `https://www.cardekho.com/${s}/specs`,
+    // The brand page is keyed on the display name; model paths use the slug.
+    brandUrl: (_slug, name) => `https://www.cardekho.com/cars/${encodeURIComponent(name)}`,
+    imageRe: ANGLE_RE,
+    ldType: 'Car',
+  },
+  bike: {
+    host: 'https://www.bikedekho.com',
+    modelUrl: (s) => `https://www.bikedekho.com/${s}`,
+    picturesUrl: (s) => `https://www.bikedekho.com/${s}/pictures`,
+    specsUrl: (s) => `https://www.bikedekho.com/${s}/specifications`,
+    brandUrl: (slug) => `https://www.bikedekho.com/${slug}-bikes`,
+    imageRe: /https:\/\/cdn\.bikedekho\.com\/processedimages\/[^"' )]+?\.(?:jpg|jpeg)/gi,
+    ldType: 'Motorcycle',
+  },
+};
+
+const get = (url: string): Promise<string> =>
+  fetch(url, { headers: { 'user-agent': UA } })
+    .then((r) => (r.ok ? r.text() : ''))
+    .catch(() => '');
+
+/**
+ * Every current model a brand sells, as source slugs.
+ *
+ * Discontinued entries are dropped: BikeDekho lists activa-3g and
+ * "Honda Activa 125 [2019-2024]" beside current bikes, and a dealer cannot sell
+ * either. CarDekho's `modelSlug` field is already the current set.
+ */
+export async function listBrandModels(
+  brandSlug: string,
+  kind: VehicleKind,
+  brandName = brandSlug,
+  alsoPages: string[] = [],
+): Promise<{ slug: string; name: string }[]> {
+  const src = SOURCES[kind];
+  const pages = await Promise.all(
+    [brandName, ...alsoPages].map((n) => get(src.brandUrl(brandSlug, n))),
+  );
+  const html = pages.filter(Boolean).join('\n');
+  if (!html) return [];
+
+  const out = new Map<string, string>();
+  // Both listings carry other brands' models — the bike catalogue is global and
+  // a car brand page cites rivals in its comparison blocks, so Maruti's page
+  // offers Punch and Scorpio-N. Ownership is decided by the nearest preceding
+  // brandSlug rather than by "is the brand mentioned nearby", which a
+  // comparison block satisfies just as easily as the real owner.
+  for (const m of html.matchAll(/"modelSlug":"([a-z0-9-]+)"/g)) {
+    const slug = m[1]!;
+    if (out.has(slug) || isRetired(slug)) continue;
+
+    const before = html.slice(Math.max(0, m.index! - 4000), m.index!);
+    const owner = [...before.matchAll(/"brandSlug":"([a-z0-9-]+)"/g)].at(-1)?.[1];
+    if (owner !== brandSlug) continue;
+
+    // On sale only: a dealer cannot sell a concept or an unlaunched model.
+    const window = html.slice(m.index!, m.index! + 1200);
+    if (/"status":"Upcoming"|"upcoming":true|Alert Me When Launched|Expected Launch/i.test(window)) continue;
+
+    const name =
+      /"modelTitle":"([^"]{1,60})"/.exec(window)?.[1] ??
+      /"modelText":"([^"]{1,60})"/.exec(window)?.[1] ??
+      title(slug.replace(/-/g, ' '));
+    if (isRetired(name)) continue;
+    out.set(slug, name);
+  }
+  return [...out].map(([slug, name]) => ({ slug, name }));
+}
+
+/** Dated or superseded entries — "[2019-2024]", "-bs4", "activa-3g", "2021-2026". */
+function isRetired(s: string): boolean {
+  // Fleet and commercial trims — Dzire Tour S, Eeco Cargo, WagonR Tour — are
+  // taxi and goods versions no dealer advertises to a private buyer.
+  if (/-(?:tour|tour-[a-z0-9]+|cargo)$/i.test(s) || /\b(Tour [A-Z]\d?|Cargo)\b/.test(s)) return true;
+  return (
+    /\[\d{4}\s*-\s*\d{4}\]/.test(s) ||
+    /\b(19|20)\d{2}\s*-\s*(19|20)\d{2}\b/.test(s) ||
+    /-(?:bs3|bs4|bs6)$/i.test(s) ||
+    /-\d{4}-\d{4}$/.test(s) ||
+    /-(?:19|20)\d{2}$/.test(s) ||
+    /\b\d[gG]$/.test(s)
+  );
+}
+
+/** Bike specifications: grouped table + schema.org Motorcycle + the FAQ block. */
+export function parseBikeSpecs(
+  modelHtml: string,
+  specsHtml: string,
+): { specs: CarSpecs; highlights: string[]; colours: string[]; images: string[] } {
+  const specs: CarSpecs = {};
+  const highlights: string[] = [];
+
+  const table = new Map<string, string>();
+  for (const m of modelHtml.matchAll(/\{"text":"([^"]{2,40})","icon":"[^"]*","value":"([^"]{1,60})"/g)) {
+    table.set(m[1]!.toLowerCase(), clean(m[2]) ?? '');
+  }
+  const t = (k: string): string | undefined => table.get(k) || undefined;
+  specs.engine = t('displacement');
+  specs.power = t('max power');
+  specs.torque = t('max torque');
+  specs.transmission = t('gear box') ?? t('transmission');
+  specs.mileage = t('mileage') ?? t('overall mileage');
+  specs.topSpeed = t('claimed top speed');
+  specs.kerbWeight = t('kerb weight');
+  specs.seatHeight = t('seat height');
+  specs.fuelTank = t('fuel tank capacity');
+  specs.groundClearance = t('ground clearance');
+  const fuel = t('fuel type');
+  if (fuel) specs.fuelTypes = [fuel];
+
+  const bike = jsonLd(specsHtml).find((d) => d['@type'] === 'Motorcycle');
+  // The schema.org block lists THIS bike's photos. Scraping the gallery page
+  // instead picks up the "related bikes" rail — a Hero sync came back with a
+  // Royal Enfield Roadstar.
+  // Entries are ImageObjects, not bare URLs: {"@type":"ImageObject","url":…}.
+  const images: string[] = (Array.isArray(bike?.image) ? bike!.image : [])
+    .map((i: unknown) => (typeof i === 'string' ? i : (i as { url?: string })?.url))
+    .filter((u: unknown): u is string => typeof u === 'string' && /^https?:/.test(u));
+  const colours: string[] = Array.isArray(bike?.color)
+    ? (bike!.color as string[]).map((c) => clean(c)).filter(Boolean) as string[]
+    : [];
+  if (bike?.description) {
+    const d = clean(bike.description);
+    if (d && d.length < 220) highlights.push(d);
+  }
+
+  const faq = jsonLd(specsHtml).find((d) => String(d['@type']).toLowerCase() === 'faqpage');
+  for (const q of (faq?.mainEntity ?? []) as { name?: string; acceptedAnswer?: { text?: string } }[]) {
+    const text = clean(q.acceptedAnswer?.text);
+    if (!text || text.length > 190) continue;
+    const trimmed = text.replace(/\s*(Check out|Choose|Browse).*$/i, '').trim();
+    if (trimmed) highlights.push(trimmed);
+  }
+
+  specs.priceRange = clean(/"priceRange":"([^"]{1,40})"/.exec(modelHtml)?.[1]);
+  for (const k of Object.keys(specs) as (keyof CarSpecs)[]) if (!specs[k]) delete specs[k];
+  return { specs, highlights: highlights.slice(0, 10), colours, images };
+}
+
 export interface SyncOptions {
   /** Angle images to keep per bucket. */
   perAngle?: Partial<Record<CarAngle, number>>;
   maxColours?: number;
+  /** Which site to read. Defaults to cars. */
+  kind?: VehicleKind;
 }
 
-export async function syncCarModel(input: string, opts: SyncOptions = {}): Promise<CarModelProfile> {
+export const syncCarModel = (input: string, opts: SyncOptions = {}): Promise<CarModelProfile> =>
+  syncVehicleModel(input, { ...opts, kind: opts.kind ?? 'car' });
+
+export async function syncVehicleModel(input: string, opts: SyncOptions = {}): Promise<CarModelProfile> {
+  const kind: VehicleKind = opts.kind ?? 'car';
+  const src = SOURCES[kind];
   const { slug, brand, model } = resolveSlug(input);
-  const id = slug.replace(/\//g, '__');
+  const id = (kind === 'car' ? '' : `${kind}__`) + slug.replace(/\//g, '__');
   const now = Date.now();
 
   let html = '';
   let sourceUrl = '';
-  for (const u of [`https://www.cardekho.com/${slug}/pictures`, `https://www.cardekho.com/${slug}`]) {
+  for (const u of [src.picturesUrl(slug), src.modelUrl(slug)]) {
     const res = await fetch(u, { headers: { 'user-agent': UA } });
     if (res.ok) {
       html = await res.text();
@@ -243,14 +424,16 @@ export async function syncCarModel(input: string, opts: SyncOptions = {}): Promi
   // The /pictures page carries the imagery; the model page carries the variants
   // and the summary numbers; /specs carries the schema.org block and the FAQ.
   let variantHtml = html;
-  if (sourceUrl.endsWith('/pictures')) {
-    const res = await fetch(`https://www.cardekho.com/${slug}`, { headers: { 'user-agent': UA } });
-    if (res.ok) variantHtml = await res.text();
-  }
-  const specsHtml = await fetch(`https://www.cardekho.com/${slug}/specs`, { headers: { 'user-agent': UA } })
-    .then((r) => (r.ok ? r.text() : ''))
-    .catch(() => '');
-  const { specs, highlights } = parseSpecs(variantHtml, specsHtml);
+  if (sourceUrl.endsWith('/pictures')) variantHtml = (await get(src.modelUrl(slug))) || html;
+  const specsHtml = await get(src.specsUrl(slug));
+
+  const parsed =
+    kind === 'bike'
+      ? parseBikeSpecs(variantHtml, specsHtml)
+      : { ...parseSpecs(variantHtml, specsHtml), colours: [], images: [] };
+  const { specs, highlights } = parsed;
+  const namedColours = parsed.colours;
+  const bikeImages = parsed.images;
 
   if (!html) {
     return {
@@ -258,11 +441,12 @@ export async function syncCarModel(input: string, opts: SyncOptions = {}): Promi
       brand,
       model,
       slug,
+      kind,
       images: {},
       colours: [],
       variants: [],
       syncStatus: 'needs-manual',
-      syncNote: `cardekho.com returned no page for "${slug}". Upload images manually.`,
+      syncNote: `${src.host.replace('https://www.', '')} returned no page for "${slug}". Upload images manually.`,
       syncedAt: now,
       createdAt: now,
       updatedAt: now,
@@ -279,12 +463,28 @@ export async function syncCarModel(input: string, opts: SyncOptions = {}): Promi
     rear: opts.perAngle?.rear ?? 1,
     interior: opts.perAngle?.interior ?? 2,
   };
-  const candidates = [...new Set(html.match(ANGLE_RE) ?? [])]
-    .filter((u) => modelRe.test(u))
+  // Car filenames name their angle; bike filenames are opaque hashes, so bikes
+  // are taken in source order and labelled honestly as photos.
+  const candidates = [...new Set(html.match(src.imageRe) ?? [])]
+    .filter((u) => (kind === 'car' ? modelRe.test(u) : true))
     .sort((a, b) => resScore(b) - resScore(a));
 
   const picked: Record<string, string[]> = {};
-  for (const u of candidates) {
+  if (kind === 'bike') {
+    // classify() reads the angle out of a car filename; bike filenames are
+    // opaque hashes, so every bike URL fell through to "detail" and was
+    // discarded — which is why bikes synced with zero images. Bikes are taken
+    // in the order the source lists them and spread across the buckets the rest
+    // of the app expects, with the schema.org list preferred because it is
+    // scoped to this model.
+    const pool = (bikeImages.length ? bikeImages : candidates).filter((u) => !/\/106X44\//.test(u));
+    const buckets: CarAngle[] = ['front', 'side', 'rear', 'interior'];
+    pool.slice(0, 6).forEach((u, i) => {
+      const a = buckets[i % buckets.length]!;
+      (picked[a] ??= []).push(u);
+    });
+  }
+  for (const u of kind === 'bike' ? [] : candidates) {
     const a = classify(u);
     if (a === 'detail') continue;
     picked[a] ??= [];
@@ -299,7 +499,7 @@ export async function syncCarModel(input: string, opts: SyncOptions = {}): Promi
     for (let i = 0; i < urls.length; i++) {
       const img = await store(
         urls[i]!,
-        `${brand} ${model} — ${angle}`,
+        kind === 'bike' ? `${brand} ${model} — photo` : `${brand} ${model} — ${angle}`,
         `${id}-${angle}-${i + 1}.jpg`,
       );
       if (img) list.push(img);
@@ -312,8 +512,8 @@ export async function syncCarModel(input: string, opts: SyncOptions = {}): Promi
     .filter((u) => modelRe.test(u))
     .sort((a, b) => resScore(b) - resScore(a));
   const seenColour = new Set<string>();
-  const colours: CarColour[] = [];
-  for (const u of colourUrls) {
+  const colours: CarColour[] = namedColours.map((name) => ({ name }));
+  for (const u of kind === 'bike' ? [] : colourUrls) {
     if (colours.length >= (opts.maxColours ?? 10)) break;
     const parsed = parseColourFile(u);
     if (!parsed || seenColour.has(parsed.name.toLowerCase())) continue;
@@ -327,7 +527,7 @@ export async function syncCarModel(input: string, opts: SyncOptions = {}): Promi
   }
 
   /* ---- variants ---- */
-  const variants: CarVariant[] = parseVariants(variantHtml, model).map((v) => ({
+  const variants: CarVariant[] = parseVariants(variantHtml, kind === 'bike' ? model : model).map((v) => ({
     name: v.name,
     price: v.price,
     ...specsFromSub(v.sub),
@@ -341,6 +541,7 @@ export async function syncCarModel(input: string, opts: SyncOptions = {}): Promi
 
   return {
     id,
+    kind,
     brand,
     model,
     slug,

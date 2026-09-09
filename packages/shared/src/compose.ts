@@ -8,6 +8,7 @@
 
 import type { Brief, DealerPhoto, CategoryId } from './types.js';
 import type {
+  VehicleKind,
   ActorProfile,
   CarModelProfile,
   ClientProfile,
@@ -63,6 +64,11 @@ export interface ComposeInputs {
   instructions?: GlobalInstruction[];
   /** The project's chosen language — its rules travel with the brief. */
   language?: LanguageProfile | null;
+  /**
+   * The whole vehicle library. Only consulted when no model was picked, to name
+   * the client brand's current range instead of leaving the choice open.
+   */
+  library?: CarModelProfile[];
 }
 
 const ANGLE_ORDER: CarAngle[] = ['front', 'side', 'rear', 'interior'];
@@ -100,6 +106,36 @@ export function carReferenceImages(
   if (colour?.image) out.unshift(colour.image);
 
   return out;
+}
+
+/**
+ * Does a client's brand refer to the same marque as a library record's?
+ *
+ * Client brands are typed by hand — "Suzuki", "RE", "Hero MotoCorp" — while the
+ * library takes its brand from the source slug, so Maruti models arrive as
+ * "Maruti". A plain equality check silently found no line-up and the film went
+ * back to inventing a car, which is the bug this was meant to fix.
+ */
+export function brandMatches(a: string | undefined, b: string | undefined): boolean {
+  const norm = (x: string): string => x.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const x = norm(a ?? '');
+  const y = norm(b ?? '');
+  if (!x || !y) return false;
+  if (x === y || x.includes(y) || y.includes(x)) return true;
+
+  // Marques the trade calls by more than one name.
+  const ALIASES: string[][] = [
+    ['maruti', 'suzuki', 'maruti suzuki', 'nexa', 'arena'],
+    ['hero', 'hero motocorp', 'hero honda'],
+    ['royal enfield', 're', 'enfield'],
+    ['mahindra', 'mahindra mahindra'],
+    ['tvs', 'tvs motor'],
+    ['bajaj', 'bajaj auto'],
+    ['tata', 'tata motors'],
+    ['hyundai', 'hyundai motor'],
+    ['honda', 'honda motorcycle', 'hmsi'],
+  ];
+  return ALIASES.some((group) => group.includes(x) && group.includes(y));
 }
 
 export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brief {
@@ -164,6 +200,18 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   if (car) {
     b.modelSpecific = true;
     b.carModel = [car.brand, car.model, project.carVariant].filter(Boolean).join(' ');
+  } else if (client?.brand?.trim()) {
+    // No model picked. Rather than leave the video model to invent one — which
+    // is how an outdated generation ends up on screen — hand it the brand's
+    // current range from the library and let it choose within that.
+    const brand = client.brand.trim();
+    const sells: VehicleKind = client.vehicleKind ?? 'car';
+    const models = (inputs.library ?? [])
+      .filter((c) => (c.kind ?? 'car') === sells && brandMatches(c.brand, brand))
+      .map((c) => c.model.trim())
+      .filter(Boolean)
+      .sort((a, z) => a.localeCompare(z));
+    if (models.length) b.lineup = { brand, kind: sells, models: [...new Set(models)] };
   }
 
   // Reference images, most-specific first: car → client logo/photos → project extras.
@@ -171,6 +219,16 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   if (car) {
     for (const img of carReferenceImages(car, project.carVariant, project.carColour)) {
       attachments.push(toDealerPhoto(img, 'car-model'));
+    }
+  } else if (b.lineup) {
+    // One shot each from a few models in the range: enough to fix the brand's
+    // current design language without pinning the film to a single car.
+    const inRange = (inputs.library ?? []).filter(
+      (c) => (c.kind ?? 'car') === b.lineup!.kind && brandMatches(c.brand, b.lineup!.brand),
+    );
+    for (const c of inRange.slice(0, 3)) {
+      const first = carReferenceImages(c)[0];
+      if (first) attachments.push(toDealerPhoto(first, 'car-model'));
     }
   }
   if (client?.logo) attachments.push(toDealerPhoto(client.logo, 'logo'));

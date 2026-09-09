@@ -143,6 +143,24 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
     });
   }
 
+  // A model-agnostic brief with nothing to anchor it is how an outdated car
+  // ends up on screen.
+  if (!brief.modelSpecific) {
+    if (brief.lineup?.models.length) {
+      checks.push({
+        level: 'ok',
+        code: 'lineup-named',
+        text: `No single model picked, so the prompt names the ${brief.lineup.brand} range it may show: ${brief.lineup.models.slice(0, 6).join(', ')}${brief.lineup.models.length > 6 ? `, +${brief.lineup.models.length - 6} more` : ''}.`,
+      });
+    } else {
+      checks.push({
+        level: 'warn',
+        code: 'no-lineup',
+        text: 'No car is selected and no line-up could be found for this client\u2019s brand, so nothing stops the model inventing a vehicle — usually an older generation. Pick a car, or sync the client\u2019s brand in Vehicles.',
+      });
+    }
+  }
+
   // Prompt budget. Global instructions and the project's own steer are pasted
   // verbatim into the video prompt, and a video model reads all of it as
   // direction for the film. A pronunciation document left switched on here once

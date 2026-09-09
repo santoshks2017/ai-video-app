@@ -1,10 +1,21 @@
 # Changelog
 
-Current version: **1.14**
+Current version: **2.0**
 
 Minor bumps for every shipped change; the major number moves only for an
 overhaul of how the app works. Generated from `packages/shared/src/changelog.ts`
 — edit that, then run `npm run changelog`.
+
+## 2.0 — Bikes, whole-brand sync, and your own account
+_2026-09-09_
+
+- Bikes and scooters join cars: BikeDekho for two-wheelers, CarDekho for cars, with the same images, colours, variants and specifications.
+- Sync a whole brand instead of one model at a time. Pick Tata or Royal Enfield and the app pulls the current line-up — 176 models across the nine brands — skipping discontinued, unlaunched and fleet-only trims.
+- A video with no specific model chosen now names the dealer brand’s real current range and shows only cars from it, instead of the model inventing an older generation.
+- Clients say whether they sell cars or two-wheelers. Honda, Suzuki and Hero badge both, and a car showroom’s film was coming back with motorcycles in it.
+- Everyone signs in with their own Google account. New people can look but not spend; an admin grants creator access, and every sign-in and generation is logged against a named person with its cost.
+- Scripts are written about the car rather than the camera, using the real price, engine, airbags and ground clearance pulled from the source.
+- A pre-flight check now blocks a generation when pasted reference documents have grown longer than the shot description — a pronunciation guide left switched on had become 54% of the prompt.
 
 ## 1.14 — Stop over-pronouncing Hindi
 _2026-09-09_

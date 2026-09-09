@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { CarModelProfile, CarAngle, StoredImage } from '@ava/shared';
+import type { CarModelProfile, CarAngle, StoredImage, BrandEntry } from '@ava/shared';
+import { BRAND_CATALOGUE } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, PickList, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
-import { isApiError, post, abs } from '../lib/client.js';
+import { isApiError, post, get, abs } from '../lib/client.js';
 
 const ANGLES: CarAngle[] = ['front', 'side', 'rear', 'interior'];
 
@@ -25,6 +26,50 @@ export function CarsSection() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [filter, setFilter] = useState('');
+  const [kind, setKind] = useState<'car' | 'bike'>('car');
+  const [brand, setBrand] = useState<BrandEntry | null>(null);
+  const [preview, setPreview] = useState<{ slug: string; name: string }[] | null>(null);
+  const [syncLog, setSyncLog] = useState<{ name: string; status: string; note?: string }[]>([]);
+  const [brandBusy, setBrandBusy] = useState('');
+  const [brandErr, setBrandErr] = useState('');
+
+  const brands = BRAND_CATALOGUE.filter((b) => b.kind === kind);
+
+  /** Cheap: one fetch, no downloads — lets you see the line-up before committing. */
+  const listModels = async (b: BrandEntry) => {
+    setBrand(b);
+    setPreview(null);
+    setSyncLog([]);
+    setBrandErr('');
+    setBrandBusy(`Reading ${b.name}…`);
+    const r = await get<{ items: { slug: string; name: string }[] }>(`/api/brands/models?brand=${b.slug}`);
+    setBrandBusy('');
+    if (isApiError(r)) {
+      setPreview(null);
+      setBrandErr(`${r.code}: ${r.message}`);
+      return;
+    }
+    setBrandErr('');
+    setPreview(r.items);
+  };
+
+  const syncBrand = async (b: BrandEntry, limit?: number) => {
+    setBrandBusy(`Syncing ${b.name}${limit ? ` (first ${limit})` : ''} — this takes a few minutes…`);
+    setSyncLog([]);
+    const r = await post<{ found: number; results: { name: string; status: string; note?: string }[] }>(
+      '/api/brands/sync',
+      { brand: b.slug, limit },
+    );
+    setBrandBusy('');
+    if (isApiError(r)) {
+      setBrandErr(`${r.code}: ${r.message}`);
+      return;
+    }
+    setBrandErr('');
+    setSyncLog(r.results);
+    setNote(`${b.name}: ${r.results.length} of ${r.found} models synced.`);
+    await refresh();
+  };
 
   const active = useMemo(() => {
     const c = cars.find((x) => x.id === activeId);
@@ -50,7 +95,7 @@ export function CarsSection() {
     if (!q) return;
     setBusy(true);
     setNote('');
-    const r = await post<CarModelProfile>('/api/cars/sync', { query: q });
+    const r = await post<CarModelProfile>('/api/cars/sync', { query: q, kind });
     setBusy(false);
     if (isApiError(r)) {
       setNote(r.message);
@@ -77,14 +122,80 @@ export function CarsSection() {
   return (
     <div className="grid two">
       <Panel
-        title="Cars"
+        title="Vehicles"
         step={`${cars.length} model${cars.length === 1 ? '' : 's'}`}
       >
         <div className="section-desc">
-          Sync a model from CarDekho to pull its real, current images — angle shots, every colour, and the full
-          variant list. These reference images are what stop the model inventing an outdated or wrong car.
+          Cars come from CarDekho, bikes and scooters from BikeDekho — real current images, every colour, the
+          full variant list and the specifications a script can quote. Pick a brand to pull its whole line-up.
         </div>
-        <Field label="Sync a model" hint='Brand + model, e.g. "Hyundai Creta" or "Maruti Suzuki Baleno".'>
+
+        <div className="toolbar" style={{ marginTop: 0 }}>
+          {(['car', 'bike'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={`btn small${kind === k ? ' primary' : ''}`}
+              onClick={() => { setKind(k); setBrand(null); setPreview(null); setSyncLog([]); }}
+            >
+              {k === 'car' ? 'Cars' : 'Bikes & scooters'}
+            </button>
+          ))}
+        </div>
+
+        <div className="brandgrid">
+          {brands.map((b) => (
+            <button
+              key={b.slug}
+              type="button"
+              className={`brandchip${brand?.slug === b.slug ? ' on' : ''}`}
+              disabled={Boolean(brandBusy)}
+              onClick={() => listModels(b)}
+            >
+              {b.name}
+            </button>
+          ))}
+        </div>
+
+        {brandBusy && <div className="hint" style={{ marginTop: 8 }}>{brandBusy}</div>}
+        {brandErr && (
+          <div className="check bad" style={{ marginTop: 8 }}>
+            <span className="icon">✕</span>
+            <span>{brandErr}</span>
+          </div>
+        )}
+
+        {brand && preview && !brandBusy && (
+          <div className="brandpreview">
+            <div className="hint">
+              <b>{brand.name}</b> — {preview.length} current model{preview.length === 1 ? '' : 's'} on{' '}
+              {brand.kind === 'car' ? 'CarDekho' : 'BikeDekho'}. Discontinued and unlaunched models are left out.
+            </div>
+            <div className="modellist">{preview.map((m) => m.name).join(' · ')}</div>
+            <div className="toolbar">
+              <button className="btn small" type="button" onClick={() => syncBrand(brand, 3)}>
+                Try 3 models first
+              </button>
+              <button className="btn primary small" type="button" onClick={() => syncBrand(brand)}>
+                Sync all {preview.length}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {syncLog.length > 0 && (
+          <div className="synclog">
+            {syncLog.map((r, i) => (
+              <div className={`syncrow ${/^(ok|already)/.test(r.status) ? 'ok' : r.status === 'failed' ? 'bad' : 'warn'}`} key={i}>
+                <b>{r.name}</b>
+                <span>{r.status}{r.note ? ` · ${r.note}` : ''}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="divider" />
+        <Field label="Or sync one model" hint='e.g. "Hyundai Creta", or "royal-enfield/classic-350" for a bike.'>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               value={query}

@@ -18,10 +18,24 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '1.14';
+export const APP_VERSION = '2.0';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '2.0',
+    date: '2026-09-09',
+    title: 'Bikes, whole-brand sync, and your own account',
+    changes: [
+      'Bikes and scooters join cars: BikeDekho for two-wheelers, CarDekho for cars, with the same images, colours, variants and specifications.',
+      'Sync a whole brand instead of one model at a time. Pick Tata or Royal Enfield and the app pulls the current line-up — 176 models across the nine brands — skipping discontinued, unlaunched and fleet-only trims.',
+      'A video with no specific model chosen now names the dealer brand\u2019s real current range and shows only cars from it, instead of the model inventing an older generation.',
+      'Clients say whether they sell cars or two-wheelers. Honda, Suzuki and Hero badge both, and a car showroom\u2019s film was coming back with motorcycles in it.',
+      'Everyone signs in with their own Google account. New people can look but not spend; an admin grants creator access, and every sign-in and generation is logged against a named person with its cost.',
+      'Scripts are written about the car rather than the camera, using the real price, engine, airbags and ground clearance pulled from the source.',
+      'A pre-flight check now blocks a generation when pasted reference documents have grown longer than the shot description \u2014 a pronunciation guide left switched on had become 54% of the prompt.',
+    ],
+  },
   {
     version: '1.14',
     date: '2026-09-09',

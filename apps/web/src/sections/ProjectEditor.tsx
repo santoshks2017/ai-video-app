@@ -67,8 +67,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     null;
 
   const brief = useMemo(
-    () => (project ? composeBrief(project, { client, actor, car, instructions, language }) : null),
-    [project, client, actor, car, instructions, language],
+    () => (project ? composeBrief(project, { client, actor, car, instructions, language, library: cars }) : null),
+    [project, client, actor, car, instructions, language, cars],
   );
 
   const built = useMemo(

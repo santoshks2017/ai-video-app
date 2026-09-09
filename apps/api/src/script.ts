@@ -227,7 +227,14 @@ function copyInstruction(req: ScriptRequest): string {
     '- **One idea per line, and lines that connect.** Line two should follow from line one, not restart.',
     '- **Earn the CTA.** The last line asks for the action, and it lands because the lines before it gave a reason.',
     `- ${verbs}`,
-    `- Everyday spoken ${lang}. Keep in English the words Indians say in English: test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, and every brand and model name.`,
+    `- Everyday spoken ${lang}, written in its own script.`,
+    '',
+    '**SCRIPT — this one is absolute.** Every English word and every proper noun stays in LATIN letters, spelled the ordinary English way, inside the Devanagari sentence. Never transliterate them into Devanagari.',
+    '  Right: "New Delhi में Tata Punch Pure CNG, सात लाख अड़सठ हज़ार से शुरू।"',
+    '  Wrong: "न्यू दिल्ली में टाटा पंच प्योर सीएनजी, सात लाख अड़सठ हज़ार से शुरू।"',
+    '  This covers brand and model names (Tata, Punch, Nexon, CNG), place names (New Delhi, Gurugram), the dealership name, and the English words Indians say in English: test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, airbags, manual, automatic, safety, family, mileage.',
+    '  Hindi words stay in Devanagari. Numbers spoken in Hindi stay in Devanagari (सात लाख अड़सठ हज़ार). Only the English keeps Latin letters.',
+    '',
     '- Never invent a price, EMI, discount, mileage, interest rate or waiting period. Use only the facts above. Numbers are written as spoken words, never digits, and never the word "rupees" or the ₹ symbol.',
     ...(sub.avoid?.length
       ? ['', 'This format fails when it does these — do not:', ...sub.avoid.map((a) => `  - ${a}`)]

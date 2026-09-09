@@ -55,6 +55,33 @@ export interface CarVariant {
   colours: CarColour[];
 }
 
+/**
+ * What the car actually is, in the terms an ad uses. Scraped from the model and
+ * /specs pages so a script can say "six airbags" or "one nine three millimetre
+ * ground clearance" instead of reaching for adjectives.
+ */
+export interface CarSpecs {
+  /** e.g. "5.75 - 10.77 Lakh" */
+  priceRange?: string;
+  /** Ex-showroom starting price in rupees, as published. */
+  basePrice?: string;
+  engine?: string;
+  power?: string;
+  torque?: string;
+  transmission?: string;
+  fuelTypes?: string[];
+  mileage?: string;
+  bootSpace?: string;
+  groundClearance?: string;
+  fuelTank?: string;
+  airbags?: string;
+  seating?: string;
+  drivetrain?: string;
+  dimensions?: string;
+  /** e.g. "4.7 from 163 reviews" */
+  rating?: string;
+}
+
 export interface CarModelProfile {
   id: string;
   brand: string;
@@ -67,6 +94,13 @@ export interface CarModelProfile {
   images: Partial<Record<CarAngle, StoredImage[]>>;
   colours: CarColour[];
   variants: CarVariant[];
+  /** Headline numbers, for the copywriter. */
+  specs?: CarSpecs;
+  /**
+   * Plain-sentence facts straight from the source ("Tata Punch comes with 6
+   * airbags"), safe to quote because nothing was inferred.
+   */
+  highlights?: string[];
   sourceUrl?: string;
   syncedAt?: number;
   syncStatus: 'ok' | 'partial' | 'needs-manual' | 'never';

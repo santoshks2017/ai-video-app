@@ -387,7 +387,8 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
         fuel: variant?.fuel,
         transmission: variant?.transmission,
         colour: project.carColour,
-        highlights: (car.highlights ?? []).slice(0, 5),
+        specs: car.specs ?? {},
+        highlights: (car.highlights ?? []).slice(0, 8),
       };
     }
   }

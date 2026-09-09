@@ -53,6 +53,9 @@ export interface ScriptSubject {
     fuel?: string;
     transmission?: string;
     colour?: string;
+    /** Scraped headline numbers: engine, power, airbags, ground clearance… */
+    specs?: Record<string, string | string[] | undefined>;
+    /** Plain sentences from the source, quotable without inference. */
     highlights?: string[];
   };
   /** How the presenter comes across. */
@@ -182,14 +185,34 @@ function copyInstruction(req: ScriptRequest): string {
       ? 'The presenter is a woman — feminine verb forms throughout.'
       : 'The presenter is a man — masculine verb forms throughout.';
 
+  const SPEC_LABELS: Record<string, string> = {
+    priceRange: 'Price range',
+    basePrice: 'Starts at (rupees, ex-showroom)',
+    engine: 'Engine',
+    power: 'Max power',
+    torque: 'Max torque',
+    transmission: 'Transmission',
+    fuelTypes: 'Fuel',
+    mileage: 'Mileage',
+    bootSpace: 'Boot space',
+    groundClearance: 'Ground clearance',
+    fuelTank: 'Fuel tank',
+    airbags: 'Airbags',
+    seating: 'Seats',
+    drivetrain: 'Drivetrain',
+    dimensions: 'Dimensions',
+    rating: 'Owner rating',
+  };
   const carFacts = [
     car.name && `Car: ${car.name}`,
-    car.variant && `Variant: ${car.variant}`,
-    car.priceLabel && `Price: ${car.priceLabel}`,
-    car.fuel && `Fuel: ${car.fuel}`,
-    car.transmission && `Transmission: ${car.transmission}`,
+    car.variant && `Variant on camera: ${car.variant}`,
+    car.priceLabel && `This variant's price: ${car.priceLabel}`,
+    car.fuel && `This variant's fuel: ${car.fuel}`,
+    car.transmission && `This variant's transmission: ${car.transmission}`,
     car.colour && `Colour on camera: ${car.colour}`,
-    car.highlights?.length && `Notable: ${car.highlights.join('; ')}`,
+    ...Object.entries(car.specs ?? {})
+      .filter(([, v]) => (Array.isArray(v) ? v.length : String(v ?? '').trim()))
+      .map(([k, v]) => `${SPEC_LABELS[k] ?? k}: ${Array.isArray(v) ? v.join(' / ') : v}`),
   ].filter(Boolean) as string[];
 
   const briefFacts = Object.entries(req.facts)
@@ -206,7 +229,19 @@ function copyInstruction(req: ScriptRequest): string {
     `Format: ${sub.useCase}${sub.purpose ? ` — ${sub.purpose}` : ''}`,
     '',
     ...(carFacts.length
-      ? ['## THE CAR — this is what you are selling. Use these specifics.', ...carFacts.map((f) => `  ${f}`), '']
+      ? [
+          '## THE CAR — this is what you are selling. Every number here is verified; use them.',
+          ...carFacts.map((f) => `  ${f}`),
+          '',
+        ]
+      : []),
+    ...(car.highlights?.length
+      ? [
+          '## VERIFIED FACTS you may state as-is',
+          ...car.highlights.map((h) => `  - ${h}`),
+          'Say a number the way a person says it, not the way a spec sheet writes it: "one ninety three millimetre ground clearance", "six airbags", "sixty litre tank".',
+          '',
+        ]
       : []),
     ...(briefFacts.length ? ['## WHAT THE DEALER GAVE YOU', ...briefFacts, ''] : []),
     `## THE DEALERSHIP`,

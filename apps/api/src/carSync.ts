@@ -12,7 +12,8 @@
  */
 
 import { putRef } from './store.js';
-import type { CarAngle, CarColour, CarModelProfile, CarVariant, StoredImage } from '@ava/shared';
+import type {
+  CarSpecs, CarAngle, CarColour, CarModelProfile, CarVariant, StoredImage } from '@ava/shared';
 
 const UA = 'Mozilla/5.0 (compatible; ai-video-app/1)';
 
@@ -117,6 +118,107 @@ async function store(url: string, label: string, filename: string): Promise<Stor
   return { refId, storagePath, label, filename, url: `/api/refs/${refId}/${filename}` };
 }
 
+
+/* ------------------------------- specifications ------------------------------
+ * CarDekho publishes the numbers three ways, and each one carries something the
+ * others do not: schema.org JSON-LD on /specs (engine, torque, dimensions), a
+ * summary object on the model page (power range, boot, airbags, rating), and an
+ * FAQ block written as plain sentences (ground clearance, fuel tank, drivetrain).
+ * Reading all three is what lets a script quote a real number instead of calling
+ * the car "शानदार".
+ * -------------------------------------------------------------------------- */
+
+function jsonLd(html: string): Record<string, any>[] {
+  const out: Record<string, any>[] = [];
+  for (const m of html.matchAll(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const parsed = JSON.parse(m[1]!.trim());
+      out.push(...(Array.isArray(parsed) ? parsed : [parsed]));
+    } catch {
+      /* a malformed block is not worth failing the whole sync over */
+    }
+  }
+  return out;
+}
+
+const clean = (s: unknown): string | undefined => {
+  const v = String(s ?? '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return v || undefined;
+};
+
+export function parseSpecs(modelHtml: string, specsHtml: string): { specs: CarSpecs; highlights: string[] } {
+  const specs: CarSpecs = {};
+  const highlights: string[] = [];
+
+  // 1. The model page's summary block — the first one belongs to this car; the
+  //    rest are "similar cars" carousels.
+  const summary = /"specs":\{(.{0,600}?)\},"/.exec(modelHtml)?.[1] ?? '';
+  const pick = (key: string): string | undefined =>
+    clean(new RegExp(`"${key}"\\s*:\\s*"([^"]{1,60})"`).exec(summary)?.[1]);
+  specs.transmission = pick('Transmission');
+  specs.engine = pick('Engine');
+  specs.power = pick('Power');
+  specs.bootSpace = pick('Boot Space');
+  specs.airbags = pick('Airbags');
+  const fuel = pick('Fuel Type');
+  if (fuel) specs.fuelTypes = fuel.split(/\s*\/\s*/).filter(Boolean);
+  const rating = /"rating":([\d.]+)[^}]*?"reviewCount":(\d+)/.exec(modelHtml)
+    ?? /"reviewCount":(\d+)[^}]*?"rating":([\d.]+)/.exec(modelHtml);
+  if (rating) {
+    const [a, b] = [rating[1]!, rating[2]!];
+    const score = Number(a) <= 5 ? a : b;
+    const count = Number(a) <= 5 ? b : a;
+    specs.rating = `${score} from ${count} reviews`;
+  }
+  specs.priceRange = clean(/"priceRange":"([^"]{1,40})"/.exec(modelHtml)?.[1]);
+
+  // 2. schema.org Car on /specs.
+  const car = jsonLd(specsHtml).find((d) => d['@type'] === 'Car' || d['@type'] === 'Vehicle');
+  if (car) {
+    specs.basePrice = clean(car.offers?.price);
+    specs.seating = clean(car.seatingCapacity);
+    if (Array.isArray(car.vehicleTransmission) && car.vehicleTransmission.length) {
+      specs.transmission = car.vehicleTransmission.join(' / ');
+    }
+    const fuels = (car.fueltype ?? car.fuelType ?? []) as { name?: string }[];
+    if (Array.isArray(fuels) && fuels.length) {
+      specs.fuelTypes = fuels.map((f) => clean(f?.name)).filter(Boolean) as string[];
+    }
+    const engine = (car.vehicleEngine ?? [])[0];
+    if (engine) {
+      specs.engine = clean(engine.engineType) ?? specs.engine;
+      specs.torque = clean(engine.torque?.value) ?? specs.torque;
+      specs.power = clean(engine.enginePower?.value) ?? specs.power;
+    }
+    const w = clean(car.width);
+    const hgt = clean(car.height);
+    if (w && hgt) specs.dimensions = `${w} wide, ${hgt} tall`;
+    if (!specs.bootSpace) specs.bootSpace = clean(car.cargoVolume?.Value ?? car.cargoVolume?.value);
+  }
+
+  // 3. The FAQ block, already written as sentences — quotable as-is.
+  const faq = jsonLd(specsHtml).find((d) => String(d['@type']).toLowerCase() === 'faqpage');
+  for (const q of (faq?.mainEntity ?? []) as { name?: string; acceptedAnswer?: { text?: string } }[]) {
+    const text = clean(q.acceptedAnswer?.text);
+    if (!text || text.length > 190) continue;
+    // Drop the cross-sell tail CarDekho appends to some answers.
+    const trimmed = text.replace(/\s*(Check out|Choose cars|Browse).*$/i, '').trim();
+    if (trimmed) highlights.push(trimmed);
+    const grab = (rx: RegExp): string | undefined => clean(rx.exec(trimmed)?.[1]);
+    if (/ground clearance/i.test(q.name ?? '')) specs.groundClearance ??= grab(/is ([\d.]+\s*mm)/i);
+    if (/fuel (consumption|capacity|tank)/i.test(q.name ?? '')) specs.fuelTank ??= grab(/is ([\d.]+\s*L)/i);
+    if (/mileage/i.test(q.name ?? '')) specs.mileage ??= grab(/is ([\d.]+\s*(?:kmpl|km\/kg|km))/i);
+    if (/drivetrain/i.test(q.name ?? '')) specs.drivetrain ??= grab(/with (\w+) drivetrain/i);
+    if (/airbags/i.test(q.name ?? '')) specs.airbags ??= grab(/have (\d+) airbags/i);
+  }
+
+  for (const k of Object.keys(specs) as (keyof CarSpecs)[]) if (specs[k] === undefined) delete specs[k];
+  return { specs, highlights: highlights.slice(0, 10) };
+}
+
 export interface SyncOptions {
   /** Angle images to keep per bucket. */
   perAngle?: Partial<Record<CarAngle, number>>;
@@ -138,12 +240,17 @@ export async function syncCarModel(input: string, opts: SyncOptions = {}): Promi
       break;
     }
   }
-  // The /pictures page carries the imagery; the model page carries the variants.
+  // The /pictures page carries the imagery; the model page carries the variants
+  // and the summary numbers; /specs carries the schema.org block and the FAQ.
   let variantHtml = html;
   if (sourceUrl.endsWith('/pictures')) {
     const res = await fetch(`https://www.cardekho.com/${slug}`, { headers: { 'user-agent': UA } });
     if (res.ok) variantHtml = await res.text();
   }
+  const specsHtml = await fetch(`https://www.cardekho.com/${slug}/specs`, { headers: { 'user-agent': UA } })
+    .then((r) => (r.ok ? r.text() : ''))
+    .catch(() => '');
+  const { specs, highlights } = parseSpecs(variantHtml, specsHtml);
 
   if (!html) {
     return {
@@ -240,6 +347,8 @@ export async function syncCarModel(input: string, opts: SyncOptions = {}): Promi
     images,
     colours,
     variants,
+    specs,
+    highlights,
     sourceUrl,
     syncedAt: now,
     syncStatus,

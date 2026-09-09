@@ -1,23 +1,15 @@
 /**
- * Authenticated API client.
- *
- * Two ways in. Normally a Google ID token, refreshed hourly by Firebase and read
- * fresh on every request. Failing that, the legacy shared-password token in
- * localStorage, which still works so a Google outage cannot lock the team out.
+ * Authenticated API client. Every request carries the signed-in person's Google
+ * ID token, refreshed hourly by Firebase — so every action is attributable to a
+ * named account, which a shared password could never be.
  */
 
 import { googleToken } from './firebase.js';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
-const TOKEN_KEY = 'ava.token';
 
 export const apiBase = BASE;
-/** Google first — a signed-in person's role travels with their own identity. */
-export const getToken = (): string | null => googleToken() ?? localStorage.getItem(TOKEN_KEY);
-export const setToken = (t: string | null): void => {
-  if (t) localStorage.setItem(TOKEN_KEY, t);
-  else localStorage.removeItem(TOKEN_KEY);
-};
+export const getToken = (): string | null => googleToken();
 
 export interface ApiError {
   ok: false;
@@ -50,7 +42,6 @@ export async function req<T>(path: string, init: RequestInit = {}): Promise<T | 
     });
     const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) {
-      if (res.status === 401 && !googleToken()) setToken(null);
       return {
         ok: false,
         status: res.status,
@@ -89,7 +80,6 @@ export interface SessionUser {
 export const session = {
   status: () =>
     get<{ authEnabled: boolean; signedIn: boolean; user: SessionUser | null }>('/api/session'),
-  signIn: (password: string) => post<{ token: string; authEnabled: boolean }>('/api/session', { password }),
 };
 
 /* ---------------- generic collection CRUD ---------------- */

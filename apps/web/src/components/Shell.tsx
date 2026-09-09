@@ -25,23 +25,13 @@ const NAV: { id: Section; label: string; icon: string; needs?: Role }[] = (
 }));
 
 export function SignIn() {
-  const signIn = useApp((s) => s.signIn);
   const signInGoogle = useApp((s) => s.signInGoogle);
   const error = useApp((s) => s.signInError);
-  const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
 
   const google = async () => {
     setBusy(true);
     await signInGoogle();
-    setBusy(false);
-  };
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    await signIn(pw);
     setBusy(false);
   };
 
@@ -73,30 +63,13 @@ export function SignIn() {
             <span>{error}</span>
           </div>
         )}
-
-        <div className="divider" />
-        {showPassword ? (
-          <form onSubmit={submit}>
-            <div className="field">
-              <label htmlFor="pw">Team password</label>
-              <input id="pw" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus />
-            </div>
-            <button className="btn" type="submit" disabled={busy || !pw} style={{ width: '100%', marginTop: 6 }}>
-              {busy ? 'Signing in…' : 'Sign in with the password'}
-            </button>
-          </form>
-        ) : (
-          <button className="btn ghost small" type="button" onClick={() => setShowPassword(true)}>
-            Use the team password instead
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { tabs, activeTabId, go, signOut, authEnabled, loading, me, can } = useApp();
+  const { tabs, activeTabId, go, signOut, loading, me, can } = useApp();
   const active = tabs.find((t) => t.id === activeTabId);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -143,7 +116,7 @@ export function Shell({ children }: { children: ReactNode }) {
               )}
               <span>
                 <b>{me.name || me.email || 'Team password'}</b>
-                <em>{me.legacy ? 'shared password · admin' : me.role}</em>
+                <em>{me.role}</em>
               </span>
             </div>
           )}
@@ -158,7 +131,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </span>
             {!collapsed && <span className="rail-label">v{APP_VERSION} · What&rsquo;s new</span>}
           </button>
-          {authEnabled && (
+          {me && (
             <button className="rail-item" type="button" onClick={signOut} title="Sign out">
               <span className="rail-icon" aria-hidden>
                 ⏻
@@ -181,16 +154,6 @@ export function Shell({ children }: { children: ReactNode }) {
       </aside>
 
       <main className="main">
-        {!authEnabled && (
-          <div className="check warn" style={{ marginBottom: 14 }}>
-            <span className="icon">!</span>
-            <span>
-              No team password is set, so anyone with this link can generate videos and spend the API budget. Set
-              one with <code>gcloud secrets versions add APP_PASSWORD --project ai-video-app-cd --data-file=-</code>{' '}
-              then redeploy.
-            </span>
-          </div>
-        )}
         {children}
       </main>
     </div>

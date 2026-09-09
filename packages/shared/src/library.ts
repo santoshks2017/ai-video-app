@@ -246,6 +246,9 @@ export interface AppUser {
   role: Role;
   /** Set on the account that bootstrapped the app; it can never be demoted. */
   isOwner?: boolean;
+  /** Running totals, kept on the record so the admin view never scans the log. */
+  generations?: number;
+  spendInr?: number;
   lastSeenAt?: number;
   createdAt: number;
   updatedAt: number;

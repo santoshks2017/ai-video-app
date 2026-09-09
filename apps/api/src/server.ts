@@ -26,13 +26,15 @@ import {
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
 import { composeFinal, lastFrame, posterFrame, selfTest, type BrandOverlay } from './post.js';
-import { authEnabled, bearer, checkPassword, issueToken, verifyToken } from './auth.js';
+import { bearer } from './auth.js';
 import {
   resolveIdToken,
   looksLikeIdToken,
   listUsers,
   setUserRole,
   removeUser,
+  recordActivity,
+  listActivity,
   allows,
   type Caller,
 } from './users.js';
@@ -91,6 +93,7 @@ declare module 'fastify' {
 function requiredRole(method: string, url: string): Role | null {
   // API credentials and roles are the keys to the kingdom — admin only.
   if (url.startsWith('/api/credentials') || url.startsWith('/api/users')) return 'admin';
+  if (url.startsWith('/api/activity')) return 'admin';
   if (url.startsWith('/api/models/seed')) return 'admin';
   if (url.startsWith('/api/models') && method !== 'GET') return 'admin';
 
@@ -123,14 +126,12 @@ app.addHook('preHandler', async (req, reply) => {
   // Identify the caller FIRST, for every guarded route and for /api/session.
   // Session is open — it is how the browser asks "am I signed in?" — but it
   // still needs the answer, so resolution has to happen before that exemption.
+  // Google only. A shared password can tell you that something happened but
+  // never who did it, and every paid action here has to be attributable.
   const token = bearer(req.headers.authorization);
   if (token && looksLikeIdToken(token)) {
     const caller = await resolveIdToken(token);
     if (caller) req.caller = caller;
-  } else if (verifyToken(token)) {
-    // The legacy shared password predates per-person sign-in. It still works and
-    // acts as an admin, so a Google outage cannot lock the team out.
-    req.caller = { uid: 'legacy', email: '', role: 'admin', isOwner: false, legacy: true };
   }
 
   if (OPEN_PATHS.has(url)) return;
@@ -154,7 +155,7 @@ app.addHook('preHandler', async (req, reply) => {
 
 /** Who am I, and what may I do? The client shapes itself around this. */
 app.get('/api/session', async (req) => ({
-  authEnabled: authEnabled(),
+  authEnabled: true,
   signedIn: Boolean(req.caller),
   user: req.caller
     ? {
@@ -164,7 +165,6 @@ app.get('/api/session', async (req) => ({
         photo: req.caller.photo,
         role: req.caller.role,
         isOwner: req.caller.isOwner,
-        legacy: req.caller.legacy,
       }
     : null,
 }));
@@ -172,6 +172,11 @@ app.get('/api/session', async (req) => ({
 /* ---- user administration (admin only, enforced in the preHandler) ---- */
 
 app.get('/api/users', async () => ({ items: await listUsers() }));
+
+/** The audit trail: who signed in, who generated what, and what it cost. */
+app.get<{ Querystring: { uid?: string; limit?: string } }>('/api/activity', async (req) => ({
+  items: await listActivity(Math.min(500, Number(req.query?.limit ?? 200) || 200), req.query?.uid),
+}));
 
 app.patch<{ Params: { id: string }; Body: { role?: Role } }>('/api/users/:id', async (req, reply) => {
   const role = req.body?.role;
@@ -192,13 +197,6 @@ app.delete<{ Params: { id: string } }>('/api/users/:id', async (req, reply) => {
   return { ok: true };
 });
 
-app.post<{ Body: { password?: string } }>('/api/session', async (req, reply) => {
-  if (!authEnabled()) return { token: 'open', authEnabled: false };
-  if (!checkPassword(req.body?.password ?? '')) {
-    return reply.code(401).send({ code: 'bad-password', message: 'Wrong password.' });
-  }
-  return { token: issueToken(), authEnabled: true };
-});
 
 /* ============================ library CRUD ============================ */
 
@@ -780,6 +778,9 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   }));
   const record: JobRecord = {
     jobId,
+    userId: req.caller?.uid,
+    userEmail: req.caller?.email,
+    userName: req.caller?.name,
     projectId: req.body?.projectId,
     projectName: req.body?.projectName,
     label: `${cost.totalSeconds}s · ${brief.categories.length} use case${brief.categories.length === 1 ? '' : 's'}`,
@@ -846,6 +847,15 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     }
 
     await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath });
+    if (req.caller) {
+      await recordActivity(req.caller, {
+        type: 'generate',
+        detail: `${cost.totalSeconds}s · ${brief.aspect} · ${resolved.label}`,
+        projectId: req.body?.projectId,
+        projectName: req.body?.projectName,
+        costInr: cost.inr,
+      });
+    }
 
     // Roll the spend up onto the project so the list can show it without
     // reading every job.
@@ -1019,6 +1029,9 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
     const totalSeconds = parts.reduce((a, p) => a + p.duration, 0);
     const record: JobRecord = {
       jobId,
+      userId: req.caller?.uid,
+      userEmail: req.caller?.email,
+      userName: req.caller?.name,
       parentJobId: source.jobId,
       refinedParts: redo,
       feedback: feedback || undefined,
@@ -1103,6 +1116,15 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       }
 
       await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath });
+      if (req.caller) {
+        await recordActivity(req.caller, {
+          type: 'retake',
+          detail: redo.length ? `segments ${redo.join(', ')} of ${parts.length}` : 'restitch only',
+          projectId: req.body?.projectId ?? source.projectId,
+          projectName: req.body?.projectName ?? source.projectName,
+          costInr: cost.inr,
+        });
+      }
 
       const projectId = req.body?.projectId ?? source.projectId;
       if (projectId) {

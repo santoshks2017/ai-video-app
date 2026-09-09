@@ -11,7 +11,7 @@ import type {
   Project,
   VideoModelProfile,
 } from '@ava/shared';
-import { collection, getToken, isApiError, session, setToken, type SessionUser } from '../lib/client.js';
+import { collection, isApiError, session, type SessionUser } from '../lib/client.js';
 import { completeRedirectSignIn, signInWithGoogle, signOutGoogle, watchGoogleAuth } from '../lib/firebase.js';
 
 export type Section =
@@ -90,7 +90,6 @@ interface AppState {
   loading: boolean;
 
   init: () => Promise<void>;
-  signIn: (password: string) => Promise<boolean>;
   signInGoogle: () => Promise<boolean>;
   signOut: () => void;
   /** Open the tab for this section or project, or focus it if already open. */
@@ -137,14 +136,16 @@ export const useApp = create<AppState>()((set, get) => ({
     let settled = false;
     watchGoogleAuth(async () => {
       const s = await session.status();
+      // Settle the moment the session answers, BEFORE loading the libraries.
+      // Marking it settled after the refresh meant a slow refresh let the
+      // fallback below fire and sign a signed-in person straight back out.
+      settled = true;
       if (isApiError(s)) {
         set({ signedIn: false, me: null });
-        settled = true;
         return;
       }
       set({ authEnabled: s.authEnabled, me: s.user, signedIn: s.signedIn });
       if (s.signedIn) await get().refresh();
-      settled = true;
     });
     // No Firebase session and no legacy token means nothing will fire above.
     setTimeout(() => {
@@ -163,22 +164,9 @@ export const useApp = create<AppState>()((set, get) => ({
     return true;
   },
 
-  signIn: async (password) => {
-    set({ signInError: '' });
-    const r = await session.signIn(password);
-    if (isApiError(r)) {
-      set({ signInError: r.message });
-      return false;
-    }
-    setToken(r.token);
-    set({ signedIn: true });
-    await get().refresh();
-    return true;
-  },
 
   signOut: () => {
     void signOutGoogle().catch(() => {});
-    setToken(null);
     set({
       tabs: [HOME],
       activeTabId: HOME.id,

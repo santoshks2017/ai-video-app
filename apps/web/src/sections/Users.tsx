@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { ROLE_LABELS, type AppUser, type Role } from '@ava/shared';
+import { useEffect, useState } from 'react';
+import { ROLE_LABELS, formatInr, type AppUser, type Role } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Panel, Banner, Confirm } from '../components/ui.js';
-import { isApiError, patchReq } from '../lib/client.js';
+import { isApiError, patchReq, get } from '../lib/client.js';
 
 /**
  * Who can do what. Anyone who signs in with Google lands here as a viewer, and
@@ -14,6 +14,15 @@ export function UsersSection() {
   const refresh = useApp((s) => s.refresh);
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
+  const [activity, setActivity] = useState<
+    { uid: string; email: string; name?: string; type: string; at: number; detail?: string; projectName?: string; costInr?: number }[]
+  >([]);
+
+  useEffect(() => {
+    void get<{ items: typeof activity }>('/api/activity?limit=60').then((r) => {
+      if (!isApiError(r)) setActivity(r.items ?? []);
+    });
+  }, []);
 
   const setRole = async (u: AppUser, role: Role) => {
     setErr('');
@@ -61,8 +70,14 @@ export function UsersSection() {
                   {self && !u.isOwner && <span className="chip">you</span>}
                 </b>
                 <span>
-                  {u.email}
-                  {u.lastSeenAt ? ` · last seen ${new Date(u.lastSeenAt).toLocaleDateString()}` : ''}
+                  {[
+                    u.email,
+                    u.lastSeenAt && `last seen ${new Date(u.lastSeenAt).toLocaleDateString()}`,
+                    u.generations ? `${u.generations} generation${u.generations > 1 ? 's' : ''}` : null,
+                    u.spendInr ? formatInr(u.spendInr) : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </span>
               </span>
               <select
@@ -89,6 +104,38 @@ export function UsersSection() {
           );
         })}
       </div>
+
+      <div className="divider" />
+      <h3 className="sub-head">Recent activity</h3>
+      <div className="section-desc" style={{ marginTop: 0 }}>
+        Sign-ins and every paid action, newest first. A shared password could tell you something happened; this
+        tells you who did it.
+      </div>
+      {activity.length === 0 ? (
+        <div className="hint">Nothing logged yet.</div>
+      ) : (
+        <div className="activity">
+          {activity.map((a, i) => (
+            <div className={`act act-${a.type}`} key={i}>
+              <span className="act-when">
+                {new Date(a.at).toLocaleString(undefined, {
+                  day: 'numeric',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </span>
+              <span className="act-who">{a.name || a.email}</span>
+              <span className="act-what">
+                <b>{a.type}</b>
+                {a.projectName ? ` · ${a.projectName}` : ''}
+                {a.detail ? ` · ${a.detail}` : ''}
+              </span>
+              <span className="act-cost">{a.costInr ? formatInr(a.costInr) : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="divider" />
       <div className="hint">

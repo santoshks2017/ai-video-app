@@ -15,7 +15,7 @@
  */
 
 import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { roleAllows, type AppUser, type Role } from '@ava/shared';
 import { ensureFirebase } from './store.js';
 
@@ -28,8 +28,60 @@ export interface Caller {
   photo?: string;
   role: Role;
   isOwner: boolean;
-  /** True for the legacy shared-password session, which acts as an admin. */
-  legacy: boolean;
+}
+
+/**
+ * An audit trail. Every sign-in and every paid action is written here against a
+ * named account, which is the whole reason the shared password had to go — it
+ * could tell you that something happened, never who did it.
+ */
+export type ActivityType = 'login' | 'generate' | 'retake' | 'script';
+
+export interface Activity {
+  uid: string;
+  email: string;
+  name?: string;
+  type: ActivityType;
+  at: number;
+  detail?: string;
+  projectId?: string;
+  projectName?: string;
+  costInr?: number;
+}
+
+const ACTIVITY = 'activity';
+/** Repeated requests are not repeated logins; one an hour is the useful signal. */
+const LOGIN_GAP_MS = 60 * 60 * 1000;
+
+export async function recordActivity(caller: Caller, a: Omit<Activity, 'uid' | 'email' | 'name' | 'at'>): Promise<void> {
+  ensureFirebase();
+  const db = getFirestore();
+  const entry: Activity = { uid: caller.uid, email: caller.email, name: caller.name, at: Date.now(), ...a };
+  await db.collection(ACTIVITY).add(entry).catch(() => {});
+  // Running totals on the person, so the admin view never has to scan the log.
+  if (a.costInr || a.type === 'generate' || a.type === 'retake') {
+    await db
+      .collection(COLLECTION)
+      .doc(caller.uid)
+      .set(
+        {
+          generations: FieldValue.increment(1),
+          spendInr: FieldValue.increment(Math.round(a.costInr ?? 0)),
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      )
+      .catch(() => {});
+  }
+}
+
+export async function listActivity(limit = 200, uid?: string): Promise<Activity[]> {
+  ensureFirebase();
+  let q = getFirestore().collection(ACTIVITY).orderBy('at', 'desc').limit(limit);
+  if (uid) q = getFirestore().collection(ACTIVITY).where('uid', '==', uid).limit(limit);
+  const snap = await q.get().catch(() => null);
+  if (!snap) return [];
+  return snap.docs.map((d) => d.data() as Activity).sort((a, b) => b.at - a.at);
 }
 
 const owners = (): string[] =>
@@ -77,21 +129,30 @@ export async function resolveIdToken(token: string): Promise<Caller | null> {
       updatedAt: now,
     };
     await ref.set(created);
-    return {
+    const caller: Caller = {
       uid: decoded.uid,
       email,
       name: created.name,
       photo: created.photo,
       role: created.role,
       isOwner: owner,
-      legacy: false,
     };
+    await recordActivity(caller, { type: 'login', detail: 'first sign-in' });
+    return caller;
   }
 
   const existing = snap.data() as AppUser;
-  // An owner is always an admin, whatever the stored record says — this is the
-  // guarantee that administration cannot be locked out.
-  const role: Role = owner ? 'admin' : (existing.role ?? 'viewer');
+  const returning: Caller = {
+    uid: decoded.uid,
+    email,
+    name: decoded.name ?? existing.name,
+    photo: decoded.picture ?? existing.photo,
+    role: owner ? 'admin' : (existing.role ?? 'viewer'),
+    isOwner: owner,
+  };
+  if (now - (existing.lastSeenAt ?? 0) > LOGIN_GAP_MS) {
+    await recordActivity(returning, { type: 'login' });
+  }
   await ref
     .set(
       {
@@ -105,15 +166,7 @@ export async function resolveIdToken(token: string): Promise<Caller | null> {
     )
     .catch(() => {});
 
-  return {
-    uid: decoded.uid,
-    email,
-    name: decoded.name ?? existing.name,
-    photo: decoded.picture ?? existing.photo,
-    role,
-    isOwner: owner,
-    legacy: false,
-  };
+  return returning;
 }
 
 export async function listUsers(): Promise<AppUser[]> {

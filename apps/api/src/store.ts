@@ -37,6 +37,10 @@ export interface JobClip {
 
 export interface JobRecord {
   jobId: string;
+  /** Who ran it. Every paid action is attributable to a named account. */
+  userId?: string;
+  userEmail?: string;
+  userName?: string;
   /** Which project this generation belongs to — the key to project history. */
   projectId?: string;
   projectName?: string;

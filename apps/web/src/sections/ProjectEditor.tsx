@@ -121,7 +121,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   /** Fill every spoken scene with a real line, then let the designer edit them. */
   const writeScript = async (): Promise<string> => {
     if (!brief || !project) return 'Fill in the brief first.';
-    const r = await genApi.script(brief, language?.id);
+    const r = await genApi.script(brief, language?.id, project.id);
     if (isApiError(r)) return `${r.code}: ${r.message}`;
     if (!r.lines.length) return 'No spoken scenes to write for.';
     const next = { ...project.sceneEdits };

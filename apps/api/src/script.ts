@@ -23,12 +23,40 @@ const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export interface ScriptScene {
   index: number;
   title: string;
-  /** The beat's stage direction — what this moment has to achieve. */
+  /**
+   * What this moment has to ACHIEVE. It is written as camera and blocking
+   * direction ("open outside the showroom, gesturing toward the facade"), which
+   * is exactly what a writer must not put in the presenter's mouth — that is how
+   * a line about a car became a line about a glass facade.
+   */
   direction: string;
   seconds: number;
   words: number;
   /** Exact on-screen card text for this scene, if any. */
   card?: string;
+}
+
+/** What the film is actually selling, and to whom. */
+export interface ScriptSubject {
+  /** The designer's own words for this video. The single most important input. */
+  assignment?: string;
+  useCase: string;
+  /** What this kind of video is for, from the use-case definition. */
+  purpose?: string;
+  /** Failure modes this kind of video is prone to. */
+  avoid?: string[];
+  /** Everything known about the car — this is where specifics come from. */
+  car?: {
+    name?: string;
+    variant?: string;
+    priceLabel?: string;
+    fuel?: string;
+    transmission?: string;
+    colour?: string;
+    highlights?: string[];
+  };
+  /** How the presenter comes across. */
+  presenter?: string;
 }
 
 /** The language rules in force, resolved from the Languages library. */
@@ -46,6 +74,7 @@ export interface ScriptLanguage {
 export interface ScriptRequest {
   scenes: ScriptScene[];
   language: ScriptLanguage;
+  subject: ScriptSubject;
   gender: 'female' | 'male';
   dealerName: string;
   brandModel: string;
@@ -79,10 +108,17 @@ export class ScriptError extends Error {
  * Which text model to use. Asking the API rather than hard-coding a name means
  * this keeps working as model names turn over; the answer is cached per process.
  */
-let cachedTextModel: string | null = null;
+const cachedTextModel: Partial<Record<'write' | 'transform', string>> = {};
 
-export async function resolveTextModel(apiKey: string): Promise<string> {
-  if (cachedTextModel) return cachedTextModel;
+/**
+ * `write` is the ad copy — creative work, worth the best model on the key.
+ * `transform` is the pronunciation pass — a mechanical substitution against a
+ * rulebook at temperature 0, where a fast model is the right tool. Using one
+ * cheap model for both is what produced flat, generic scripts.
+ */
+export async function resolveTextModel(apiKey: string, job: 'write' | 'transform' = 'write'): Promise<string> {
+  const cached = cachedTextModel[job];
+  if (cached) return cached;
   const res = await fetch(`${BASE}/models?pageSize=200`, { headers: { 'x-goog-api-key': apiKey } });
   if (!res.ok) throw new ScriptError('script-models-unavailable', `Could not list Gemini models (${res.status}).`);
   const json = (await res.json()) as {
@@ -94,19 +130,26 @@ export async function resolveTextModel(apiKey: string): Promise<string> {
     // Video, image and embedding models can't write a script.
     .filter((n) => n && !/embed|image|video|omni|veo|imagen|tts|audio/i.test(n));
 
-  // A flash-class text model is the right tool: cheap, fast, good at Hindi.
+  const stable = (n: string): boolean => !/lite|exp|preview|thinking/.test(n);
+  const best = (rx: RegExp): string | undefined =>
+    usable.filter((n) => rx.test(n) && stable(n)).sort().at(-1) ?? usable.filter((n) => rx.test(n)).sort().at(-1);
+
   const pick =
-    usable.filter((n) => /flash/.test(n) && !/lite|thinking|exp|preview/.test(n)).sort().at(-1) ??
-    usable.filter((n) => /flash/.test(n)).sort().at(-1) ??
-    usable.filter((n) => /pro/.test(n)).sort().at(-1) ??
-    usable[0];
+    job === 'write'
+      ? (best(/pro/) ?? best(/flash/) ?? usable[0])
+      : (best(/flash/) ?? best(/pro/) ?? usable[0]);
   if (!pick) throw new ScriptError('script-no-text-model', 'No Gemini text model is available on this key.');
-  cachedTextModel = pick;
+  cachedTextModel[job] = pick;
   return pick;
 }
 
-async function ask(instruction: string, apiKey: string, temperature: number): Promise<string> {
-  const model = await resolveTextModel(apiKey);
+async function ask(
+  instruction: string,
+  apiKey: string,
+  temperature: number,
+  job: 'write' | 'transform',
+): Promise<string> {
+  const model = await resolveTextModel(apiKey, job);
   const res = await fetch(`${BASE}/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
@@ -132,45 +175,74 @@ async function ask(instruction: string, apiKey: string, temperature: number): Pr
 
 function copyInstruction(req: ScriptRequest): string {
   const lang = req.language.name;
+  const sub = req.subject;
+  const car = sub.car ?? {};
   const verbs =
     req.gender === 'female'
-      ? 'The presenter is a woman — use feminine verb forms throughout.'
-      : 'The presenter is a man — use masculine verb forms throughout.';
+      ? 'The presenter is a woman — feminine verb forms throughout.'
+      : 'The presenter is a man — masculine verb forms throughout.';
 
-  const facts = Object.entries(req.facts)
+  const carFacts = [
+    car.name && `Car: ${car.name}`,
+    car.variant && `Variant: ${car.variant}`,
+    car.priceLabel && `Price: ${car.priceLabel}`,
+    car.fuel && `Fuel: ${car.fuel}`,
+    car.transmission && `Transmission: ${car.transmission}`,
+    car.colour && `Colour on camera: ${car.colour}`,
+    car.highlights?.length && `Notable: ${car.highlights.join('; ')}`,
+  ].filter(Boolean) as string[];
+
+  const briefFacts = Object.entries(req.facts)
     .filter(([, v]) => String(v ?? '').trim())
     .map(([k, v]) => `  - ${k}: ${v}`);
 
   return [
-    `You write the spoken lines for short Indian car-dealership ad videos in ${lang}. The lines are performed to camera by a presenter and lip-synced by an AI video model, so each must be exactly what she or he says — no stage directions, no narration about the shot.`,
+    `You are a senior advertising copywriter who writes ${lang} scripts for Indian car dealership films. You are good at this: your lines sound like a real person who knows cars talking to someone who is thinking of buying one.`,
     '',
-    'STYLE',
-    `- Write in ${lang}'s own script — Devanagari for Hindi. This line is what a person reads to check the meaning, so it must be readable ${lang}, never a phonetic respelling and never romanised.`,
-    `- Everyday spoken ${lang} as people actually talk, not written or literary register.`,
-    '- Keep the English words Indians use in English in English: test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, and all brand and model names.',
+    '## THE ASSIGNMENT',
+    sub.assignment?.trim()
+      ? `The client asked for exactly this: "${sub.assignment.trim()}"\nEverything below serves that sentence. If the scene directions and this sentence disagree, this sentence wins.`
+      : `A ${sub.useCase} film.`,
+    `Format: ${sub.useCase}${sub.purpose ? ` — ${sub.purpose}` : ''}`,
+    '',
+    ...(carFacts.length
+      ? ['## THE CAR — this is what you are selling. Use these specifics.', ...carFacts.map((f) => `  ${f}`), '']
+      : []),
+    ...(briefFacts.length ? ['## WHAT THE DEALER GAVE YOU', ...briefFacts, ''] : []),
+    `## THE DEALERSHIP`,
+    `  ${req.dealerName}${req.city ? `, ${req.city}` : ''}`,
+    ...(req.cta ? [`  The film ends on this action: ${req.cta}`] : []),
+    ...(sub.presenter ? [`  Presenter: ${sub.presenter}`] : []),
+    '',
+    '## HOW TO WRITE IT',
+    '',
+    'Write the whole thing as ONE piece with an arc, not a set of captions. It should build: something that makes a person keep watching, then a reason to care, then one clear thing to do.',
+    '',
+    'Rules that separate a good script from a generic one:',
+    '- **Sell the car, not the room.** The scene directions below describe where the CAMERA is and what the presenter DOES. They are not the subject of the line. "Open outside the showroom, gesturing at the facade" means she is standing outside — it does NOT mean she talks about the facade. Nobody buys a car because a building has a glass front.',
+    '- **Be specific or say nothing.** One real fact — a price, a number, a feature, a colour, a use — beats three adjectives. "शानदार", "बहुत अच्छा", "premium experience" are empty; cut them.',
+    '- **Name the car early.** By the end of the first line the viewer should know which car this is about.',
+    '- **No greeting-card openings.** Do not open with "स्वागत है", "नमस्ते दोस्तों", "आज मैं आपको दिखाने लाई हूँ". Open with something the viewer wants to know.',
+    '- **Talk to one person**, not "everyone". No "फैमिली के लिए" filler unless the brief is about families.',
+    '- **One idea per line, and lines that connect.** Line two should follow from line one, not restart.',
+    '- **Earn the CTA.** The last line asks for the action, and it lands because the lines before it gave a reason.',
     `- ${verbs}`,
-    '- Short, natural sentences. One idea per line. No lists. Never repeat a phrase across lines.',
+    `- Everyday spoken ${lang}. Keep in English the words Indians say in English: test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, and every brand and model name.`,
+    '- Never invent a price, EMI, discount, mileage, interest rate or waiting period. Use only the facts above. Numbers are written as spoken words, never digits, and never the word "rupees" or the ₹ symbol.',
+    ...(sub.avoid?.length
+      ? ['', 'This format fails when it does these — do not:', ...sub.avoid.map((a) => `  - ${a}`)]
+      : []),
     '',
-    'ACCURACY',
-    '- Use only the facts given below. Never invent a price, EMI, discount, mileage, interest rate or waiting period.',
-    '- Write numbers as words, the way they are spoken, never as digits, and never say the word "rupees" or use the ₹ symbol.',
-    '',
-    'CONTEXT',
-    `- Dealership: ${req.dealerName}`,
-    `- Car: ${req.brandModel}`,
-    ...(req.city ? [`- City: ${req.city}`] : []),
-    ...(req.cta ? [`- Call to action for the closing line: ${req.cta}`] : []),
-    ...(facts.length ? ['- Facts you may quote:', ...facts] : []),
-    ...(req.direction ? ['', 'EXTRA DIRECTION', req.direction] : []),
-    '',
-    'THE SCENES',
-    'Write one line per scene. Each must fit its word budget at a natural, unhurried pace — over budget means the delivery gets rushed and the lip-sync breaks.',
+    '## THE SCENES',
+    'One line per scene, in order, each within its word budget at an unhurried pace. The direction tells you what the moment is FOR; you decide what she says.',
     ...req.scenes.map(
-      (s) =>
-        `Scene ${s.index} — "${s.title}" · ${s.seconds}s · at most ${s.words} words${
-          s.card ? ` · on-screen card reads "${s.card}"` : ''
-        }\n  What this moment has to do: ${s.direction}`,
+      (sc) =>
+        `\nScene ${sc.index} — ${sc.title} · ${sc.seconds}s · at most ${sc.words} words${
+          sc.card ? ` · an on-screen card reads "${sc.card}", so do not say it aloud` : ''
+        }\n  The moment's job: ${sc.direction}`,
     ),
+    '',
+    'Before you answer, read your lines back. If any line would work for a different dealership, a different car, or a different city, it is too generic — rewrite it.',
     '',
     'Return JSON only: an array of {"index": <scene index>, "line": "<the spoken line>"}. One object per scene, in order. No commentary.',
   ].join('\n');
@@ -235,14 +307,14 @@ export async function writeScript(
 ): Promise<{ model: string; lines: ScriptLine[] }> {
   if (!req.scenes.length) return { model: '', lines: [] };
 
-  const copy = parseRows(await ask(copyInstruction(req), apiKey, 0.85), 'line').map((r) => ({
+  const copy = parseRows(await ask(copyInstruction(req), apiKey, 1.0, 'write'), 'line').map((r) => ({
     index: r.index,
     line: r.text,
   }));
   if (!copy.length) throw new ScriptError('script-unparseable', 'The model did not return any usable lines.');
 
   const lines = await addPhonetics(copy, req.language, apiKey);
-  return { model: await resolveTextModel(apiKey), lines };
+  return { model: await resolveTextModel(apiKey, 'write'), lines };
 }
 
 /**
@@ -263,7 +335,7 @@ export async function addPhonetics(
 
   // Temperature 0: this is a transform against a rulebook, not a creative step.
   const said = new Map(
-    parseRows(await ask(phoneticInstruction(usable, language), apiKey, 0), 'say').map((r) => [
+    parseRows(await ask(phoneticInstruction(usable, language), apiKey, 0, 'transform'), 'say').map((r) => [
       r.index,
       r.text,
     ]),

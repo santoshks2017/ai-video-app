@@ -324,7 +324,9 @@ app.post<{ Body: { lines?: { index: number; line: string }[]; languageId?: strin
   },
 );
 
-app.post<{ Body: { brief?: Brief; languageId?: string } }>('/api/script', async (req, reply) => {
+app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
+  '/api/script',
+  async (req, reply) => {
   const brief = req.body?.brief;
   if (!brief || !Array.isArray(brief.categories) || !brief.categories.length) {
     return reply.code(400).send({ code: 'bad-request', message: 'A brief with at least one use case is required.' });
@@ -369,11 +371,44 @@ app.post<{ Body: { brief?: Brief; languageId?: string } }>('/api/script', async 
       .send({ code: 'script-no-key', message: 'Writing the script needs a Google Gemini key. Add one in APIs & models.' });
   }
 
+  // A copywriter needs the product, not just its name. Pull the real variant off
+  // the car record — price, fuel, gearbox — so the script can be specific instead
+  // of reaching for adjectives.
+  const project = req.body?.projectId
+    ? await getOne<Record<string, any>>('projects', req.body.projectId)
+    : null;
+  let carSubject: Record<string, unknown> | undefined;
+  if (project?.carId) {
+    const car = await getOne<Record<string, any>>('cars', project.carId).catch(() => null);
+    if (car) {
+      const variant = (car.variants ?? []).find((v: any) => v.name === project.carVariant);
+      carSubject = {
+        name: [car.brand, car.model].filter(Boolean).join(' '),
+        variant: variant?.name ?? project.carVariant,
+        priceLabel: variant?.priceLabel ?? variant?.price,
+        fuel: variant?.fuel,
+        transmission: variant?.transmission,
+        colour: project.carColour,
+        highlights: (car.highlights ?? []).slice(0, 5),
+      };
+    }
+  }
+  const primary = CATEGORY_BY_ID[brief.categories[0]!];
+
   try {
     const out = await writeScript(
       {
         scenes,
         language: await resolveLanguage(req.body?.languageId),
+        subject: {
+          // The designer's own sentence outranks everything the templates assume.
+          assignment: project?.prompt,
+          useCase: brief.categories.map((c) => CATEGORY_BY_ID[c]?.label ?? c).join(' + '),
+          purpose: primary?.purpose,
+          avoid: primary?.avoid,
+          car: carSubject as never,
+          presenter: [brief.actor?.style, brief.actor?.age].filter(Boolean).join(', ') || undefined,
+        },
         gender: brief.actor?.gender === 'male' ? 'male' : 'female',
         dealerName: ctx.brief.dealer.fictionalize
           ? ctx.brief.dealer.fakeDealer || ctx.brief.dealer.dealerName
@@ -393,7 +428,8 @@ app.post<{ Body: { brief?: Brief; languageId?: string } }>('/api/script', async 
     const err = e as ScriptError;
     return reply.code(err.status ?? 502).send({ code: err.code ?? 'script-failed', message: err.message });
   }
-});
+  },
+);
 
 /** Check a saved key without spending anything on a generation. */
 app.post<{ Params: { id: string } }>('/api/credentials/:id/test', async (req, reply) => {

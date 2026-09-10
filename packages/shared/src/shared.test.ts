@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   emptyBrief,
   buildPrompt,
+  overlayCards,
   runChecks,
   estimateCost,
   planScenes,
@@ -89,10 +90,33 @@ test('gender locks the correct Hindi verb forms', () => {
   assert.match(female.parts[0]!.text, /feminine Hindi verb forms/);
 });
 
-test('on-screen strings are emitted as an exact-spelling lock', () => {
-  const res = buildPrompt(base())!;
-  assert.match(res.parts[0]!.text, /ON-SCREEN TEXT — EXACT STRINGS/);
-  assert.match(res.parts[0]!.text, /Render these strings EXACTLY as written/);
+test('on-screen text is composited, never handed to the video model', () => {
+  const b = base({
+    categories: ['offer'],
+    narration: 'presenter',
+    durationSec: 24,
+    maxChunkSec: 30,
+    fieldValues: { offer: { cashDiscount: 'Rs 40,000 Cash Discount', warrantyYears: '5 years', warrantyKm: 'Unlimited' } },
+  });
+  const res = buildPrompt(b)!;
+  const text = res.parts.map((p) => `${p.text}\n${p.continuationText}`).join('\n');
+  const cards = overlayCards(res.scenePlan);
+
+  // Every card is still written — it just goes to post, not to the model.
+  assert.ok(cards.length >= 2, 'offer brief should produce cards');
+  assert.ok(cards.some((c) => c.text === 'Rs 40,000' && c.sub === 'Cash Discount'));
+  assert.doesNotMatch(text, /ON-SCREEN TEXT — EXACT STRINGS/);
+  for (const c of cards) {
+    assert.ok(!text.includes(c.text), `"${c.text}" leaked into the prompt`);
+    if (c.sub) assert.ok(!text.includes(c.sub), `"${c.sub}" leaked into the prompt`);
+  }
+
+  // Timings are per-part and inside their part, because the parts are rendered
+  // separately and crossfaded together afterwards.
+  for (const c of cards) {
+    assert.ok(c.part >= 1 && c.part <= res.parts.length, 'card names a real part');
+    assert.ok(c.start >= 0 && c.end > c.start && c.end <= c.partSeconds + 0.05, 'card sits inside its part');
+  }
 });
 
 test('every use case is automated — the prompt-only split was dropped', () => {
@@ -116,8 +140,9 @@ test('the model is told to leave branding furniture out of the frame', () => {
   // must not ask the model to draw them.
   const res = buildPrompt(base())!;
   const text = res.parts.map((p) => p.text).join('\n');
-  assert.match(text, /CLEAN FRAME/);
-  assert.match(text, /no bottom footer bar/);
+  assert.match(text, /Leave the frame CLEAN/);
+  assert.match(text, /no footer bar/);
+  assert.match(text, /NO text of any kind anywhere/);
   assert.doesNotMatch(text, /PERSISTENT BRANDING/);
 });
 
@@ -240,11 +265,13 @@ test('language rules drive the prompt, not hard-coded Hindi', () => {
   const hi = buildPrompt(brief(hindi), { sceneOverrides: overrides })!.parts[0]!.text;
   const en = buildPrompt(brief(english), { sceneOverrides: overrides })!.parts[0]!.text;
 
-  // The language names itself, and its on-screen rules travel with the prompt.
+  // The language names itself. Its ON-SCREEN rules deliberately do not travel
+  // with the prompt any more: the model draws no text at all, so shipping it
+  // typography rules is pure prompt weight.
   assert.match(hi, /Spoken language: Hindi/);
   assert.match(en, /Spoken language: English/);
-  assert.match(hi, /Hindi on-screen text rules/);
-  assert.match(en, /English on-screen text rules/);
+  assert.doesNotMatch(hi, /Hindi on-screen text rules/);
+  assert.doesNotMatch(en, /English on-screen text rules/);
 
   // A language written the way it is said gets no respelling explainer, and
   // pre-flight never nags it for a pronunciation spelling it does not need.

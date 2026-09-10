@@ -11,6 +11,7 @@ import { WORDS_PER_SECOND } from './constants.js';
 import { buildContext, type RenderContext } from './context.js';
 import { buildBeats, collectStrings } from './buildBeats.js';
 import { planScenes, fmtTime } from './planScenes.js';
+import type { ScenePlan } from './types.js';
 import { CATEGORY_BY_ID } from './categories.js';
 import { rulebookText } from './rulebook.js';
 
@@ -21,7 +22,7 @@ import { rulebookText } from './rulebook.js';
  * our overlay and show through at the edges.
  */
 const CLEAN_FRAME =
-  'Leave the frame CLEAN of any branding furniture: no bottom footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, no lower third, no channel bug, no subtitles and no end card. Those are added afterwards in post. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so overlays can sit there.';
+  'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. Signage that genuinely exists in the location (a showroom fascia, a number plate) is part of the scene and is fine; invented graphics are not.';
 
 function spokenLock(brief: Brief): string {
   const lang = brief.language?.name ?? 'Hindi';
@@ -39,8 +40,8 @@ function spokenLock(brief: Brief): string {
       '- CAPITALS mark the stressed syllable. Give it the stress; do not shout it, and do not treat capitals as an acronym to be spelled letter by letter.',
       '- Doubled vowels are long vowels: "AAJ" is aaj, "DRAAIV" is drive, "ee" is a long e.',
       '- An em dash is a short breath, not a spoken word.',
-      '- English loanwords are respelled the way an Indian presenter says them: "dis-KAAUNT" is discount, "MO-tarz" is Motors, "TEST DRAAIV" is test drive.',
-      '- CRITICAL: this respelling is for the VOICE ONLY. Never render any of it as on-screen text, a subtitle, a caption or a graphic. Nothing with hyphens or mid-word capitals may ever appear on screen. On-screen text comes only from the exact strings listed separately below.',
+      '- Numbers, prices and units are already plain English — "fifteen lakh four thousand", "six airbags" — and are read as ordinary English.',
+      '- CRITICAL: this is for the VOICE ONLY. Never render any of it as on-screen text, a subtitle or a caption. Nothing with hyphens or mid-word capitals may ever appear on screen.',
     );
   }
   return lines.join('\n');
@@ -261,23 +262,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       L.push(spokenLock(brief));
     }
 
-    const strings = collectStrings(scenes);
-    if (strings.length) {
-      L.push('');
-      L.push('## ON-SCREEN TEXT — EXACT STRINGS');
-      if (brief.language?.writtenGuide?.trim()) {
-        L.push(brief.language.writtenGuide.trim());
-      }
-      L.push(
-        "Render these strings EXACTLY as written: same spelling, spacing, punctuation, case and symbols. Do not paraphrase, translate, abbreviate, re-spell or 'correct' them. Misspelled on-screen text is the single most common failure in this format.",
-      );
-      strings.forEach((s, i) => L.push(`${i + 1}. "${s}"`));
-      L.push(textLangLine(brief.textLang));
-      L.push(
-        'Keep each card to one short headline plus at most one smaller sub-line. Never stack more than two text elements on screen at once.',
-      );
-      L.push(`Copy tone: ${brief.captionStyle} (${brief.dealer.tier} dealer).`);
-    }
+    // On-screen text used to be listed here for the model to draw. It is now
+    // composited in post — see overlayCards() — because a video model garbles
+    // small text, and a garbled price card makes the whole take unusable.
+    L.push('');
+    L.push(`Copy tone: ${brief.captionStyle} (${brief.dealer.tier} dealer).`);
 
     L.push('');
     L.push('## VISUAL STYLE');
@@ -323,13 +312,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       } else if (dialogue) {
         L.push(`Story beat, told visually with no speech: ${dialogue}`);
       }
-      if (sc.beat.card) {
-        L.push(`On-screen card, headline: "${sc.beat.card}"`);
-        if (sc.beat.cardSub) L.push(`On-screen card, sub-line under it: "${sc.beat.cardSub}"`);
-      }
-      if (sc.beat.cardLines && sc.beat.cardLines.length) {
-        L.push('On-screen text, stacked and centred, one line per row:');
-        sc.beat.cardLines.forEach((line, li) => L.push(`  Line ${li + 1}: "${line}"`));
+      if (sc.beat.card || sc.beat.cardLines?.length) {
+        // Room, not words: a caption is laid over this moment in post.
+        L.push(
+          'A caption is composited over this shot afterwards — leave the lower third uncluttered and draw no text here yourself.',
+        );
       }
       if (sc.beat.note) L.push(`Note: ${sc.beat.note}`);
       L.push('---');
@@ -448,10 +435,10 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
               : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(sc.duration)} words, composed from this intent: ${d}`,
         );
       }
-      if (sc.beat.card) C.push(`  On-screen card: "${sc.beat.card}"${sc.beat.cardSub ? ` / "${sc.beat.cardSub}"` : ''}`);
-      (sc.beat.cardLines ?? []).forEach((line) => C.push(`  On-screen line: "${line}"`));
+      if (sc.beat.card || sc.beat.cardLines?.length) {
+        C.push('  A caption is composited over this shot afterwards — leave the lower third clear, draw no text.');
+      }
     });
-    const contStrings = collectStrings(scenes);
     C.push('');
     if (
       ctx.mode.speaks &&
@@ -462,17 +449,6 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     ) {
       C.push(spokenLock(brief));
       C.push('');
-    }
-    C.push('## ON-SCREEN TEXT — EXACT STRINGS (do not render anything else as text)');
-    if (contStrings.length) {
-      C.push(
-        "Render these strings EXACTLY as written — same spelling, spacing, punctuation, case and symbols. Do not paraphrase, translate, abbreviate, re-spell or 'correct' them. Garbled on-screen text is the most common failure in this format:",
-      );
-      contStrings.forEach((s, i) => C.push(`${i + 1}. "${s}"`));
-      C.push(textLangLine(brief.textLang));
-      C.push('One short headline plus at most one smaller sub-line per card. Never more than two text elements on screen at once.');
-    } else {
-      C.push('No on-screen text cards in this segment — no text of any kind on screen.');
     }
     C.push(CLEAN_FRAME);
     if (mode.speaks) C.push('Same pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
@@ -492,6 +468,62 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
   }
 
   return { parts: partsOut, scenePlan: plan, context: ctx };
+}
+
+/**
+ * The text cards, with the moment each belongs to.
+ *
+ * These used to be listed in the prompt for the video model to draw, and it
+ * garbled them — a misspelled price card makes a whole take unusable. They are
+ * composited in post instead, which is why they carry timings.
+ *
+ * Times are relative to the card's own PART, because a part is one generated
+ * segment and the segments are crossfaded together afterwards; absolute times
+ * would drift by the length of every dissolve before them. The end card is
+ * excluded: it is a full frame of its own, built separately.
+ */
+export interface OverlayCard {
+  text: string;
+  sub?: string;
+  /** 1-based part, matching PromptPart.partNum and the segment rendered for it. */
+  part: number;
+  /** Seconds from the start of that part. */
+  start: number;
+  end: number;
+  /** The length that part was planned at, so a short render still lines up. */
+  partSeconds: number;
+}
+
+export function overlayCards(plan: ScenePlan): OverlayCard[] {
+  const out: OverlayCard[] = [];
+  for (let p = 0; p < plan.parts; p++) {
+    const scenes = plan.scenes.filter((s) => s.part === p);
+    if (!scenes.length) continue;
+    const partStart = scenes[0]!.start;
+    const partSeconds = Math.round((scenes[scenes.length - 1]!.end - partStart) * 10) / 10;
+
+    for (const sc of scenes) {
+      if (sc.beat.isEndCard) continue;
+      const headline = sc.beat.card?.trim();
+      const stacked = (sc.beat.cardLines ?? []).map((l) => l.trim()).filter(Boolean);
+      const text = headline || stacked[0];
+      if (!text) continue;
+      // A caption that covers its whole shot is wallpaper. Hold it off the cut
+      // at either end so the picture is seen before the words arrive.
+      const lead = Math.min(0.4, sc.duration * 0.1);
+      out.push({
+        text,
+        sub: headline
+          ? sc.beat.cardSub?.trim() || undefined
+          : stacked.slice(1).join(' · ') || undefined,
+        part: p + 1,
+        start: Math.round((sc.start - partStart + lead) * 10) / 10,
+        end: Math.round((sc.end - partStart - lead) * 10) / 10,
+        partSeconds,
+      });
+    }
+  }
+  return out;
 }
 
 export function joinPromptParts(parts: PromptPart[]): string {

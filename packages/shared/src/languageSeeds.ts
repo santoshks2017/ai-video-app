@@ -29,9 +29,11 @@ the exception you have to justify.
 
 Respell a word ONLY if one of these is true:
 - It is in the locked-spellings list you are given.
-- It is a number, price or currency amount (the highest-stakes words in an ad).
 - It is a Hindi word with a real trap: a dropped schwa (करना is KAR-na, not
   ka-ra-na), a long vowel that changes the word, or a stress that lands wrong.
+
+NUMBERS ARE NEVER RESPELLED. Prices, quantities and units are written in plain
+English words — see section 3.
 
 NEVER respell these — leave them exactly as written:
 - English words and phrases. Models read "test drive", "showroom", "glass
@@ -40,6 +42,7 @@ NEVER respell these — leave them exactly as written:
 - Brand, model, dealership and place names: Tata Punch, Jasper Cars, New Delhi,
   Byte Vanta X. Models know these. TAA-taa PANCH and NYOO DEL-ee are wrong.
 - Function words: का की के, को, से, में, पर, और, तो, ही, अपनी, अपना.
+- Any number, price, quantity or unit: those are English words, not respellings.
 - Any Hindi word you are not confident is mispronounced by default.
 
 Expect to change only a handful of words in a line — often none at all. If you
@@ -51,7 +54,7 @@ put the rest back.
 | Failure | Cause | Fix |
 |---|---|---|
 | Wrong vowel length ("बात" read like "but", not "baat") | Roman \`a\` is ambiguous between अ (short) and आ (long) | When you do respell, mark long vowels: \`aa\`, \`ee\`, \`oo\` |
-| Flat or foreign stress, worst on numbers and offer words | English TTS applies English stress rules | Mark the stressed syllable in CAPS |
+| Flat or foreign stress on Hindi words | English TTS applies English stress rules | Mark the stressed syllable in CAPS |
 | Over-pronounced words ("करता" as ka-ra-ta, 3 beats, not kar-ta, 2) | Devanagari does not mark that Hindi drops the inherent vowel in speech | Spell the word as SPOKEN, never as Devanagari is structured |
 
 ## 2. The encoding system
@@ -112,32 +115,28 @@ The only exception is a specific word you have HEARD the model mispronounce. Add
 that one word to the locked-spellings list with its fix, so it is corrected the
 same way in every video — and leave every other English word alone.
 
-## 3. Numbers and currency — the highest-stakes lines
+## 3. Numbers and currency — say them in ENGLISH
 
-### 3.1 Base numbers
-1 EK · 2 DO · 3 TEEN · 4 CHAAR · 5 PAANCH · 6 CHHE · 7 SAAT · 8 AATH · 9 NAU · 10 DAS
-11 GYAA-rah · 12 BAA-rah · 13 TE-rah · 14 CHAU-dah · 15 PAN-drah · 16 SO-lah
-17 SAT-rah · 18 a-THAA-rah · 19 un-NEES · 20 BEES
+Do NOT respell numbers phonetically. "pandrah LAAKH chaar ha-ZAAR" does not work:
+models mangle it, and a price is the one line in a car ad that has to land. Write
+every number, price and unit in plain English words, in Latin letters, inside the
+Devanagari sentence.
 
-### 3.2 Tens
-20 BEES · 25 pach-CHEES · 30 TEES · 40 CHAA-lees · 50 pa-CHAAS
-60 SAATH · 70 SAT-tar · 75 pa-CHAT-tar · 80 AS-see · 90 NAB-be
-Hindi 21–99 are irregular, not compositional — say the number aloud and
-transcribe that rather than assembling it from parts.
+  Right: यह automatic variant fifteen lakh four thousand का है।
+  Wrong: यह automatic variant pandrah LAAKH chaar ha-ZAAR का है।
+  Wrong: यह automatic variant पंद्रह लाख चार हज़ार का है।
 
-### 3.3 Indian multipliers
-Car prices are always spoken in lakh and crore, never as thousands-grouped
-numbers. This is the most common mispronunciation in dealer ads.
-100 सौ → SAU · 1,000 हज़ार → ha-ZAAR · 1 lakh लाख → LAAKH · 1 crore करोड़ → ka-ROD
-
-Pattern: [number] LAAKH [number] ha-ZAAR ru-PAY-ye
-2,25,000 → do LAAKH pach-CHEES ha-ZAAR ru-PAY-ye
-8,50,000 → AATH LAAKH pa-CHAAS ha-ZAAR ru-PAY-ye
-12,00,000 → BAA-rah LAAKH ru-PAY-ye
-
-### 3.4 Currency and finance
-रुपये → ru-PAY-ye · तक → tak · से शुरू → se sha-ROO · प्रति माह → PRA-ti maah
-हर महीने → har ma-HEE-ne · डाउन पेमेंट → DAAUN PAY-ment · EMI → leave as letters
+Rules:
+- Numbers as English words, lower case, no hyphens and no stress capitals:
+  "fifteen lakh four thousand", "eight lakh fifty thousand", "twelve lakh".
+- Indian scale words stay English too: lakh, crore, thousand, hundred.
+- Never digits and never the ₹ symbol — those are read out unpredictably.
+- Never say "rupees"; the number alone is how a showroom says a price.
+- Units and technical terms stay English as well: kmpl, cc, bhp, Nm, mm, litre,
+  airbags, EMI, down payment, on-road price.
+  "six airbags", "one ninety three mm ground clearance", "seventy kmpl".
+- Ordinary Hindi words around them still follow the rules above: only the
+  number and the unit are English.
 
 ## 4. Output checklist
 - Most of the line came through unchanged. Fewer than a quarter of the words were
@@ -146,7 +145,8 @@ Pattern: [number] LAAKH [number] ha-ZAAR ru-PAY-ye
 - No function word was respelled.
 - In the words you DID respell: long vowels marked (aa / ee / oo), aspirated
   consonants keep their h, and no schwa written that is dropped in speech.
-- Prices are spoken words in the Indian system, never digits or the ₹ symbol.`;
+- Every number, price and unit is plain English words in Latin letters — no
+  phonetic respelling, no digits, no ₹ symbol.`;
 
 const HINDI_WRITTEN = `# Hindi on-screen text rules
 
@@ -254,10 +254,10 @@ const HINDI_GLOSSARY: LanguageProfile['glossary'] = [
   { term: 'Shubh / auspicious', say: 'SHUBH', group: 'Festival' },
 
   // --- money ---
-  { term: 'Rupaye', say: 'ru-PAY-ye', group: 'Money' },
-  { term: 'Lakh', say: 'LAAKH', group: 'Money' },
-  { term: 'Hazaar', say: 'ha-ZAAR', group: 'Money' },
-  { term: 'Crore', say: 'ka-ROD', group: 'Money' },
+  { term: 'Rupaye', say: 'rupaye', mode: 'english', note: 'Numbers stay English.', group: 'Money' },
+  { term: 'Lakh', say: 'lakh', mode: 'english', note: 'Numbers stay English.', group: 'Money' },
+  { term: 'Hazaar', say: 'thousand', mode: 'english', note: 'Numbers stay English.', group: 'Money' },
+  { term: 'Crore', say: 'crore', mode: 'english', note: 'Numbers stay English.', group: 'Money' },
   { term: 'Se shuru / starting from', say: 'se sha-ROO', group: 'Money' },
   { term: 'Har maheene / every month', say: 'har ma-HEE-ne', group: 'Money' },
   { term: 'Down payment', say: 'down payment', mode: 'english', group: 'Money' },

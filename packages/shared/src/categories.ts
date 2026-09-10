@@ -486,7 +486,7 @@ export const CATEGORIES: CategoryDef[] = [
     avoid: [
       'Percentage-off framing — use "up to ₹X" instead',
       'Vague "great offer" language',
-      'More than three number cards in one video — the model drops the extras',
+      'More than three number cards in one video — the viewer remembers none of them',
     ],
     fields: [
       { id: 'cashDiscount', label: 'Cash discount — amount only', type: 'text', ph: 'e.g. ₹2,25,000' },

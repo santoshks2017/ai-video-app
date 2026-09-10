@@ -1,10 +1,19 @@
 # Changelog
 
-Current version: **2.0**
+Current version: **2.1**
 
 Minor bumps for every shipped change; the major number moves only for an
 overhaul of how the app works. Generated from `packages/shared/src/changelog.ts`
 — edit that, then run `npm run changelog`.
+
+## 2.1 — On-screen text is composited, not generated
+_2026-09-10_
+
+- Every caption — the offer figure, the warranty card, the CTA — is now laid over the finished video in post, like the logos and the end card. The video model is told to draw no text at all, so a price can no longer come back misspelled, cropped or in the wrong alphabet.
+- Captions are timed to their own scene, fade in and out, and sit above the footer bar. A segment that renders shorter than requested pulls its captions in with it instead of stranding them.
+- Numbers, prices and units stay in plain English throughout — "fifteen lakh four thousand", not "pandrah LAAKH chaar ha-ZAAR". The pronunciation pass was respelling figures and the models were reading the respelling literally.
+- Fixed a stitching failure that could lose a whole paid run: clips coming back at a different frame rate from the end card were rejected outright by the compositor.
+- Pre-flight no longer warns that the model may drop or garble a card, because it cannot any more. It warns when cards come too fast to read instead.
 
 ## 2.0 — Bikes, whole-brand sync, and your own account
 _2026-09-09_

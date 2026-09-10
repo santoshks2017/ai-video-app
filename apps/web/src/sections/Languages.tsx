@@ -119,8 +119,8 @@ export function LanguagesSection() {
       >
         <div className="section-desc">
           The rules for how each language is spoken and written in a video. Only languages switched on here can be
-          picked on a project, and the guides below are sent to the models — this is where delivery gets fixed,
-          not in the code.
+          picked on a project. The spoken guide is sent to the models — this is where delivery gets fixed, not in
+          the code.
         </div>
         {note && <Banner kind="ok">{note}</Banner>}
         <PickList
@@ -253,7 +253,7 @@ export function LanguagesSection() {
           {tab === 'written' && (
             <Field
               label="On-screen text rules"
-              hint="Goes into the video prompt beside the exact strings — how cards, the footer and the end card must be set in this language."
+              hint="The house standard for how cards, the footer and the end card are worded and set in this language. Read by whoever writes the text — the video model never sees it, because it no longer draws any text."
             >
               <textarea
                 className="guide"
@@ -334,8 +334,10 @@ export function LanguagesSection() {
               call and leaves approved copy untouched.
             </p>
             <p>
-              <b>On-screen text rules</b> are injected into the video prompt next to the exact card strings, so a
-              language that garbles at length or in a particular script can say so once, here.
+              <b>On-screen text rules</b> are the written standard for this language. Every word the viewer reads —
+              the captions, the footer strip, the end card — is composited after generation rather than drawn by the
+              video model, so spelling and legibility are no longer at risk; what these rules govern is wording,
+              length and which script the text is set in.
             </p>
             <p>
               <b>Glossary</b> entries are applied before any rule is derived. This is what stops the same brand

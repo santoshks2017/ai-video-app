@@ -57,10 +57,19 @@ export function emptyProject(): Project {
   };
 }
 
+/** The vehicles a project features, including the older single-car field. */
+export function projectVehicleIds(project: Pick<Project, 'carId' | 'carIds'>): string[] {
+  const ids = project.carIds?.length ? project.carIds : project.carId ? [project.carId] : [];
+  return [...new Set(ids.filter(Boolean))];
+}
+
 export interface ComposeInputs {
   client?: ClientProfile | null;
   actor?: ActorProfile | null;
+  /** The hero vehicle. */
   car?: CarModelProfile | null;
+  /** Every vehicle the film features, hero first. */
+  vehicles?: CarModelProfile[];
   instructions?: GlobalInstruction[];
   /** The project's chosen language — its rules travel with the brief. */
   language?: LanguageProfile | null;
@@ -139,7 +148,10 @@ export function brandMatches(a: string | undefined, b: string | undefined): bool
 }
 
 export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brief {
-  const { client, actor, car, instructions, language } = inputs;
+  const { client, actor, instructions, language } = inputs;
+  // Hero first, then any others the dealer wants in the same film.
+  const vehicles = (inputs.vehicles?.length ? inputs.vehicles : inputs.car ? [inputs.car] : []).filter(Boolean);
+  const car = vehicles[0] ?? null;
   const b = emptyBrief();
   const s = project.spec;
 
@@ -199,7 +211,10 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
 
   if (car) {
     b.modelSpecific = true;
-    b.carModel = [car.brand, car.model, project.carVariant].filter(Boolean).join(' ');
+    b.carModel = [car.brand, car.model, vehicles.length === 1 ? project.carVariant : ''].filter(Boolean).join(' ');
+    if (vehicles.length > 1) {
+      b.alsoFeatured = vehicles.slice(1).map((v) => `${v.brand} ${v.model}`);
+    }
   } else if (client?.brand?.trim()) {
     // No model picked. Rather than leave the video model to invent one — which
     // is how an outdated generation ends up on screen — hand it the brand's
@@ -216,9 +231,15 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
 
   // Reference images, most-specific first: car → client logo/photos → project extras.
   const attachments: DealerPhoto[] = [];
-  if (car) {
-    for (const img of carReferenceImages(car, project.carVariant, project.carColour)) {
+  if (vehicles.length) {
+    // The hero gets its variant and colour; the others contribute one shot each
+    // so the model knows what they look like without swamping the reference set.
+    for (const img of carReferenceImages(car!, project.carVariant, project.carColour)) {
       attachments.push(toDealerPhoto(img, 'car-model'));
+    }
+    for (const v of vehicles.slice(1)) {
+      const first = carReferenceImages(v)[0];
+      if (first) attachments.push(toDealerPhoto(first, 'car-model'));
     }
   } else if (b.lineup) {
     // One shot each from a few models in the range: enough to fix the brand's

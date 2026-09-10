@@ -197,6 +197,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
             : `This showroom sells cars. No motorcycles or scooters anywhere in the film, including in the background — ${brief.lineup.brand} badges both, and the wrong one on screen makes the film unusable.`,
         );
       }
+      if (brief.modelSpecific && brief.alsoFeatured?.length) {
+        L.push(
+          `This film features more than one vehicle: ${[brief.carModel, ...brief.alsoFeatured].join(', ')}. Give each its own moment on screen and keep every one of them true to its supplied reference images — do not blend two models into one vehicle.`,
+        );
+      }
       if (brief.modelSpecific && brief.carModel) {
         L.push(
           `Car model: ${brief.carModel}. Match the current-generation ${brief.carModel} exactly as shown in the supplied car-model reference set — body shape, face, lamps, wheels and proportions. Do not substitute an older generation or invent a design.`,

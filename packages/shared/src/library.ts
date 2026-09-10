@@ -248,7 +248,13 @@ export interface Project {
   /** Tags — every project is filed under these for search. */
   clientId?: string;
   actorId?: string;
+  /** The hero vehicle. Kept for projects created before multi-select. */
   carId?: string;
+  /**
+   * Every vehicle the film features. A dealer promoting two models in one video
+   * needs both; the first is the hero and carries the variant and colour.
+   */
+  carIds?: string[];
   carVariant?: string;
   carColour?: string;
   useCases: CategoryId[];

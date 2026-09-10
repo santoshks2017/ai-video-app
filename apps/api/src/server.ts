@@ -539,8 +539,11 @@ app.get<{ Querystring: { brand?: string; kind?: VehicleKind } }>(
   async (req, reply) => {
     const typed = (req.query?.brand ?? '').trim();
     if (!typed) return reply.code(400).send({ code: 'bad-request', message: 'brand is required' });
-    const known = BRAND_CATALOGUE.find((x) => x.slug === typed || brandMatches(x.name, typed));
-    const kind: VehicleKind = req.query?.kind ?? known?.kind ?? 'car';
+    const asked = BRAND_CATALOGUE.find((x) => x.slug === typed || brandMatches(x.name, typed));
+    const kind: VehicleKind = req.query?.kind ?? asked?.kind ?? 'car';
+    // Only borrow the catalogue's display name when the vehicle type agrees:
+    // "Suzuki" under bikes was being labelled "Maruti Suzuki" via the car alias.
+    const known = asked?.kind === kind ? asked : undefined;
     const found = await listBrandModels(typed, kind, known?.alsoPages ?? []);
     return { brand: { name: known?.name ?? typed, slug: found.slug, kind }, items: found.items };
   },
@@ -558,8 +561,11 @@ app.post<{ Body: { brand?: string; kind?: VehicleKind; limit?: number; refresh?:
   async (req, reply) => {
     const typed = (req.body?.brand ?? '').trim();
     if (!typed) return reply.code(400).send({ code: 'bad-request', message: 'brand is required' });
-    const known = BRAND_CATALOGUE.find((x) => x.slug === typed || brandMatches(x.name, typed));
-    const kind: VehicleKind = req.body?.kind ?? known?.kind ?? 'car';
+    const asked = BRAND_CATALOGUE.find((x) => x.slug === typed || brandMatches(x.name, typed));
+    const kind: VehicleKind = req.body?.kind ?? asked?.kind ?? 'car';
+    // Only borrow the catalogue's display name when the vehicle type agrees:
+    // "Suzuki" under bikes was being labelled "Maruti Suzuki" via the car alias.
+    const known = asked?.kind === kind ? asked : undefined;
     const found = await listBrandModels(typed, kind, known?.alsoPages ?? []);
     if (!found.items.length) {
       return reply.code(404).send({

@@ -1181,3 +1181,25 @@ textarea.guide {
 .syncrow.ok { background: var(--good-wash); }
 .syncrow.warn { background: var(--warn-wash); }
 .syncrow.bad { background: var(--bad-wash); }
+
+/* ---- vehicle picker: several models per film, scoped to the client's brand ---- */
+.vehpick > summary {
+  cursor: pointer; list-style: none; padding: 8px 10px; font-size: 13.5px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vehpick > summary::-webkit-details-marker { display: none; }
+.vehpick > summary::after { content: ' ▾'; color: var(--ink-faint); }
+.vehpick[open] > summary { border-color: var(--accent); }
+.vehlist {
+  margin-top: 4px; padding: 6px; max-height: 260px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+}
+.vehrow {
+  display: flex; align-items: center; gap: 8px; padding: 5px 7px; margin: 0;
+  border-radius: 6px; cursor: pointer; font-size: 12.5px; font-weight: 400; color: var(--ink);
+}
+.vehrow:hover { background: var(--surface-2); }
+.vehrow.on { background: var(--accent-wash); color: var(--accent); font-weight: 600; }
+.vehrow input { width: auto; margin: 0; flex: none; }
+.vehother > summary { cursor: pointer; font-size: 11.5px; color: var(--ink-faint); padding: 6px 7px; }

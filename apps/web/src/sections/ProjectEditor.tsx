@@ -7,6 +7,8 @@ import {
   estimateCost,
   isPromptOnly,
   composeBrief,
+  projectVehicleIds,
+  brandMatches,
   formatFit,
   formatFitSummary,
   defaultFooterText,
@@ -58,7 +60,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const client = clients.find((c) => c.id === project?.clientId) ?? null;
   const footerPreview = client ? client.footerText?.trim() || defaultFooterText(client) : '';
   const actor = actors.find((a) => a.id === project?.actorId) ?? null;
-  const car = cars.find((c) => c.id === project?.carId) ?? null;
+  const vehicleIds = project ? projectVehicleIds(project) : [];
+  const vehicles = vehicleIds.map((id) => cars.find((c) => c.id === id)).filter(Boolean) as typeof cars;
+  const car = vehicles[0] ?? null;
 
   const language =
     languages.find((l) => l.id === project?.spec.languageId && l.enabled !== false) ??
@@ -67,8 +71,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     null;
 
   const brief = useMemo(
-    () => (project ? composeBrief(project, { client, actor, car, instructions, language, library: cars }) : null),
-    [project, client, actor, car, instructions, language, cars],
+    () => (project ? composeBrief(project, { client, actor, vehicles, instructions, language, library: cars }) : null),
+    [project, client, actor, vehicles, instructions, language, cars],
   );
 
   const built = useMemo(
@@ -184,6 +188,12 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
   const fit = formatFit(project.spec.durationSec, project.spec.aspect);
   const parts = built?.parts ?? [];
+  const sells = client?.vehicleKind ?? 'car';
+  const pickableVehicles = cars.filter(
+    (c) => (c.kind ?? 'car') === sells && (!client?.brand || brandMatches(c.brand, client.brand)),
+  );
+  const otherVehicles = cars.filter((c) => !pickableVehicles.includes(c));
+
   const selectedCar = car;
   const variants = selectedCar?.variants ?? [];
   const colours = selectedCar?.colours ?? [];
@@ -261,20 +271,79 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   ))}
                 </select>
               </Field>
-              <Field label="Car">
-                <select
-                  value={project.carId ?? ''}
-                  onChange={(e) =>
-                    set({ carId: e.target.value || undefined, carVariant: undefined, carColour: undefined })
-                  }
-                >
-                  <option value="">— none —</option>
-                  {cars.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.brand} {c.model}
-                    </option>
-                  ))}
-                </select>
+              <Field
+                label="Vehicles"
+                hint={
+                  vehicleIds.length > 1
+                    ? `${vehicleIds.length} models — the first is the hero and carries the variant and colour.`
+                    : client?.brand
+                      ? `${client.brand} ${client.vehicleKind === 'bike' ? 'bikes & scooters' : 'cars'} in your library. Leave empty to feature the whole range.`
+                      : 'Leave empty to feature the whole range.'
+                }
+              >
+                <details className="vehpick">
+                  <summary>
+                    {vehicleIds.length === 0
+                      ? '— whole range —'
+                      : vehicles.map((v) => `${v.brand} ${v.model}`).join(', ') || `${vehicleIds.length} selected`}
+                  </summary>
+                  <div className="vehlist">
+                    {pickableVehicles.length === 0 && (
+                      <div className="hint">
+                        Nothing in the library for {client?.brand || 'this client'} yet — sync the brand in
+                        Vehicles.
+                      </div>
+                    )}
+                    {pickableVehicles.map((c) => {
+                      const on = vehicleIds.includes(c.id);
+                      return (
+                        <label key={c.id} className={`vehrow${on ? ' on' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => {
+                              const next = on ? vehicleIds.filter((x) => x !== c.id) : [...vehicleIds, c.id];
+                              set({
+                                carIds: next,
+                                carId: next[0],
+                                // Variant and colour belong to the hero, so they
+                                // stop meaning anything once it changes.
+                                carVariant: next[0] === vehicleIds[0] ? project.carVariant : undefined,
+                                carColour: next[0] === vehicleIds[0] ? project.carColour : undefined,
+                              });
+                            }}
+                          />
+                          <span>
+                            {c.brand} {c.model}
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {otherVehicles.length > 0 && (
+                      <details className="vehother">
+                        <summary>Other brands in the library ({otherVehicles.length})</summary>
+                        {otherVehicles.map((c) => {
+                          const on = vehicleIds.includes(c.id);
+                          return (
+                            <label key={c.id} className={`vehrow${on ? ' on' : ''}`}>
+                              <input
+                                type="checkbox"
+                                checked={on}
+                                onChange={() => {
+                                  const next = on ? vehicleIds.filter((x) => x !== c.id) : [...vehicleIds, c.id];
+                                  set({ carIds: next, carId: next[0] });
+                                }}
+                              />
+                              <span>
+                                {c.brand} {c.model}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </details>
+                    )}
+                  </div>
+                </details>
               </Field>
             </div>
             {selectedCar && (

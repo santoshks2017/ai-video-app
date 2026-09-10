@@ -5,7 +5,7 @@ import { useApp, type Section } from '../state/appStore.js';
 export const SECTION_META: Record<Section, { label: string; icon: string }> = {
   projects: { label: 'Projects', icon: '🎬' },
   clients: { label: 'Clients', icon: '🏢' },
-  cars: { label: 'Cars', icon: '🚗' },
+  cars: { label: 'Vehicles', icon: '🚗' },
   actors: { label: 'Actors', icon: '🎭' },
   instructions: { label: 'Instructions', icon: '📐' },
   languages: { label: 'Languages', icon: '🗣️' },

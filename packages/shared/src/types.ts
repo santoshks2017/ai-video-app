@@ -173,6 +173,8 @@ export interface BrandLineup {
 export interface Brief {
   /** Set when the brief names no specific model. */
   lineup?: BrandLineup;
+  /** Other models the same film features, beyond the hero in `carModel`. */
+  alsoFeatured?: string[];
   /** Resolved from the project's chosen LanguageProfile. */
   language?: BriefLanguage;
   categories: CategoryId[];

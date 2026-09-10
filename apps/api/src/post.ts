@@ -334,6 +334,13 @@ async function footerPng(text: string, W: number, H: number, ink: string): Promi
     h = fitted.lineHeight * fitted.lines.length + vPad;
   }
   h = Math.min(h, capH);
+  // A wrapped strip must not end one line on a separator and open the next after
+  // it — "… 55555 ·" over "Near …" reads as a typo. Dropping it only shortens the
+  // line, so the fit still holds.
+  fitted = {
+    ...fitted,
+    lines: fitted.lines.map((l) => l.replace(/\s*[·|•]\s*$/, '').replace(/^\s*[·|•]\s*/, '')),
+  };
   const firstBaseline = Math.round((h - fitted.lineHeight * (fitted.lines.length - 1)) / 2 + fitted.fontSize * 0.35);
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${h}">

@@ -362,17 +362,29 @@ code {
 }
 
 /* Storyboard */
+/* The storyboard is read, not skimmed: nothing may be clipped, so every field
+   grows to its content and the columns are given fixed shares of the width
+   instead of fighting each other for it. */
+.sb-scroll { overflow-x: auto; }
 .sb-table {
   width: 100%;
+  min-width: 860px;
+  table-layout: fixed;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 12.5px;
 }
+.sb-table col.c-scene { width: 15%; }
+.sb-table col.c-ref   { width: 13%; }
+.sb-table col.c-shot  { width: 21%; }
+.sb-table col.c-vo    { width: 33%; }
+.sb-table col.c-card  { width: 18%; }
 .sb-table th,
 .sb-table td {
   border: 1px solid var(--line);
-  padding: 7px 8px;
+  padding: 9px 10px;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 .sb-table th {
   background: var(--surface-2);
@@ -387,14 +399,84 @@ code {
   color: var(--ink-muted);
 }
 .sb-table textarea {
-  min-height: 40px;
-  font-size: 11.5px;
-  padding: 5px 6px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 7px 8px;
+  min-height: 0;
+  resize: vertical;
+  overflow: hidden;   /* it is sized to fit, so there is never anything to scroll */
+}
+.sb-scene { line-height: 1.4; }
+.sb-scene-no {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ink-faint);
 }
 .sb-scene-title {
   font-weight: 700;
-  font-size: 11.5px;
+  font-size: 12.5px;
 }
+.sb-scene-time {
+  margin-top: 5px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--ink-muted);
+}
+.sb-card-main { font-weight: 600; }
+
+/* Visual reference: the frame the shot is built on, and the way to change it. */
+.sb-ref { display: grid; gap: 6px; }
+.sb-ref-thumb {
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+}
+.sb-ref-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sb-ref-auto {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.sb-ref select { width: 100%; padding: 5px 6px; font-size: 11.5px; }
+
+/* The creative platform, above the lines it produced. */
+.sb-angle {
+  margin: 10px 0 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.sb-angle-head {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--ink-faint);
+  margin-bottom: 7px;
+}
+.sb-angle dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  font-size: 12.5px;
+}
+.sb-angle dt {
+  font-weight: 700;
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding-top: 1px;
+}
+.sb-angle dd { margin: 0; }
 .sb-part-row td {
   background: var(--surface-2);
   font-weight: 700;
@@ -1016,7 +1098,7 @@ code {
   text-transform: uppercase; color: var(--ink-faint);
 }
 .sb-say textarea {
-  min-height: 46px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px;
   background: var(--surface-2);
 }
 .sb-say textarea.unset { border-color: var(--warn); }

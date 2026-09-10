@@ -1,21 +1,133 @@
-import { useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   fmtTime,
   wordBudget,
   narrationMode,
+  type DealerPhoto,
   type ScenePlan,
 } from '@ava/shared';
 import type { NarrationKey } from '@ava/shared';
 
+type SceneEdit = { dialogue?: string; phonetic?: string; shot?: string; ref?: string };
+
 /**
- * Editable storyboard (PRD P0.5): scene-by-scene table with timing, roll type,
- * reference image and voiceover. Edits to a scene's script or shot are saved and
- * fed back into the master prompt (buildPrompt sceneOverrides).
+ * A textarea that is always exactly as tall as its contents.
+ *
+ * Fixed-height boxes in a storyboard hide the end of every line — you cannot
+ * judge a script you can only see the first half of, and the designer was
+ * scrolling inside a 40px box to read a sentence. Growing to fit costs a layout
+ * pass per keystroke and makes the whole table readable at a glance.
+ */
+function AutoTextarea({
+  value,
+  onChange,
+  className,
+  placeholder,
+  minRows = 2,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  className?: string;
+  placeholder?: string;
+  minRows?: number;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  const fit = (): void => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    // scrollHeight is the content; the box is border-box, so the borders have to
+    // be added back or every field ends up exactly one border short and clips
+    // its last line.
+    const borders = el.offsetHeight - el.clientHeight;
+    el.style.height = `${el.scrollHeight + borders}px`;
+  };
+
+  useEffect(fit, [value]);
+
+  // The text is not the only thing that changes how many lines it takes. The
+  // column narrows when a panel opens beside it, and the web font arrives after
+  // the first measure with different glyph widths — either one rewraps the text
+  // without touching the value, and the field clips again.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let lastWidth = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      // Only a width change rewraps; reacting to our own height change would loop.
+      if (el.clientWidth === lastWidth) return;
+      lastWidth = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    void document.fonts?.ready.then(fit);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <textarea
+      ref={ref}
+      className={className}
+      rows={minRows}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
+/** The reference image a shot is built on, with the option to change it. */
+function RefPicker({
+  chosen,
+  options,
+  onPick,
+}: {
+  chosen?: string;
+  options: DealerPhoto[];
+  onPick: (filename: string | undefined) => void;
+}) {
+  const pick = options.find((o) => o.filename === chosen);
+  if (!options.length) {
+    return <span className="hint">No reference images on this project yet.</span>;
+  }
+  return (
+    <div className="sb-ref">
+      <div className="sb-ref-thumb">
+        {pick?.src ? (
+          <img src={pick.src} alt={pick.label} loading="lazy" />
+        ) : (
+          <div className="sb-ref-auto" title="The model picks from all supplied references">
+            auto
+          </div>
+        )}
+      </div>
+      <select
+        value={chosen ?? ''}
+        onChange={(e) => onPick(e.target.value || undefined)}
+        title="Which supplied image this shot is built on"
+      >
+        <option value="">Auto — any reference</option>
+        {options.map((o) => (
+          <option key={o.filename} value={o.filename}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/**
+ * Editable storyboard (PRD P0.5): scene by scene, with timing, the reference
+ * image the shot is built on, the shot direction and the spoken line. Edits are
+ * saved and fed back into the master prompt (buildPrompt sceneOverrides).
  */
 export function Storyboard({
   scenePlan,
   sceneEdits,
   narration,
+  attachments = [],
+  angle,
   onEditScene,
   onClearEdits,
   onWriteScript,
@@ -23,9 +135,13 @@ export function Storyboard({
   languageName,
 }: {
   scenePlan: ScenePlan | null;
-  sceneEdits: Record<string, { dialogue?: string; phonetic?: string; shot?: string }>;
+  sceneEdits: Record<string, SceneEdit>;
   narration: NarrationKey;
-  onEditScene: (key: string, patch: { dialogue?: string; phonetic?: string; shot?: string }) => void;
+  /** Every image supplied with this brief — the pool a shot can be built on. */
+  attachments?: DealerPhoto[];
+  /** What the last written script is arguing, so the idea can be judged first. */
+  angle?: { viewer: string; idea: string; throughline: string; proof: string[] };
+  onEditScene: (key: string, patch: SceneEdit) => void;
   onClearEdits: () => void;
   /** Fills every spoken scene with a real line. Resolves to a status message. */
   onWriteScript?: () => Promise<string>;
@@ -42,6 +158,9 @@ export function Storyboard({
   if (!scenePlan || scenePlan.scenes.length === 0) {
     return null;
   }
+
+  // Logos are overlay furniture, never something a shot is framed on.
+  const refOptions = attachments.filter((a) => a.kind !== 'logo' && a.kind !== 'brand-logo');
 
   const editCount = Object.keys(sceneEdits).length;
   const spokenScenes = mode.speaks ? scenePlan.scenes.filter((sc) => sc.beat.dialogue).length : 0;
@@ -69,7 +188,7 @@ export function Storyboard({
           {scenePlan.scenes.length} scenes · {scenePlan.parts} part{scenePlan.parts > 1 ? 's' : ''}
         </span>
       </div>
-      <div className="body tight" style={{ overflowX: 'auto' }}>
+      <div className="body tight">
         {mode.speaks && onWriteScript && (
           <div className={`script-bar${scripted >= spokenScenes && spokenScenes > 0 ? ' done' : ''}`}>
             <div>
@@ -79,7 +198,7 @@ export function Storyboard({
               <span>
                 {scripted >= spokenScenes && spokenScenes > 0
                   ? `The model performs the pronunciation line, not the ${languageName ?? 'plain'} one above it. Most of it should look untouched — respelling is only for words that come out wrong.`
-                  : `Each line needs a pronunciation pass — the line mostly as written, with only the few words a model says wrong respelled.`}
+                  : `Written in three passes: the angle, the draft, then an edit that cuts anything generic. Each line then gets a pronunciation pass.`}
               </span>
               {scriptNote && <span className="script-note">{scriptNote}</span>}
             </div>
@@ -106,10 +225,42 @@ export function Storyboard({
             </div>
           </div>
         )}
+
+        {/* The idea the copy is arguing. Judge this before judging the lines —
+            a good line serving a weak idea is still a weak film. */}
+        {angle?.idea && (
+          <div className="sb-angle">
+            <div className="sb-angle-head">The angle this script is written to</div>
+            <dl>
+              <dt>Idea</dt>
+              <dd>{angle.idea}</dd>
+              {angle.viewer && (
+                <>
+                  <dt>Viewer</dt>
+                  <dd>{angle.viewer}</dd>
+                </>
+              )}
+              {angle.throughline && (
+                <>
+                  <dt>Builds</dt>
+                  <dd>{angle.throughline}</dd>
+                </>
+              )}
+              {angle.proof?.length > 0 && (
+                <>
+                  <dt>Proof</dt>
+                  <dd>{angle.proof.join(' · ')}</dd>
+                </>
+              )}
+            </dl>
+          </div>
+        )}
+
         <div className="section-desc">
-          Edit any scene’s script or shot below — changes flow straight into the master prompt on the right, no
-          full rebuild of the brief. On-screen text is deliberately absent from that prompt: it is composited over
-          the finished video in post, like the logos and the end card, so a price is never misspelled by the model.
+          Edit any scene’s script, shot or reference image below — changes flow straight into the master prompt on
+          the right, no full rebuild of the brief. On-screen text is deliberately absent from that prompt: it is
+          composited over the finished video in post, like the logos and the end card, so a price is never
+          misspelled by the model.
           {editCount > 0 && (
             <>
               {' '}
@@ -119,88 +270,106 @@ export function Storyboard({
             </>
           )}
         </div>
-        <table className="sb-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Timing</th>
-              <th>Scene / roll</th>
-              <th>Shot direction</th>
-              <th>{mode.speaks ? 'Voiceover / script' : 'Story beat (no speech)'}</th>
-              <th>On-screen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {scenePlan.scenes.map((sc, gi) => {
-              const rows: ReactElement[] = [];
-              if (sc.part !== lastPart && scenePlan.parts > 1) {
-                lastPart = sc.part;
+        <div className="sb-scroll">
+          <table className="sb-table">
+            <colgroup>
+              <col className="c-scene" />
+              <col className="c-ref" />
+              <col className="c-shot" />
+              <col className="c-vo" />
+              <col className="c-card" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Scene</th>
+                <th>Visual reference</th>
+                <th>Shot direction</th>
+                <th>{mode.speaks ? 'Voiceover / script' : 'Story beat (no speech)'}</th>
+                <th>On-screen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scenePlan.scenes.map((sc, gi) => {
+                const rows: ReactElement[] = [];
+                if (sc.part !== lastPart && scenePlan.parts > 1) {
+                  lastPart = sc.part;
+                  rows.push(
+                    <tr className="sb-part-row" key={`p${sc.part}`}>
+                      <td colSpan={5}>
+                        Part {sc.part + 1} of {scenePlan.parts}
+                        {sc.part === 0 ? ' — create' : ' — extend'}
+                      </td>
+                    </tr>,
+                  );
+                }
+                const ov = sceneEdits[String(gi)] ?? {};
+                const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
                 rows.push(
-                  <tr className="sb-part-row" key={`p${sc.part}`}>
-                    <td colSpan={6}>
-                      Part {sc.part + 1} of {scenePlan.parts}
-                      {sc.part === 0 ? ' — create' : ' — extend'}
+                  <tr key={gi}>
+                    <td className="sb-scene">
+                      <div className="sb-scene-no">{gi + 1}</div>
+                      <div className="sb-scene-title">{sc.beat.title}</div>
+                      <div className="hint">{sc.beat.cat}</div>
+                      <div className="sb-scene-time">
+                        {fmtTime(sc.start)}–{fmtTime(sc.end)}
+                        <br />
+                        {sc.duration}s
+                      </div>
+                    </td>
+                    <td>
+                      <RefPicker
+                        chosen={ov.ref}
+                        options={refOptions}
+                        onPick={(ref) => editScene(String(gi), { ref })}
+                      />
+                    </td>
+                    <td>
+                      <AutoTextarea
+                        value={ov.shot ?? baseShot ?? ''}
+                        onChange={(v) => editScene(String(gi), { shot: v })}
+                      />
+                    </td>
+                    <td>
+                      <AutoTextarea
+                        value={ov.dialogue ?? sc.beat.dialogue ?? ''}
+                        onChange={(v) => editScene(String(gi), { dialogue: v })}
+                      />
+                      {mode.speaks && (
+                        <>
+                          <div className="hint">~{wordBudget(sc.duration)} words max</div>
+                          {/* The respelling is what the video model performs — the
+                              line above is only here so a human can read it. */}
+                          <div className="sb-say">
+                            <label>Pronunciation — what the model actually says</label>
+                            <AutoTextarea
+                              className={ov.phonetic?.trim() ? '' : 'unset'}
+                              value={ov.phonetic ?? ''}
+                              placeholder="आज ही अपनी test drive book KEE-ji-ye"
+                              onChange={(v) => editScene(String(gi), { phonetic: v })}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </td>
+                    <td>
+                      {sc.beat.card && <div className="sb-card-main">“{sc.beat.card}”</div>}
+                      {sc.beat.cardSub && <div className="hint">“{sc.beat.cardSub}”</div>}
+                      {(sc.beat.cardLines ?? []).map((l, i) => (
+                        <div key={i} className="hint">
+                          “{l}”
+                        </div>
+                      ))}
+                      {!sc.beat.card && !sc.beat.cardSub && !(sc.beat.cardLines ?? []).length && (
+                        <span className="hint">—</span>
+                      )}
                     </td>
                   </tr>,
                 );
-              }
-              const ov = sceneEdits[String(gi)] ?? {};
-              const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
-              rows.push(
-                <tr key={gi}>
-                  <td className="t">{gi + 1}</td>
-                  <td className="t">
-                    {fmtTime(sc.start)}–{fmtTime(sc.end)}
-                    <br />
-                    {sc.duration}s
-                  </td>
-                  <td>
-                    <div className="sb-scene-title">{sc.beat.title}</div>
-                    <div className="hint">{sc.beat.cat}</div>
-                  </td>
-                  <td>
-                    <textarea
-                      value={ov.shot ?? baseShot}
-                      onChange={(e) => editScene(String(gi), { shot: e.target.value })}
-                    />
-                  </td>
-                  <td>
-                    <textarea
-                      value={ov.dialogue ?? sc.beat.dialogue ?? ''}
-                      onChange={(e) => editScene(String(gi), { dialogue: e.target.value })}
-                    />
-                    {mode.speaks && (
-                      <>
-                        <div className="hint">~{wordBudget(sc.duration)} words max</div>
-                        {/* The respelling is what the video model performs — the
-                            line above is only here so a human can read it. */}
-                        <div className="sb-say">
-                          <label>Pronunciation — what the model actually says</label>
-                          <textarea
-                            className={ov.phonetic?.trim() ? '' : 'unset'}
-                            value={ov.phonetic ?? ''}
-                            placeholder="आज ही अपनी test drive book KEE-ji-ye"
-                            onChange={(e) => editScene(String(gi), { phonetic: e.target.value })}
-                          />
-                        </div>
-                      </>
-                    )}
-                  </td>
-                  <td>
-                    {sc.beat.card && <div>“{sc.beat.card}”</div>}
-                    {sc.beat.cardSub && <div className="hint">“{sc.beat.cardSub}”</div>}
-                    {(sc.beat.cardLines ?? []).map((l, i) => (
-                      <div key={i} className="hint">
-                        “{l}”
-                      </div>
-                    ))}
-                  </td>
-                </tr>,
-              );
-              return rows;
-            })}
-          </tbody>
-        </table>
+                return rows;
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

@@ -262,7 +262,12 @@ export interface Project {
   /** Per-category dynamic field values. */
   fieldValues: Partial<Record<CategoryId, Record<string, string>>>;
   /** Storyboard edits keyed by global scene index. */
-  sceneEdits: Record<string, { dialogue?: string; phonetic?: string; shot?: string }>;
+  sceneEdits: Record<string, { dialogue?: string; phonetic?: string; shot?: string; ref?: string }>;
+  /**
+   * The creative platform the last script was written to. Kept so the designer
+   * can see what the copy is arguing before judging the lines themselves.
+   */
+  scriptAngle?: { viewer: string; idea: string; throughline: string; proof: string[] };
   /** Extra reference images added on this project only. */
   extraRefs: StoredImage[];
   status: ProjectStatus;

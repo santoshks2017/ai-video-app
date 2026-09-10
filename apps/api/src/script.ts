@@ -176,14 +176,39 @@ async function ask(
 
 /* ------------------------------- pass 1: copy ------------------------------ */
 
-function copyInstruction(req: ScriptRequest): string {
-  const lang = req.language.name;
+/**
+ * The creative platform, decided before a single line is written.
+ *
+ * Writing straight to the scene list is what produced copy that read like six
+ * unrelated captions: each line was composed in isolation, so each one restarted
+ * the argument and reached for an adjective to fill the gap. A writer settles
+ * the idea first and then serves it. This is that step, made explicit — and it
+ * comes back to the designer, so the angle can be judged before the lines are.
+ */
+export interface ScriptAngle {
+  /** Who is watching, and what they are weighing up. */
+  viewer: string;
+  /** The one thought the film leaves behind. */
+  idea: string;
+  /** How the lines build from first to last. */
+  throughline: string;
+  /** The specific verified facts this script will spend its seconds on. */
+  proof: string[];
+}
+
+/** Stock phrases that make a script sound written by committee. */
+const DEAD_PHRASES = [
+  'शानदार', 'बेहतरीन', 'जबरदस्त', 'लाजवाब', 'बेमिसाल',
+  'सपनों की कार', 'तो देर किस बात की', 'स्वागत है', 'नमस्ते दोस्तों',
+  'city हो या highway', 'की पसंद', 'हर दिल की धड़कन',
+  'premium experience', 'best in class', 'value for money', 'game changer',
+  'take your driving experience to the next level',
+];
+
+/** The parts of the brief every pass needs in front of it. */
+function subjectBlock(req: ScriptRequest): string[] {
   const sub = req.subject;
   const car = sub.car ?? {};
-  const verbs =
-    req.gender === 'female'
-      ? 'The presenter is a woman — feminine verb forms throughout.'
-      : 'The presenter is a man — masculine verb forms throughout.';
 
   const SPEC_LABELS: Record<string, string> = {
     priceRange: 'Price range',
@@ -220,74 +245,164 @@ function copyInstruction(req: ScriptRequest): string {
     .map(([k, v]) => `  - ${k}: ${v}`);
 
   return [
-    `You are a senior advertising copywriter who writes ${lang} scripts for Indian car dealership films. You are good at this: your lines sound like a real person who knows cars talking to someone who is thinking of buying one.`,
-    '',
     '## THE ASSIGNMENT',
-    sub.assignment?.trim()
-      ? `The client asked for exactly this: "${sub.assignment.trim()}"\nEverything below serves that sentence. If the scene directions and this sentence disagree, this sentence wins.`
-      : `A ${sub.useCase} film.`,
-    `Format: ${sub.useCase}${sub.purpose ? ` — ${sub.purpose}` : ''}`,
+    req.subject.assignment?.trim()
+      ? `The client asked for exactly this, in their own words:\n  "${req.subject.assignment.trim()}"\nThis sentence is the brief. Everything below serves it, and where the scene directions and this sentence disagree, this sentence wins.`
+      : `A ${req.subject.useCase} film.`,
+    `Format: ${req.subject.useCase}${req.subject.purpose ? ` — ${req.subject.purpose}` : ''}`,
     '',
     ...(carFacts.length
-      ? [
-          '## THE CAR — this is what you are selling. Every number here is verified; use them.',
-          ...carFacts.map((f) => `  ${f}`),
-          '',
-        ]
+      ? ['## THE CAR — this is what you are selling. Every number here is verified; use them.', ...carFacts.map((f) => `  ${f}`), '']
       : []),
     ...(car.highlights?.length
+      ? ['## VERIFIED FACTS you may state as-is', ...car.highlights.map((h) => `  - ${h}`), '']
+      : []),
+    ...(briefFacts.length ? ['## WHAT THE DEALER GAVE YOU', ...briefFacts, ''] : []),
+    '## THE DEALERSHIP',
+    `  ${req.dealerName}${req.city ? `, ${req.city}` : ''}`,
+    ...(req.cta ? [`  The film ends on this action: ${req.cta}`] : []),
+    ...(req.subject.presenter ? [`  Presenter: ${req.subject.presenter}`] : []),
+    ...(req.direction?.trim() ? ['', '## EXTRA DIRECTION', `  ${req.direction.trim()}`] : []),
+  ];
+}
+
+/** The scene list as the writer sees it: what each moment is FOR, and how long. */
+function sceneBlock(req: ScriptRequest): string[] {
+  return req.scenes.map(
+    (sc) =>
+      `Scene ${sc.index} — ${sc.title} · ${sc.seconds}s · at most ${sc.words} words${
+        sc.card ? ` · an on-screen card already reads "${sc.card}", so do not say it aloud` : ''
+      }\n  The moment's job: ${sc.direction}`,
+  );
+}
+
+/* --- 1a. the angle --------------------------------------------------------- */
+
+function angleInstruction(req: ScriptRequest): string {
+  return [
+    `You are a creative director at an advertising agency, working on a ${req.subject.useCase} film for an Indian car dealership. Before anyone writes a line, you decide what the film is actually about.`,
+    '',
+    ...subjectBlock(req),
+    '',
+    '## THE SCENES YOU HAVE',
+    ...sceneBlock(req),
+    '',
+    '## WHAT TO DECIDE',
+    'Not the lines — the thinking behind them.',
+    '',
+    '1. **The viewer.** One sentence: who is watching this, and what are they actually weighing up? Not a demographic. A person mid-decision — comparing two cars, waiting for a discount, replacing a hatchback that has stopped fitting the family.',
+    '2. **The idea.** One sentence: the single thought this film leaves behind. It has to be something only THIS car at THIS dealership could say. If it would fit a rival brand, it is not an idea, it is a slogan.',
+    '3. **The throughline.** One sentence on how the lines build — what the opening makes them want to know, and how each scene pays that off until the last line asks for the action.',
+    '4. **The proof.** The two to four specific facts from above the script will spend its seconds on. Real numbers and named features. If a fact is not in the brief, it does not exist.',
+    '',
+    'Be hard about this. The failure mode is a nice-sounding idea that means nothing — "safety for your family", "the joy of driving". Those are categories, not ideas. An idea has an edge to it.',
+    '',
+    'Return JSON only: {"viewer": "...", "idea": "...", "throughline": "...", "proof": ["...", "..."]}. No commentary.',
+  ].join('\n');
+}
+
+/* --- 1b. the lines --------------------------------------------------------- */
+
+function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string {
+  const lang = req.language.name;
+  const verbs =
+    req.gender === 'female'
+      ? 'The presenter is a woman — feminine verb forms throughout.'
+      : 'The presenter is a man — masculine verb forms throughout.';
+
+  return [
+    `You are a senior advertising copywriter who writes ${lang} scripts for Indian car dealership films. Your lines sound like a person who knows cars talking to someone who is thinking of buying one — never like a brochure being read aloud.`,
+    '',
+    ...subjectBlock(req),
+    '',
+    ...(angle
       ? [
-          '## VERIFIED FACTS you may state as-is',
-          ...car.highlights.map((h) => `  - ${h}`),
-          'Say a number the way a person says it, not the way a spec sheet writes it: "one ninety three millimetre ground clearance", "six airbags", "sixty litre tank".',
+          '## THE ANGLE — already decided. Write to it; do not invent a different one.',
+          `  Viewer:     ${angle.viewer}`,
+          `  Idea:       ${angle.idea}`,
+          `  Throughline: ${angle.throughline}`,
+          ...(angle.proof.length ? ['  Proof to use:', ...angle.proof.map((p) => `    - ${p}`)] : []),
           '',
         ]
       : []),
-    ...(briefFacts.length ? ['## WHAT THE DEALER GAVE YOU', ...briefFacts, ''] : []),
-    `## THE DEALERSHIP`,
-    `  ${req.dealerName}${req.city ? `, ${req.city}` : ''}`,
-    ...(req.cta ? [`  The film ends on this action: ${req.cta}`] : []),
-    ...(sub.presenter ? [`  Presenter: ${sub.presenter}`] : []),
-    '',
     '## HOW TO WRITE IT',
     '',
-    'Write the whole thing as ONE piece with an arc, not a set of captions. It should build: something that makes a person keep watching, then a reason to care, then one clear thing to do.',
+    'Write the whole thing as ONE piece of copy with an arc, not a set of captions. Read it end to end in your head before you answer: it has to sound like one person talking without stopping, not six sentences taking turns.',
     '',
-    'Rules that separate a good script from a generic one:',
-    '- **Sell the car, not the room.** The scene directions below describe where the CAMERA is and what the presenter DOES. They are not the subject of the line. "Open outside the showroom, gesturing at the facade" means she is standing outside — it does NOT mean she talks about the facade. Nobody buys a car because a building has a glass front.',
-    '- **Be specific or say nothing.** One real fact — a price, a number, a feature, a colour, a use — beats three adjectives. "शानदार", "बहुत अच्छा", "premium experience" are empty; cut them.',
-    '- **Name the car early.** By the end of the first line the viewer should know which car this is about.',
-    '- **No greeting-card openings.** Do not open with "स्वागत है", "नमस्ते दोस्तों", "आज मैं आपको दिखाने लाई हूँ". Open with something the viewer wants to know.',
-    '- **Talk to one person**, not "everyone". No "फैमिली के लिए" filler unless the brief is about families.',
-    '- **One idea per line, and lines that connect.** Line two should follow from line one, not restart.',
-    '- **Earn the CTA.** The last line asks for the action, and it lands because the lines before it gave a reason.',
+    'The rules that separate a professional script from a naive one:',
+    '- **Sell the car, not the room.** The scene directions describe where the CAMERA is and what the presenter DOES. They are not the subject of the line. "Open outside the showroom, gesturing at the facade" means she is standing outside — it does NOT mean she talks about the facade.',
+    '- **Be specific or say nothing.** One real fact — a price, a number, a feature, a use — beats three adjectives.',
+    '- **Every line finishes its thought.** A short complete sentence always beats a longer fragment. Never end a line mid-clause to fit the word budget; write a shorter sentence instead.',
+    '- **Each line follows from the last.** Line two continues line one, it does not restart. The film should be impossible to shuffle.',
+    '- **Name the car in the first line.**',
+    '- **No greeting-card openings.** Open on something the viewer wants to know, not on hello.',
+    '- **Talk to one person.**',
+    '- **Earn the CTA.** The last line asks for the action and lands because of what came before.',
     `- ${verbs}`,
-    `- Everyday spoken ${lang}, written in its own script.`,
+    `- Everyday spoken ${lang}, the way it is actually spoken — not translated English.`,
+    '',
+    '**BANNED — these are what naive copy is made of. Not one of them, in any line:**',
+    ...DEAD_PHRASES.map((d) => `  ✗ ${d}`),
+    '  ✗ any adjective with no fact behind it',
     '',
     '**SCRIPT — this one is absolute.** Every English word and every proper noun stays in LATIN letters, spelled the ordinary English way, inside the Devanagari sentence. Never transliterate them into Devanagari.',
-    '  Right: "New Delhi में Tata Punch Pure CNG, सात लाख अड़सठ हज़ार से शुरू।"',
-    '  Wrong: "न्यू दिल्ली में टाटा पंच प्योर सीएनजी, सात लाख अड़सठ हज़ार से शुरू।"',
-    '  This covers brand and model names (Tata, Punch, Nexon, CNG), place names (New Delhi, Gurugram), the dealership name, and the English words Indians say in English: test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, airbags, manual, automatic, safety, family, mileage.',
-    '  Hindi words stay in Devanagari. Numbers spoken in Hindi stay in Devanagari (सात लाख अड़सठ हज़ार). Only the English keeps Latin letters.',
+    '  Right: "New Delhi में Tata Punch Pure CNG, seven lakh sixty eight thousand से शुरू।"',
+    '  Wrong: "न्यू दिल्ली में टाटा पंच प्योर सीएनजी।"',
+    '  This covers brand and model names, place names, the dealership name, and the English words Indians say in English: test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, airbags, manual, automatic, safety, family, mileage.',
     '',
-    '- Never invent a price, EMI, discount, mileage, interest rate or waiting period. Use only the facts above.',
-    '- Write every number, price and unit as plain ENGLISH words in Latin letters — "fifteen lakh four thousand", "six airbags", "seventy kmpl". Never digits, never the ₹ symbol, never the word "rupees", and never the Devanagari spelling of a number. A phonetic respelling of a price does not survive the video model, and the price is the line that has to land.',
-    ...(sub.avoid?.length
-      ? ['', 'This format fails when it does these — do not:', ...sub.avoid.map((a) => `  - ${a}`)]
+    '- Never invent a price, EMI, discount, mileage, interest rate or waiting period. Only the facts above exist.',
+    '- Write every number, price and unit as plain ENGLISH words in Latin letters — "fifteen lakh four thousand", "six airbags", "seventy kmpl". Never digits, never the ₹ symbol, never the word "rupees", and never a Devanagari number. The price is the line that has to land, and a respelled price does not survive the video model.',
+    ...(req.subject.avoid?.length
+      ? ['', 'This format fails when it does these — do not:', ...req.subject.avoid.map((a) => `  - ${a}`)]
       : []),
     '',
     '## THE SCENES',
-    'One line per scene, in order, each within its word budget at an unhurried pace. The direction tells you what the moment is FOR; you decide what she says.',
-    ...req.scenes.map(
-      (sc) =>
-        `\nScene ${sc.index} — ${sc.title} · ${sc.seconds}s · at most ${sc.words} words${
-          sc.card ? ` · an on-screen card reads "${sc.card}", so do not say it aloud` : ''
-        }\n  The moment's job: ${sc.direction}`,
-    ),
-    '',
-    'Before you answer, read your lines back. If any line would work for a different dealership, a different car, or a different city, it is too generic — rewrite it.',
+    'One line per scene, in order, each within its word budget at an unhurried speaking pace.',
+    ...sceneBlock(req),
     '',
     'Return JSON only: an array of {"index": <scene index>, "line": "<the spoken line>"}. One object per scene, in order. No commentary.',
+  ].join('\n');
+}
+
+/* --- 1c. the edit ---------------------------------------------------------- */
+
+/**
+ * The pass that does most of the work.
+ *
+ * A first draft written scene by scene always contains a few lines that are
+ * merely acceptable — an adjective standing in for a fact, a sentence that stops
+ * before it finishes, a line that could belong to any dealership in the country.
+ * A copywriter cuts those; a single generation call does not. So this reads the
+ * draft back against a checklist and rewrites only what fails, which is the
+ * difference between copy that reads as competent and copy that reads as naive.
+ */
+function editInstruction(req: ScriptRequest, angle: ScriptAngle | null, draft: { index: number; line: string }[]): string {
+  const budget = new Map(req.scenes.map((sc) => [sc.index, sc.words]));
+  return [
+    `You are the copy chief. A writer has handed you a ${req.language.name} script for an Indian car dealership film. Your job is to make it publishable — cut what is weak, keep what works, and hand back the same number of lines.`,
+    '',
+    ...subjectBlock(req),
+    '',
+    ...(angle
+      ? ['## THE ANGLE THIS WAS WRITTEN TO', `  Idea:       ${angle.idea}`, `  Throughline: ${angle.throughline}`, '']
+      : []),
+    '## THE DRAFT',
+    ...draft.map((l) => `${l.index}: ${l.line}   [at most ${budget.get(l.index) ?? '?'} words]`),
+    '',
+    '## READ IT BACK AGAINST THIS — every line, in order',
+    '1. **Does it finish its thought?** A line ending mid-clause — "और आपको मिले peace" — is the worst fault here. Rewrite it as a shorter complete sentence.',
+    '2. **Is there an adjective doing a fact’s job?** शानदार, बेहतरीन, premium, amazing. Replace it with the real number or feature, or cut the clause.',
+    '3. **Is it a stock phrase?** "city हो या highway", "families की पसंद", "तो देर किस बात की". Rewrite from scratch.',
+    '4. **Would this line work for a different dealership, a different car or a different city?** Then it is not doing any work. Make it specific.',
+    '5. **Does it follow from the line before it?** If the script could be shuffled without anyone noticing, connect them.',
+    '6. **Is it about the car, or about the room and the camera?** Nobody buys a car because a building has a glass front.',
+    '7. **Is it inside its word budget?** Cut words, never meaning. If it will not fit, write a different, shorter sentence.',
+    '8. **Do the numbers read as plain English words in Latin letters,** and does every English word and proper noun stay in Latin letters inside the Devanagari sentence?',
+    '9. **The last line:** does it ask for the action, and has the script earned it?',
+    '',
+    'Rewrite a line only where it fails. A line that passes comes back exactly as it is — resist the urge to fiddle with copy that already works. Never invent a fact that is not in the brief.',
+    '',
+    'Return JSON only: an array of {"index": <the same index>, "line": "<the final line>"}. One object per line, in order, same count as the draft. No commentary.',
   ].join('\n');
 }
 
@@ -349,17 +464,68 @@ function phoneticInstruction(
 export async function writeScript(
   req: ScriptRequest,
   apiKey: string,
-): Promise<{ model: string; lines: ScriptLine[] }> {
+): Promise<{ model: string; lines: ScriptLine[]; angle?: ScriptAngle }> {
   if (!req.scenes.length) return { model: '', lines: [] };
 
-  const copy = parseRows(await ask(copyInstruction(req), apiKey, 1.0, 'write'), 'line').map((r) => ({
+  // 1a. Settle the idea. Warm but not wild — this is judgement, not invention.
+  const angle = await askAngle(req, apiKey);
+
+  // 1b. The draft, written to that idea rather than scene by scene in the dark.
+  const draft = parseRows(await ask(linesInstruction(req, angle), apiKey, 1.0, 'write'), 'line').map((r) => ({
     index: r.index,
     line: r.text,
   }));
-  if (!copy.length) throw new ScriptError('script-unparseable', 'The model did not return any usable lines.');
+  if (!draft.length) throw new ScriptError('script-unparseable', 'The model did not return any usable lines.');
+
+  // 1c. The edit. Low temperature: this is judgement against a checklist, and a
+  // hot model here rewrites lines that were already good.
+  const copy = await polish(req, angle, draft, apiKey);
 
   const lines = await addPhonetics(copy, req.language, apiKey);
-  return { model: await resolveTextModel(apiKey, 'write'), lines };
+  return { model: await resolveTextModel(apiKey, 'write'), lines, angle: angle ?? undefined };
+}
+
+/** The creative platform. A failure here is not fatal — the draft can proceed. */
+async function askAngle(req: ScriptRequest, apiKey: string): Promise<ScriptAngle | null> {
+  try {
+    const raw = await ask(angleInstruction(req), apiKey, 0.9, 'write');
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+    const j = JSON.parse(raw.slice(start, end + 1)) as Partial<ScriptAngle>;
+    const str = (v: unknown): string => String(v ?? '').trim();
+    const angle: ScriptAngle = {
+      viewer: str(j.viewer),
+      idea: str(j.idea),
+      throughline: str(j.throughline),
+      proof: (Array.isArray(j.proof) ? j.proof : []).map(str).filter(Boolean),
+    };
+    return angle.idea ? angle : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The edit pass, with the draft as its own fallback: a script that came back
+ * unparseable is a reason to ship the draft, never a reason to fail the run the
+ * designer is waiting on.
+ */
+async function polish(
+  req: ScriptRequest,
+  angle: ScriptAngle | null,
+  draft: { index: number; line: string }[],
+  apiKey: string,
+): Promise<{ index: number; line: string }[]> {
+  try {
+    const edited = parseRows(await ask(editInstruction(req, angle, draft), apiKey, 0.4, 'write'), 'line');
+    if (!edited.length) return draft;
+    const byIndex = new Map(edited.map((r) => [r.index, r.text]));
+    // Keep the draft's shape; the edit may only replace lines, never drop them.
+    return draft.map((l) => ({ index: l.index, line: byIndex.get(l.index) || l.line }));
+  } catch {
+    return draft;
+  }
 }
 
 /**

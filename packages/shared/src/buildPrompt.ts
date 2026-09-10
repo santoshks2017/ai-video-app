@@ -24,6 +24,22 @@ import { rulebookText } from './rulebook.js';
 const CLEAN_FRAME =
   'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. Signage that genuinely exists in the location (a showroom fascia, a number plate) is part of the scene and is fine; invented graphics are not.';
 
+/**
+ * Name the reference image a single shot is built on.
+ *
+ * The REFERENCE IMAGES block lists every supplied file, which leaves the model
+ * to choose — and it reaches for the wrong one, framing a showroom wide when the
+ * scene called for a macro of the lamp. A scene that names its own reference
+ * gets what the designer picked.
+ */
+function refLine(ref: string | undefined, attachments: { filename: string; label: string }[]): string | null {
+  const name = ref?.trim();
+  if (!name) return null;
+  const found = attachments.find((a) => a.filename === name);
+  if (!found) return null;
+  return `Build this shot on the supplied reference image ${found.filename} (${found.label}) — match its vehicle, angle and setting.`;
+}
+
 function spokenLock(brief: Brief): string {
   const lang = brief.language?.name ?? 'Hindi';
   const respelled = brief.language?.needsPhonetics !== false;
@@ -77,6 +93,12 @@ export interface SceneOverride {
    */
   phonetic?: string;
   shot?: string;
+  /**
+   * Filename of the reference image this shot is built on. The prompt cites
+   * every reference globally; naming one per scene is what stops the model
+   * picking the showroom photo for a macro of the headlamp.
+   */
+  ref?: string;
 }
 
 export interface BuildPromptOptions {
@@ -298,6 +320,8 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       const shotText = ov.shot?.trim() || baseShot;
       if (shotText) L.push(`Shot: ${shotText}`);
+      const sceneRef = refLine(ov.ref, attachments);
+      if (sceneRef) L.push(sceneRef);
       const scripted = ov.phonetic?.trim() || ov.dialogue?.trim();
       const dialogue = scripted || sc.beat.dialogue;
       if (mode.speaks && scripted) {
@@ -424,6 +448,8 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push(`Scene ${i + 1} (~${sc.duration}s) — ${sc.beat.title}`);
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       if (ov.shot?.trim() || baseShot) C.push(`  Shot: ${ov.shot?.trim() || baseShot}`);
+      const contRef = refLine(ov.ref, attachments);
+      if (contRef) C.push(`  ${contRef}`);
       const scriptedC = ov.phonetic?.trim() || ov.dialogue?.trim();
       const d = scriptedC || sc.beat.dialogue;
       if (d) {

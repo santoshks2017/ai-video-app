@@ -3,12 +3,21 @@ import {
   fmtTime,
   wordBudget,
   narrationMode,
+  sceneCard,
+  type Beat,
   type DealerPhoto,
   type ScenePlan,
 } from '@ava/shared';
 import type { NarrationKey } from '@ava/shared';
 
-type SceneEdit = { dialogue?: string; phonetic?: string; shot?: string; ref?: string };
+type SceneEdit = {
+  dialogue?: string;
+  phonetic?: string;
+  shot?: string;
+  ref?: string;
+  card?: string;
+  cardSub?: string;
+};
 
 /**
  * A textarea that is always exactly as tall as its contents.
@@ -73,6 +82,64 @@ function AutoTextarea({
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
     />
+  );
+}
+
+/**
+ * The caption composited over a scene, edited in place.
+ *
+ * It is drawn in post rather than by the model, so exactly what is typed here is
+ * what the viewer reads — no respelling, no model to garble it. Clearing the
+ * headline removes the caption; Reset brings back the template's.
+ */
+function CaptionEditor({
+  beat,
+  ov,
+  onChange,
+}: {
+  beat: Beat;
+  ov: SceneEdit;
+  onChange: (patch: SceneEdit) => void;
+}) {
+  const card = sceneCard(beat, ov);
+  const edited = ov.card !== undefined || ov.cardSub !== undefined;
+  return (
+    <div className="sb-caption">
+      <AutoTextarea
+        minRows={1}
+        value={card?.text ?? ''}
+        placeholder="No caption on this scene"
+        onChange={(v) => onChange({ card: v })}
+      />
+      {card && (
+        <AutoTextarea
+          minRows={1}
+          className="sb-caption-sub"
+          value={card.sub ?? ''}
+          placeholder="Small line under it (optional)"
+          onChange={(v) => onChange({ cardSub: v })}
+        />
+      )}
+      {(card || edited) && (
+        <div className="sb-caption-actions">
+          {card && (
+            <button type="button" className="btn ghost small" onClick={() => onChange({ card: '', cardSub: '' })}>
+              Remove
+            </button>
+          )}
+          {edited && (
+            <button
+              type="button"
+              className="btn ghost small"
+              onClick={() => onChange({ card: undefined, cardSub: undefined })}
+              title="Back to the caption the template wrote"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -285,7 +352,7 @@ export function Storyboard({
                 <th>Visual reference</th>
                 <th>Shot direction</th>
                 <th>{mode.speaks ? 'Voiceover / script' : 'Story beat (no speech)'}</th>
-                <th>On-screen</th>
+                <th>On-screen text</th>
               </tr>
             </thead>
             <tbody>
@@ -352,16 +419,7 @@ export function Storyboard({
                       )}
                     </td>
                     <td>
-                      {sc.beat.card && <div className="sb-card-main">“{sc.beat.card}”</div>}
-                      {sc.beat.cardSub && <div className="hint">“{sc.beat.cardSub}”</div>}
-                      {(sc.beat.cardLines ?? []).map((l, i) => (
-                        <div key={i} className="hint">
-                          “{l}”
-                        </div>
-                      ))}
-                      {!sc.beat.card && !sc.beat.cardSub && !(sc.beat.cardLines ?? []).length && (
-                        <span className="hint">—</span>
-                      )}
+                      <CaptionEditor beat={sc.beat} ov={ov} onChange={(patch) => editScene(String(gi), patch)} />
                     </td>
                   </tr>,
                 );

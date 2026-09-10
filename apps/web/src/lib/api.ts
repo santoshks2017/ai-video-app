@@ -42,6 +42,10 @@ export interface GenerationHistoryItem {
   parentJobId?: string;
   refinedParts?: number[];
   feedback?: string;
+  /** Start to finished video, in ms. Absent on runs that never finished. */
+  durationMs?: number;
+  /** Set when the video was upscaled — what the model actually rendered. */
+  renderResolution?: string;
 }
 
 export interface ScriptLineView {
@@ -87,6 +91,8 @@ export const api = {
     confirmedCostInr?: number,
     modelId?: string,
     project?: { id: string; name: string },
+    /** Storyboard edits — the server needs the edited captions to composite them. */
+    sceneOverrides?: Record<string, unknown>,
   ) {
     const r = await req<GenerateResult>('/api/generate', {
       method: 'POST',
@@ -95,6 +101,7 @@ export const api = {
         parts,
         confirmedCostInr,
         modelId,
+        sceneOverrides,
         projectId: project?.id,
         projectName: project?.name,
       }),
@@ -132,6 +139,7 @@ export const api = {
     confirmedCostInr?: number,
     modelId?: string,
     project?: { id: string; name: string },
+    sceneOverrides?: Record<string, unknown>,
   ) {
     const r = await req<GenerateResult>(`/api/generate/${jobId}/refine`, {
       method: 'POST',
@@ -142,6 +150,7 @@ export const api = {
         feedback,
         confirmedCostInr,
         modelId,
+        sceneOverrides,
         projectId: project?.id,
         projectName: project?.name,
       }),
@@ -171,6 +180,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ lines, languageId }),
     });
+  },
+
+  /**
+   * How long a run should take, learned from this app's own finished runs on the
+   * same model. No provider reports progress, so history is the only honest source.
+   */
+  async eta(q: { modelId?: string; resolution: string; seconds: number; parts: number }) {
+    const qs = new URLSearchParams({
+      ...(q.modelId ? { modelId: q.modelId } : {}),
+      resolution: q.resolution,
+      seconds: String(q.seconds),
+      parts: String(q.parts),
+    });
+    return await req<{ seconds: number; basis: 'history' | 'default'; samples: number }>(
+      `/api/generate/eta?${qs.toString()}`,
+    );
   },
 
   async job(jobId: string) {

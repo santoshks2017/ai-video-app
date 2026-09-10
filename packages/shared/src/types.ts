@@ -34,8 +34,12 @@ export type AspectRatio = '9:16' | '1:1' | '16:9';
 
 export type TextLang = 'english' | 'mixed' | 'hindi';
 
-/** Omni Flash is 720p-only in v1; 480p kept for forward-compat, informational only. */
-export type Resolution = '480p' | '720p';
+/**
+ * The deliverable's resolution. Not every model renders every size natively —
+ * Seedance tops out at 720p — so the server renders at the model's best native
+ * size and upscales in post (see renderResolution in library.ts).
+ */
+export type Resolution = '480p' | '720p' | '1080p';
 
 export interface CategoryField {
   id: string;

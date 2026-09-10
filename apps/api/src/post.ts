@@ -59,6 +59,12 @@ export interface BrandOverlay {
   endCard?: EndCardSpec;
   /** Timed captions, drawn here rather than by the video model. */
   cards?: TextCard[];
+  /**
+   * Final short side in pixels — 1080 for a 1080p deliverable. A model that
+   * cannot render that natively is upscaled here, once, before any overlay is
+   * drawn, so the type and logos are set at full size rather than enlarged.
+   */
+  targetShortSide?: number;
   /** Dissolve between segments, seconds. */
   transition?: number;
   accent?: string;
@@ -467,7 +473,8 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     !overlay.brandLogo &&
     !overlay.dealerLogo &&
     !overlay.endCard &&
-    !overlay.cards?.length;
+    !overlay.cards?.length &&
+    !overlay.targetShortSide;
   if (nothingToDo) return segments[0]!;
 
   const dir = await mkdtemp(join(tmpdir(), 'ava-post-'));
@@ -479,7 +486,16 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       files.push(f);
     }
     const metas = await Promise.all(files.map(probe));
-    const { width: W, height: H } = metas[0]!;
+    // Every clip is scaled to one frame size before the chain. xfade refuses to
+    // join two sizes, and a 1080p deliverable from a model that renders 720p is
+    // upscaled here — before the footer, captions and logos are drawn at W×H.
+    const srcW = metas[0]!.width;
+    const srcH = metas[0]!.height;
+    const target = overlay.targetShortSide ?? 0;
+    const k = target && shortSide(srcW, srcH) < target ? target / shortSide(srcW, srcH) : 1;
+    const even = (n: number): number => Math.round(n / 2) * 2;
+    const W = even(srcW * k);
+    const H = even(srcH * k);
     // xfade refuses to join two links whose timebases differ, so everything
     // that enters the chain — clips, end card, captions — is pinned to the
     // frame rate of the first clip. Segments arrive from the model at whatever
@@ -537,7 +553,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     // --- crossfade the clips together ---
     const parts: string[] = [];
     for (let i = 0; i < clipCount; i++) {
-      parts.push(`[${i}:v]fps=${fps},format=yuv420p,settb=AVTB[n${i}v]`);
+      parts.push(`[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,fps=${fps},format=yuv420p,settb=AVTB[n${i}v]`);
       parts.push(`[${i}:a]aresample=44100:async=1,asettb=AVTB[n${i}a]`);
     }
     let vLast = 'n0v';
@@ -631,6 +647,33 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       out,
     ]);
     return await readFile(out);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Cut a clip down to the length its segment was planned at.
+ *
+ * Veo renders only 4, 6 or 8 seconds — always 8 at 1080p or with reference
+ * images — so a planned 5.3s segment comes back long. Left untrimmed, every
+ * later scene drifts off the storyboard and captions land on the wrong shot.
+ * Re-encoded rather than stream-copied, because a copy can only cut on a keyframe.
+ */
+export async function trimClip(clip: Buffer, seconds: number): Promise<Buffer> {
+  const dir = await mkdtemp(join(tmpdir(), 'ava-trim-'));
+  try {
+    const inF = join(dir, 'in.mp4');
+    const outF = join(dir, 'out.mp4');
+    await writeFile(inF, clip);
+    const { duration } = await probe(inF);
+    if (!(seconds > 0) || duration <= seconds + 0.05) return clip;
+    await run('ffmpeg', [
+      '-v', 'error', '-y', '-i', inF, '-t', seconds.toFixed(3),
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-movflags', '+faststart', outF,
+    ]);
+    return await readFile(outF);
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }

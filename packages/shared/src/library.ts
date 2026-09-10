@@ -262,7 +262,10 @@ export interface Project {
   /** Per-category dynamic field values. */
   fieldValues: Partial<Record<CategoryId, Record<string, string>>>;
   /** Storyboard edits keyed by global scene index. */
-  sceneEdits: Record<string, { dialogue?: string; phonetic?: string; shot?: string; ref?: string }>;
+  sceneEdits: Record<
+    string,
+    { dialogue?: string; phonetic?: string; shot?: string; ref?: string; card?: string; cardSub?: string }
+  >;
   /**
    * The creative platform the last script was written to. Kept so the designer
    * can see what the copy is arguing before judging the lines themselves.
@@ -438,6 +441,12 @@ export interface VideoModelProfile {
   maxReferenceImages: number;
   usdPerSecond: number;
   /**
+   * Price at a specific resolution, where the provider charges differently —
+   * Veo 3.1 Fast is $0.10/s at 720p and $0.12/s at 1080p. Falls back to
+   * `usdPerSecond`.
+   */
+  usdPerSecondByResolution?: Partial<Record<Resolution, number>>;
+  /**
    * Languages the provider says the model can SPEAK, as ISO codes. Left unset
    * when the provider publishes no list — pre-flight only warns on a stated
    * restriction, never on silence.
@@ -452,11 +461,11 @@ export interface VideoModelProfile {
 
 /** The built-in model, seeded on first run so the app works out of the box. */
 export const OMNI_FLASH_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' | 'createdAt' | 'updatedAt'> = {
-  name: 'Gemini Omni Flash',
+  name: 'Gemini Omni 1.1 Flash',
   modelId: 'gemini-omni-1.1-flash',
   minClipSec: 3,
   maxClipSec: 10,
-  resolutions: ['720p'],
+  resolutions: ['720p', '1080p'],
   aspects: ['9:16', '16:9'],
   supportsImageToVideo: true,
   supportsReferenceImages: true,
@@ -494,7 +503,7 @@ export const SEEDANCE_25_DEFAULTS: Omit<
   speechLanguages: ['zh', 'en', 'es', 'id', 'ms', 'th', 'ar', 'pt', 'vi', 'ja', 'ko'],
   enabled: true,
   isDefault: false,
-  notes: '30s in one call, native audio. Speech languages do not include Hindi.',
+  notes: '30s in one call, native audio. Renders 480p/720p natively; a 1080p video is upscaled in post. Speech languages do not include Hindi.',
 };
 
 export const SEEDANCE_20_FAST_DEFAULTS: Omit<
@@ -515,8 +524,108 @@ export const SEEDANCE_20_FAST_DEFAULTS: Omit<
   speechLanguages: ['zh', 'en', 'es', 'id', 'ms', 'th', 'ar', 'pt', 'vi', 'ja', 'ko'],
   enabled: true,
   isDefault: false,
-  notes: 'Cheapest of the three; 15s per call, 480p/720p only.',
+  notes: '15s per call. Renders 480p/720p natively; a 1080p video is upscaled in post.',
 };
+
+/**
+ * Google Veo 3.1, on the same Gemini API key as Omni.
+ *
+ * Clips are 4, 6 or 8 seconds and nothing in between; 1080p and reference
+ * images both force 8. The server renders the allowed length that fits and
+ * trims to the planned segment, so the extra seconds are billed but never seen.
+ * Prices are Google list (Sept 2026), editable per model.
+ * Docs: https://ai.google.dev/gemini-api/docs/veo
+ */
+export const VEO_31_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' | 'createdAt' | 'updatedAt'> = {
+  name: 'Google Veo 3.1',
+  modelId: 'veo-3.1-generate-preview',
+  minClipSec: 4,
+  maxClipSec: 8,
+  resolutions: ['720p', '1080p'],
+  aspects: ['9:16', '16:9'],
+  supportsImageToVideo: true,
+  supportsReferenceImages: true,
+  maxReferenceImages: 3,
+  usdPerSecond: 0.4,
+  usdPerSecondByResolution: { '720p': 0.4, '1080p': 0.4 },
+  enabled: true,
+  isDefault: false,
+  notes: '8s max per clip, native audio. 1080p and reference images always render 8s, trimmed to fit.',
+};
+
+export const VEO_31_FAST_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' | 'createdAt' | 'updatedAt'> = {
+  name: 'Google Veo 3.1 Fast',
+  modelId: 'veo-3.1-fast-generate-preview',
+  minClipSec: 4,
+  maxClipSec: 8,
+  resolutions: ['720p', '1080p'],
+  aspects: ['9:16', '16:9'],
+  supportsImageToVideo: true,
+  supportsReferenceImages: true,
+  maxReferenceImages: 3,
+  usdPerSecond: 0.1,
+  usdPerSecondByResolution: { '720p': 0.1, '1080p': 0.12 },
+  enabled: true,
+  isDefault: false,
+  notes: 'Cheaper Veo. 8s max per clip, native audio. 1080p and reference images always render 8s, trimmed to fit.',
+};
+
+/* ---- what each model can actually render ---- */
+
+const RES_ORDER: Resolution[] = ['480p', '720p', '1080p'];
+
+/**
+ * Resolutions each provider renders natively, by model id. Kept in code rather
+ * than read from the saved model record: those records were seeded when every
+ * model was listed as 720p-only, and a stale record must not decide whether a
+ * video is rendered at 1080p or upscaled to it.
+ */
+const NATIVE_RESOLUTIONS: { match: RegExp; native: Resolution[] }[] = [
+  { match: /^gemini-omni/, native: ['720p', '1080p'] },
+  { match: /^veo-3\.1-lite/, native: ['720p', '1080p'] },
+  { match: /^veo-/, native: ['720p', '1080p'] },
+  // Seedance 2.0 (standard) lists 1080p; 2.0 fast and 2.5 publish 480p/720p only.
+  { match: /^dreamina-seedance-2-0-(?!fast)/, native: ['480p', '720p', '1080p'] },
+  { match: /^dreamina-seedance/, native: ['480p', '720p'] },
+];
+
+export function nativeResolutions(modelId: string, fallback: Resolution[] = ['720p']): Resolution[] {
+  return NATIVE_RESOLUTIONS.find((r) => r.match.test(modelId))?.native ?? fallback;
+}
+
+/**
+ * How to produce the resolution a project asked for on a given model: render
+ * natively when the model can, otherwise render at its largest native size and
+ * upscale in post. `upscale` is what the designer should be told.
+ */
+export function renderResolution(
+  modelId: string,
+  wanted: Resolution,
+  fallback?: Resolution[],
+): { render: Resolution; upscale: boolean } {
+  const native = nativeResolutions(modelId, fallback);
+  if (native.includes(wanted)) return { render: wanted, upscale: false };
+  const rank = (r: Resolution): number => RES_ORDER.indexOf(r);
+  // Asked for more than the model can do: render its largest size below the
+  // request and upscale. Asked for less than it can do: render its smallest
+  // size — never a bigger, dearer one — and deliver that as it is.
+  const below = native.filter((r) => rank(r) < rank(wanted)).sort((a, b) => rank(b) - rank(a));
+  const above = native.filter((r) => rank(r) > rank(wanted)).sort((a, b) => rank(a) - rank(b));
+  const render = below[0] ?? above[0] ?? '720p';
+  return { render, upscale: rank(wanted) > rank(render) };
+}
+
+/** Dollars per second for a run at the resolution the model will actually render. */
+export function priceFor(
+  model: Pick<VideoModelProfile, 'modelId' | 'usdPerSecond' | 'usdPerSecondByResolution' | 'resolutions'>,
+  wanted: Resolution,
+): number {
+  const { render } = renderResolution(model.modelId, wanted, model.resolutions);
+  return model.usdPerSecondByResolution?.[render] ?? model.usdPerSecond;
+}
+
+/** The short side, in pixels, of a delivered resolution. */
+export const shortSideFor = (r: Resolution): number => (r === '1080p' ? 1080 : r === '480p' ? 480 : 720);
 
 export const PROVIDER_LABELS: Record<ProviderKind, string> = {
   'google-gemini': 'Google — Gemini / Veo',

@@ -65,6 +65,8 @@ export const projectTabId = (projectId: string): string => `project:${projectId}
 interface AppState {
   /** null = still checking */
   signedIn: boolean | null;
+  /** True when this session is a sign-in-free preview. */
+  previewOpen: boolean;
   authEnabled: boolean;
   signInError: string;
   /** Who is signed in, and what they may do. Null while still checking. */
@@ -104,6 +106,7 @@ const HOME: Tab = { id: sectionTabId('projects'), kind: 'section', section: 'pro
 
 export const useApp = create<AppState>()((set, get) => ({
   signedIn: null,
+  previewOpen: false,
   authEnabled: true,
   signInError: '',
   me: null,
@@ -126,6 +129,18 @@ export const useApp = create<AppState>()((set, get) => ({
   loading: false,
 
   init: async () => {
+    // A preview built to open without signing in asks the server straight away.
+    // The server decides whether this address and moment allow it; the page only
+    // asks. If it says no, normal Google sign-in follows below.
+    if (import.meta.env.VITE_PREVIEW_OPEN === '1') {
+      const open = await session.status();
+      if (!isApiError(open) && open.signedIn && open.previewOpen) {
+        set({ authEnabled: open.authEnabled, me: open.user, signedIn: true, previewOpen: true });
+        await get().refresh();
+        return;
+      }
+    }
+
     // A redirect sign-in lands back here mid-flight; finish it before deciding
     // whether anybody is signed in, and surface anything it went wrong with.
     const redirectError = await completeRedirectSignIn();

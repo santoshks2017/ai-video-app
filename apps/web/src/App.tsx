@@ -38,7 +38,7 @@ function TabBody({ tab }: { tab: Tab }) {
 }
 
 export default function App() {
-  const { signedIn, tabs, activeTabId, init } = useApp();
+  const { signedIn, previewOpen, tabs, activeTabId, init } = useApp();
 
   useEffect(() => {
     void init();
@@ -55,6 +55,12 @@ export default function App() {
 
   return (
     <Shell>
+      {previewOpen && (
+        <div className="preview-banner" role="note">
+          Preview, opened without sign-in. Anything generated here spends real money, and edits change the live
+          libraries.
+        </div>
+      )}
       <Tabs />
       {/* Every tab stays mounted: hiding rather than unmounting is what keeps a
           generation running while the designer works somewhere else. */}

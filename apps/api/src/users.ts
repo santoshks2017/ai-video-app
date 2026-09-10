@@ -21,6 +21,9 @@ import { ensureFirebase } from './store.js';
 
 const COLLECTION = 'users';
 
+/** The identity a sign-in-free preview acts as. It is not a person and has no users record. */
+export const PREVIEW_UID = 'preview-no-sign-in';
+
 export interface Caller {
   uid: string;
   email: string;
@@ -59,7 +62,9 @@ export async function recordActivity(caller: Caller, a: Omit<Activity, 'uid' | '
   const entry: Activity = { uid: caller.uid, email: caller.email, name: caller.name, at: Date.now(), ...a };
   await db.collection(ACTIVITY).add(entry).catch(() => {});
   // Running totals on the person, so the admin view never has to scan the log.
-  if (a.costInr || a.type === 'generate' || a.type === 'retake') {
+  // The sign-in-free preview is not a person — no record to total onto, and none
+  // to appear in People. Its spend is still in the log above.
+  if (caller.uid !== PREVIEW_UID && (a.costInr || a.type === 'generate' || a.type === 'retake')) {
     await db
       .collection(COLLECTION)
       .doc(caller.uid)

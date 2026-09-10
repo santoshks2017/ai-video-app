@@ -18,10 +18,23 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '2.1';
+export const APP_VERSION = '2.2';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '2.2',
+    date: '2026-09-10',
+    title: 'A storyboard you can read, and scripts written like an agency would',
+    changes: [
+      'Scripts are written in three passes instead of one: first the angle — who is watching, the one idea, how the film builds and the facts it will spend its seconds on — then the draft, then an edit that reads every line back and rewrites anything generic, unfinished or disconnected.',
+      'The angle is shown above the storyboard, so you can judge what the script is arguing before judging the lines.',
+      'Stock phrases that made scripts sound naive — शानदार, बेहतरीन, "city हो या highway", "families की पसंद" — are banned outright, and a line may no longer stop mid-sentence to fit its word budget.',
+      'Every storyboard field grows to fit its text. Nothing is clipped inside a box, including after the column is resized.',
+      'The columns are restructured: scene, timing and duration in one column, then the visual reference, shot direction, the script with its pronunciation, and on-screen text.',
+      'Each scene shows the reference image its shot is built on, and you can change it. The chosen image is named in that scene of the prompt, so the model frames the headlamp macro on the headlamp photo rather than the showroom.',
+    ],
+  },
   {
     version: '2.1',
     date: '2026-09-10',

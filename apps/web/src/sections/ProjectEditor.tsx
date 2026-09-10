@@ -132,8 +132,10 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     for (const { index, line, say } of r.lines) {
       next[String(index)] = { ...next[String(index)], dialogue: line, phonetic: say };
     }
-    set({ sceneEdits: next });
-    return `Wrote ${r.lines.length} line${r.lines.length > 1 ? 's' : ''} with ${r.model}, each with its pronunciation spelling. Read them through and fix anything that sounds off.`;
+    // The angle is saved with the copy: it is what the lines are arguing, and
+    // judging a line without it is judging half the work.
+    set({ sceneEdits: next, scriptAngle: r.angle });
+    return `Wrote ${r.lines.length} line${r.lines.length > 1 ? 's' : ''} with ${r.model} — angle, draft, then an edit pass. Read them through and fix anything that sounds off.`;
   };
 
   /** Re-apply the current pronunciation guide without rewriting the copy. */
@@ -697,6 +699,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   set({ sceneEdits: { ...project.sceneEdits, [key]: { ...project.sceneEdits[key], ...patch } } })
                 }
                 onClearEdits={() => set({ sceneEdits: {} })}
+                attachments={brief?.attachments ?? []}
+                angle={project.scriptAngle}
                 onWriteScript={writeScript}
                 onRedoPhonetics={language?.needsPhonetics === false ? undefined : redoPhonetics}
                 languageName={language?.name}

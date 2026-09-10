@@ -294,3 +294,28 @@ test('language rules drive the prompt, not hard-coded Hindi', () => {
   assert.ok(speech(hindi, ['en', 'ja']).includes('speech-language-unsupported'));
   assert.ok(!speech(english, ['en', 'ja']).includes('speech-language-unsupported'));
 });
+
+test('a scene can name the reference image its shot is built on', () => {
+  const b = base({ categories: ['offer'], narration: 'presenter', durationSec: 24, maxChunkSec: 10,
+    fieldValues: { offer: { cashDiscount: 'Rs 40,000 Cash Discount' } } });
+  b.attachments = [
+    { label: 'Headlamp detail', filename: 'lamp.jpg', kind: 'car-model' },
+    { label: 'Showroom facade', filename: 'showroom.jpg', kind: 'dealer' },
+  ];
+  const plain = buildPrompt(b)!;
+  const all = (r: typeof plain) => r.parts.map((p) => `${p.text}\n${p.continuationText}`).join('\n');
+  assert.doesNotMatch(all(plain), /Build this shot on/);
+
+  // Pick a reference for the first scene AND for a scene in a later part, so
+  // both the opening prompt and the continuation path are exercised.
+  const lastIdx = plain.scenePlan.scenes.length - 1;
+  assert.ok(plain.scenePlan.scenes[lastIdx]!.part > 0, 'brief should span more than one part');
+  const picked = buildPrompt(b, { sceneOverrides: { '0': { ref: 'lamp.jpg' }, [String(lastIdx)]: { ref: 'showroom.jpg' } } })!;
+  assert.match(picked.parts[0]!.text, /Build this shot on the supplied reference image lamp\.jpg \(Headlamp detail\)/);
+  const later = picked.parts.find((p) => p.partNum === plain.scenePlan.scenes[lastIdx]!.part + 1)!;
+  assert.match(later.continuationText, /showroom\.jpg \(Showroom facade\)/);
+
+  // A name that is not one of the supplied files is ignored, not invented.
+  const ghost = buildPrompt(b, { sceneOverrides: { '0': { ref: 'nope.jpg' } } })!;
+  assert.doesNotMatch(all(ghost), /nope\.jpg/);
+});

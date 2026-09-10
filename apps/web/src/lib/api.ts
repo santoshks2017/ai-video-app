@@ -155,7 +155,11 @@ export const api = {
 
   /** Turn the storyboard's stage directions into lines the presenter says. */
   async script(brief: Brief, languageId?: string, projectId?: string) {
-    return await req<{ model: string; lines: ScriptLineView[] }>('/api/script', {
+    return await req<{
+      model: string;
+      lines: ScriptLineView[];
+      angle?: { viewer: string; idea: string; throughline: string; proof: string[] };
+    }>('/api/script', {
       method: 'POST',
       body: JSON.stringify({ brief, languageId, projectId }),
     });

@@ -102,20 +102,29 @@ function CaptionEditor({
   onChange: (patch: SceneEdit) => void;
 }) {
   const card = sceneCard(beat, ov);
+  const template = sceneCard(beat, undefined);
   const edited = ov.card !== undefined || ov.cardSub !== undefined;
+  // Show exactly what was typed. sceneCard() trims — right for what gets
+  // composited, wrong for an input: trimming on every keystroke deleted a space
+  // the instant it was typed, so a caption could never grow past one word.
+  const headline = ov.card !== undefined ? ov.card : (template?.text ?? '');
+  const subline = ov.cardSub !== undefined ? ov.cardSub : (template?.sub ?? '');
   return (
     <div className="sb-caption">
       <AutoTextarea
         minRows={1}
-        value={card?.text ?? ''}
+        value={headline}
         placeholder="No caption on this scene"
         onChange={(v) => onChange({ card: v })}
       />
+      {headline.trim().length > 32 && (
+        <span className="hint">Long captions are set smaller to fit — under about 30 characters reads best.</span>
+      )}
       {card && (
         <AutoTextarea
           minRows={1}
           className="sb-caption-sub"
-          value={card.sub ?? ''}
+          value={subline}
           placeholder="Small line under it (optional)"
           onChange={(v) => onChange({ cardSub: v })}
         />

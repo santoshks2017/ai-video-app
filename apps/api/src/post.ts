@@ -73,7 +73,13 @@ export interface BrandOverlay {
 
 const DEFAULT_ACCENT = '#e2600a';
 const DEFAULT_INK = '#0f1e33';
-const FONT = 'Manrope, Helvetica, Arial, DejaVu Sans, sans-serif';
+/**
+ * The type the overlays are set in. The Cloud Run image installs DejaVu Sans and
+ * Noto (for Devanagari) and nothing else, so DejaVu is what production draws —
+ * it leads the stack so a local render looks like the real one wherever it can.
+ * POST_FONT overrides it, which is how the layout is tested against a wide face.
+ */
+const FONT = process.env.POST_FONT || 'DejaVu Sans, Noto Sans, Helvetica, Arial, sans-serif';
 
 const esc = (s: string): string =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -138,8 +144,53 @@ function textUnits(text: string): number {
   return u;
 }
 
+/**
+ * How far off the per-character estimate is for the font actually installed.
+ *
+ * The estimate was tuned against Arial. Production only has DejaVu Sans, which
+ * sets roughly a sixth wider, so every panel was sized for narrower text than it
+ * drew and captions ran straight out of their boxes. Measured once per process by
+ * rendering a sample line in each weight.
+ */
+const fontScale = { regular: 1, bold: 1 };
+let calibration: Promise<void> | null = null;
+
 const measure = (text: string, fontSize: number, bold: boolean): number =>
-  textUnits(text) * fontSize * (bold ? 1.06 : 1);
+  textUnits(text) * fontSize * (bold ? 1.06 * fontScale.bold : fontScale.regular);
+
+/** Width in pixels of a line exactly as the renderer draws it — the ground truth. */
+async function inkWidth(text: string, fontSize: number, weight: number): Promise<number> {
+  const t = text.trim();
+  if (!t) return 0;
+  const w = Math.ceil(fontSize * t.length * 1.4) + 40;
+  const h = Math.ceil(fontSize * 2);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+  <rect width="${w}" height="${h}" fill="#ffffff"/>
+  <text x="10" y="${Math.round(fontSize * 1.35)}" font-family="${FONT}" font-size="${fontSize}" font-weight="${weight}" fill="#000000">${esc(t)}</text>
+</svg>`;
+  try {
+    const { info } = await sharp(Buffer.from(svg))
+      .trim({ background: '#ffffff', threshold: 10 })
+      .png()
+      .toBuffer({ resolveWithObject: true });
+    return info.width;
+  } catch {
+    return 0; // nothing was drawn
+  }
+}
+
+const CALIBRATION_SAMPLE = 'Sahyadri Motors · Book your test drive today · +91 73505 55555 · 7.99%';
+
+function calibrate(): Promise<void> {
+  calibration ??= (async () => {
+    for (const [key, weight, bold] of [['regular', 400, false], ['bold', 700, true]] as const) {
+      const actual = await inkWidth(CALIBRATION_SAMPLE, 100, weight);
+      const guess = textUnits(CALIBRATION_SAMPLE) * 100 * (bold ? 1.06 : 1);
+      if (actual > 0 && guess > 0) fontScale[key] = actual / guess;
+    }
+  })().catch(() => {});
+  return calibration;
+}
 
 /** Greedy word wrap; a single word longer than the line is left to overflow-fit. */
 function wrap(text: string, maxWidth: number, fontSize: number, bold: boolean): string[] {
@@ -182,8 +233,58 @@ function fitText(
   return { lines, fontSize: size, lineHeight: Math.round(size * 1.28) };
 }
 
+/**
+ * Split a two-line block into lines of similar length. A greedy wrap fills the
+ * first line and strands a word on the second; an even pair reads as a designed
+ * caption rather than an accident.
+ */
+function balanceLines(f: FittedText, maxWidth: number, bold: boolean): FittedText {
+  if (f.lines.length !== 2) return f;
+  const words = f.lines.join(' ').split(/\s+/).filter(Boolean);
+  let best = f.lines;
+  let bestLongest = Math.max(...f.lines.map((l) => measure(l, f.fontSize, bold)));
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(' ');
+    const b = words.slice(i).join(' ');
+    const longest = Math.max(measure(a, f.fontSize, bold), measure(b, f.fontSize, bold));
+    if (longest <= maxWidth && longest < bestLongest) {
+      best = [a, b];
+      bestLongest = longest;
+    }
+  }
+  return { ...f, lines: best };
+}
+
+type CheckedText = FittedText & { widths: number[] };
+
+/**
+ * Fit, then check every line against the renderer and shrink until it really fits.
+ * Calibration brings the estimate close; this makes it certain — Devanagari, a
+ * run of wide capitals, anything a per-character estimate misjudges.
+ */
+async function fitChecked(
+  text: string,
+  maxWidth: number,
+  opts: { start: number; min: number; maxLines: number; bold?: boolean; weight: number; balance?: boolean },
+): Promise<CheckedText> {
+  await calibrate();
+  const bold = opts.bold ?? false;
+  let start = opts.start;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let f = fitText(text, maxWidth, { start, min: opts.min, maxLines: opts.maxLines, bold });
+    if (opts.balance) f = balanceLines(f, maxWidth, bold);
+    const widths = await Promise.all(f.lines.map((l) => inkWidth(l, f.fontSize, opts.weight)));
+    const widest = Math.max(0, ...widths);
+    if (widest <= maxWidth || f.fontSize <= opts.min) return { ...f, widths };
+    // Shrink by the overshoot the renderer reported, and a point more to settle.
+    start = Math.max(opts.min, Math.floor((f.fontSize * maxWidth) / widest) - 1);
+  }
+  const f = fitText(text, maxWidth, { start: opts.min, min: opts.min, maxLines: opts.maxLines, bold });
+  return { ...f, widths: await Promise.all(f.lines.map((l) => inkWidth(l, f.fontSize, opts.weight))) };
+}
+
 const tspans = (
-  f: FittedText,
+  f: FittedText & { widths?: number[] },
   x: number,
   yStart: number,
   fill: string,
@@ -192,7 +293,7 @@ const tspans = (
 ): string =>
   f.lines
     .map((line, i) => {
-      const over = measure(line, f.fontSize, weight >= 600) > maxWidth;
+      const over = (f.widths?.[i] ?? measure(line, f.fontSize, weight >= 600)) > maxWidth;
       return `<text x="${x}" y="${yStart + i * f.lineHeight}" text-anchor="middle" font-family="${FONT}"
         font-size="${f.fontSize}" font-weight="${weight}" fill="${fill}"${
           over ? ` textLength="${maxWidth}" lengthAdjust="spacingAndGlyphs"` : ''
@@ -225,13 +326,21 @@ async function footerPng(text: string, W: number, H: number, ink: string): Promi
   // A wide frame has room for the whole strip on one line; a tall one may need two.
   const maxLines = W >= H ? 1 : 2;
 
-  let fitted = fitText(text, maxWidth, { start: Math.round(S * 0.034), min, maxLines });
+  const footerOpts = { min, maxLines, bold: true, weight: 600 };
+  let fitted = await fitChecked(text, maxWidth, { ...footerOpts, start: Math.round(S * 0.034) });
   let h = fitted.lineHeight * fitted.lines.length + vPad;
   while (h > capH && fitted.fontSize > min) {
-    fitted = fitText(text, maxWidth, { start: fitted.fontSize - 1, min, maxLines });
+    fitted = await fitChecked(text, maxWidth, { ...footerOpts, start: fitted.fontSize - 1 });
     h = fitted.lineHeight * fitted.lines.length + vPad;
   }
   h = Math.min(h, capH);
+  // A wrapped strip must not end one line on a separator and open the next after
+  // it — "… 55555 ·" over "Near …" reads as a typo. Dropping it only shortens the
+  // line, so the fit still holds.
+  fitted = {
+    ...fitted,
+    lines: fitted.lines.map((l) => l.replace(/\s*[·|•]\s*$/, '').replace(/^\s*[·|•]\s*/, '')),
+  };
   const firstBaseline = Math.round((h - fitted.lineHeight * (fitted.lines.length - 1)) / 2 + fitted.fontSize * 0.35);
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${h}">
@@ -255,13 +364,19 @@ async function endCardPng(
   const maxWidth = w - pad * 2;
 
   const nameFit = name
-    ? fitText(name, maxWidth, { start: Math.round(S * 0.075), min: Math.round(S * 0.036), maxLines: 3, bold: true })
+    ? await fitChecked(name, maxWidth, {
+        start: Math.round(S * 0.075), min: Math.round(S * 0.036), maxLines: 3, bold: true, weight: 700, balance: true,
+      })
     : null;
   const ctaFit = cta
-    ? fitText(cta, maxWidth, { start: Math.round(S * 0.042), min: Math.round(S * 0.028), maxLines: 2 })
+    ? await fitChecked(cta, maxWidth, {
+        start: Math.round(S * 0.042), min: Math.round(S * 0.028), maxLines: 2, weight: 500, balance: true,
+      })
     : null;
-  const restFits = rest.map((line) =>
-    fitText(line, maxWidth, { start: Math.round(S * 0.034), min: Math.round(S * 0.024), maxLines: 2 }),
+  const restFits = await Promise.all(
+    rest.map((line) =>
+      fitChecked(line, maxWidth, { start: Math.round(S * 0.034), min: Math.round(S * 0.024), maxLines: 2, weight: 400 }),
+    ),
   );
 
   // Lay the block out as a stack, then centre the whole thing vertically.
@@ -383,33 +498,68 @@ async function normalizedLogo(
 
 /** How much of the frame a caption may take, and how far it sits off the edge. */
 const CARD_MAX_W = { landscape: 0.46, portrait: 0.78 };
+/** Caption type, as fractions of the frame's short side. */
+const CARD_TYPE = { head: 0.058, headMin: 0.03, sub: 0.032, subMin: 0.021 };
+
+const cardTextWidth = (W: number, H: number): number =>
+  Math.round(W * (W >= H ? CARD_MAX_W.landscape : CARD_MAX_W.portrait));
+
+const headOpts = (S: number, start?: number) => ({
+  start: start ?? Math.round(S * CARD_TYPE.head),
+  min: Math.round(S * CARD_TYPE.headMin),
+  maxLines: 2,
+  bold: true,
+  weight: 700,
+  balance: true,
+});
+
+/**
+ * One headline size for every caption in a film.
+ *
+ * Fitted card by card, a short caption came up large and the next one small, and
+ * the size jumped at every cut. Every caption is set at the size the longest one
+ * needs — but never below four-fifths of full size: one wordy caption should
+ * shrink itself, not every other caption in the video.
+ */
+export async function captionSize(texts: string[], W: number, H: number): Promise<number | undefined> {
+  const clean = texts.map((t) => t.trim()).filter(Boolean);
+  if (!clean.length) return undefined;
+  const S = shortSide(W, H);
+  const full = Math.round(S * CARD_TYPE.head);
+  const sizes = await Promise.all(clean.map(async (t) => (await fitChecked(t, cardTextWidth(W, H), headOpts(S))).fontSize));
+  return Math.max(Math.round(full * 0.8), Math.min(...sizes));
+}
 
 /**
  * A caption panel, sized to its own text.
  *
  * Left-aligned and set on a solid slab rather than dropped straight onto the
  * picture: a price read off a moving car is the one thing in the video that has
- * to be unambiguous. The panel is only as wide as it needs to be, so it never
- * curtains off the shot it is annotating.
+ * to be unambiguous. The panel is sized from what the renderer actually drew, so
+ * it hugs the text instead of cropping it, and never curtains off the shot.
  */
-async function cardPng(
+export async function cardPng(
   text: string,
   sub: string | undefined,
   W: number,
   H: number,
   accent: string,
   ink: string,
+  /** The film-wide headline size from captionSize(). A caption that cannot fit at it goes smaller. */
+  headSize?: number,
 ): Promise<Buffer> {
   const S = shortSide(W, H);
-  const maxText = Math.round(W * (W >= H ? CARD_MAX_W.landscape : CARD_MAX_W.portrait));
-  const head = fitText(text, maxText, {
-    start: Math.round(S * 0.058),
-    min: Math.round(S * 0.03),
-    maxLines: 2,
-    bold: true,
-  });
+  const maxText = cardTextWidth(W, H);
+  const head = await fitChecked(text, maxText, headOpts(S, headSize));
+  // The small line follows the headline down, so the pair keeps its proportion.
   const subFit = sub?.trim()
-    ? fitText(sub.trim(), maxText, { start: Math.round(S * 0.032), min: Math.round(S * 0.021), maxLines: 2 })
+    ? await fitChecked(sub.trim(), maxText, {
+        start: Math.round(Math.min(S * CARD_TYPE.sub, head.fontSize * 0.56)),
+        min: Math.round(S * CARD_TYPE.subMin),
+        maxLines: 2,
+        weight: 500,
+        balance: true,
+      })
     : null;
 
   const padX = Math.round(S * 0.042);
@@ -417,10 +567,7 @@ async function cardPng(
   const barW = Math.max(3, Math.round(S * 0.009));
   const gap = subFit ? Math.round(S * 0.018) : 0;
 
-  const widest = Math.max(
-    ...head.lines.map((l) => measure(l, head.fontSize, true)),
-    ...(subFit ? subFit.lines.map((l) => measure(l, subFit.fontSize, false)) : [0]),
-  );
+  const widest = Math.max(0, ...head.widths, ...(subFit ? subFit.widths : []));
   const w = Math.min(W - Math.round(S * 0.08), Math.round(barW + padX + widest + padX));
   const textW = w - barW - padX * 2;
   const headH = head.lineHeight * head.lines.length;
@@ -429,17 +576,11 @@ async function cardPng(
   const rx = Math.round(S * 0.012);
   const x = barW + padX;
 
-  // tspans() centres on the x it is given; these are left-aligned, so the anchor
-  // is overridden per line.
-  const line = (
-    f: FittedText,
-    top: number,
-    fill: string,
-    weight: number,
-  ): string =>
+  // tspans() centres on the x it is given; these are left-aligned.
+  const line = (f: CheckedText, top: number, fill: string, weight: number): string =>
     f.lines
       .map((t, i) => {
-        const over = measure(t, f.fontSize, weight >= 600) > textW;
+        const over = (f.widths[i] ?? 0) > textW;
         return `<text x="${x}" y="${top + i * f.lineHeight + f.fontSize}" text-anchor="start" font-family="${FONT}"
           font-size="${f.fontSize}" font-weight="${weight}" fill="${fill}"${
             over ? ` textLength="${textW}" lengthAdjust="spacingAndGlyphs"` : ''
@@ -594,6 +735,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     const totalDur = clipStart[clipCount - 1]! + metas[clipCount - 1]!.duration;
     const CARD_FADE = 0.28;
 
+    const headSize = await captionSize((overlay.cards ?? []).map((c) => c.text ?? ''), W, H);
     let cardNo = 0;
     for (const card of (overlay.cards ?? []).slice(0, 16)) {
       const text = card.text?.trim();
@@ -606,7 +748,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       const to = Math.min(bodyEnd, clipStart[ci]! + card.end * k);
       if (to - from < 0.8) continue; // too brief to read
 
-      const png = await cardPng(text, card.sub, W, H, accent, ink);
+      const png = await cardPng(text, card.sub, W, H, accent, ink, headSize);
       const cardH = (await sharp(png).metadata()).height ?? 0;
       const idx = await addOverlayInput(`card-${cardNo}.png`, png, totalDur);
       const top = Math.max(margin, H - footerH - margin - cardH);

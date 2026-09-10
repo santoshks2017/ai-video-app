@@ -182,7 +182,17 @@ export async function downloadFile(fileId: string, apiKey: string): Promise<{ by
     const mj = (await meta.json().catch(() => ({}))) as Record<string, unknown>;
     const state = String(mj.state ?? '');
     if (state === 'ACTIVE' || state === '') break;
-    if (state === 'FAILED') throw new OmniFlashError('omni-flash-file-failed', 'Generated file processing failed.');
+    if (state === 'FAILED') {
+      // The file record says why it failed. The bare "processing failed" this
+      // used to throw gave nobody anything to act on.
+      const why = (mj.error as { message?: string } | undefined)?.message?.trim();
+      throw new OmniFlashError(
+        'omni-flash-file-failed',
+        why
+          ? `Google could not finish the generated video: ${why}`
+          : 'Google could not finish the generated video and gave no reason — usually temporary, so try again.',
+      );
+    }
     await new Promise((r) => setTimeout(r, 5000));
   }
   const dl = await fetch(`${BASE}/files/${id}:download?alt=media`, { headers: headers(apiKey) });

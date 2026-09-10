@@ -143,6 +143,15 @@ export async function streamClip(
 
 /* ---- reference images (P0.4 / P0.2): uploaded or scraped, grounded into the model ---- */
 
+/**
+ * The name a reference image is stored under. Uploads arrive with names like
+ * "WhatsApp Image 2026-09-10 at 20.07.53 (1).jpeg"; storage keeps only safe
+ * characters. Saving and loading must agree on this, or every such image
+ * uploads fine and then 404s the moment anything asks for it by name.
+ */
+export const safeRefName = (filename: string): string =>
+  filename.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'ref.jpg';
+
 export async function putRef(
   filename: string,
   contentType: string,
@@ -150,8 +159,7 @@ export async function putRef(
 ): Promise<{ refId: string; storagePath: string }> {
   ensure();
   const refId = crypto.randomUUID();
-  const safe = filename.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'ref.jpg';
-  const storagePath = `refs/${refId}/${safe}`;
+  const storagePath = `refs/${refId}/${safeRefName(filename)}`;
   await getStorage()
     .bucket(BUCKET)
     .file(storagePath)

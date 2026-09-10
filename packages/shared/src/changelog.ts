@@ -18,10 +18,22 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '2.3';
+export const APP_VERSION = '2.4';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '2.4',
+    date: '2026-09-10',
+    title: 'Captions fit, Veo generates, and failures say why',
+    changes: [
+      'Captions and the footer no longer run out of their boxes. The server draws text in a wider font than the layout assumed, so long lines were cut off; every line is now measured exactly as it is drawn and shrunk until it fits. A caption that wraps is split into two even lines, and every caption in a video shares one size, so the text does not jump between scenes.',
+      'Google Veo 3.1 and Veo 3.1 Fast failed every run that carried a reference image. The images were sent in the format Google uses for its chat models, which its video endpoint rejects. They now go in the format Google\u2019s own SDK sends.',
+      'Typing a space in a storyboard caption no longer vanishes — the box was showing the tidied-up caption instead of what you typed, so a trailing space was removed before the next word.',
+      'When Omni fails while Google is finishing the video, the error now gives Google\u2019s actual reason instead of "Generated file processing failed", and every failed generation is logged so it can be diagnosed.',
+      'Reference images with spaces or brackets in their names — WhatsApp photos, for one — showed a broken thumbnail. They load again, including ones already uploaded.',
+    ],
+  },
   {
     version: '2.3',
     date: '2026-09-10',

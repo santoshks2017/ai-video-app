@@ -34,6 +34,7 @@ import {
   readObject,
   listJobsForProject,
   listRecentJobs,
+  safeRefName,
   type JobRecord,
   type JobClip,
 } from './store.js';
@@ -1139,6 +1140,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     };
   } catch (err) {
     const e = err as OmniFlashError | SeedanceError | VeoError;
+    app.log.error({ jobId, model: resolved?.modelId, code: e.code, message: e.message }, 'generation failed');
     const failedIdx = clips.findIndex((c) => c.status === 'pending');
     if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
     // Bill what actually rendered, not what was planned. A run that dies on
@@ -1171,7 +1173,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     } catch {
       /* ignore */
     }
-    return reply.code(e instanceof OmniFlashError || e instanceof SeedanceError ? e.status : 502).send({
+    return reply.code(e instanceof OmniFlashError || e instanceof SeedanceError || e instanceof VeoError ? e.status : 502).send({
       code: e.code ?? 'generate-failed',
       message: e.message,
       jobId,
@@ -1421,10 +1423,11 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       };
     } catch (err) {
       const e = err as OmniFlashError | SeedanceError | VeoError;
+      app.log.error({ jobId, model: resolved?.modelId, code: e.code, message: e.message }, 'generation failed');
       const failedIdx = clips.findIndex((c) => c.status === 'pending');
       if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
       await updateJob(jobId, { status: 'failed', error: e.message, clips }).catch(() => {});
-      return reply.code(e instanceof OmniFlashError || e instanceof SeedanceError ? e.status : 502).send({
+      return reply.code(e instanceof OmniFlashError || e instanceof SeedanceError || e instanceof VeoError ? e.status : 502).send({
         code: e.code ?? 'refine-failed',
         message: e.message,
         jobId,
@@ -1536,7 +1539,9 @@ app.post<{
 });
 
 app.get<{ Params: { refId: string; name: string } }>('/api/refs/:refId/:name', async (req, reply) => {
-  const obj = await readObject(`refs/${req.params.refId}/${req.params.name}`);
+  // Links saved before this fix carry the original upload name; storage has the
+  // safe one. Normalising here makes those existing thumbnails load again.
+  const obj = await readObject(`refs/${req.params.refId}/${safeRefName(req.params.name)}`);
   if (!obj) return reply.code(404).send({ code: 'not-found', message: 'No such reference image' });
   reply.header('content-type', obj.contentType);
   reply.header('cache-control', 'public, max-age=86400');

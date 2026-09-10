@@ -270,7 +270,8 @@ function copyInstruction(req: ScriptRequest): string {
     '  This covers brand and model names (Tata, Punch, Nexon, CNG), place names (New Delhi, Gurugram), the dealership name, and the English words Indians say in English: test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, airbags, manual, automatic, safety, family, mileage.',
     '  Hindi words stay in Devanagari. Numbers spoken in Hindi stay in Devanagari (सात लाख अड़सठ हज़ार). Only the English keeps Latin letters.',
     '',
-    '- Never invent a price, EMI, discount, mileage, interest rate or waiting period. Use only the facts above. Numbers are written as spoken words, never digits, and never the word "rupees" or the ₹ symbol.',
+    '- Never invent a price, EMI, discount, mileage, interest rate or waiting period. Use only the facts above.',
+    '- Write every number, price and unit as plain ENGLISH words in Latin letters — "fifteen lakh four thousand", "six airbags", "seventy kmpl". Never digits, never the ₹ symbol, never the word "rupees", and never the Devanagari spelling of a number. A phonetic respelling of a price does not survive the video model, and the price is the line that has to land.',
     ...(sub.avoid?.length
       ? ['', 'This format fails when it does these — do not:', ...sub.avoid.map((a) => `  - ${a}`)]
       : []),
@@ -305,6 +306,8 @@ function phoneticInstruction(
     '',
     'This is a light touch, not a conversion. Most of the line — usually all of it — comes back unchanged. Respelling a word that was already fine makes it worse, and respelling everything makes the whole line sound like a phrasebook being read aloud.',
     '',
+    'NEVER respell a number, price, quantity or unit. Those are already in English and must stay exactly as they are: "fifteen lakh four thousand" stays "fifteen lakh four thousand", not "pandrah LAAKH chaar ha-ZAAR".',
+    '',
     language.spokenGuide.trim(),
     '',
     ...(respell.length
@@ -329,9 +332,9 @@ function phoneticInstruction(
     'Wrong: NYOO DEL-ee ke JAS-par KAARZ SHO-room ka GLAAS fa-SAAD DE-khi-ye!',
     '       — every word mangled, including four that were already correct.',
     '',
-    'Line:  दो लाख पच्चीस हज़ार रुपये तक का cash discount।',
-    'Right: दो LAAKH pach-CHEES ha-ZAAR ru-PAY-ye तक का cash discount।',
-    '       — only the price is respelled, because that is where models actually fail. "cash discount" stays in English.',
+    'Line:  यह automatic variant fifteen lakh four thousand का है।',
+    'Right: यह automatic variant fifteen lakh four thousand का है।',
+    '       — nothing changed. The price is already English and must stay that way.',
     '',
     '## THE LINES',
     'Return each line with the meaning and word order identical. Do not add, drop, reorder or translate words — only change the spelling of the few that need it.',

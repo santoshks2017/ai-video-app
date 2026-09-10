@@ -256,7 +256,10 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
     }
   }
 
-  // On-screen card load (Premier Motors reference dropped a card when overloaded).
+  // On-screen card load. The video model no longer draws these — they are
+  // composited in post, so they can no longer be dropped or misspelled. What is
+  // left is a viewer problem: cards stacked this close together go by faster
+  // than anyone can read them.
   const cardMoments = plan.scenes.filter(
     (s) => !s.beat.isEndCard && (s.beat.card || (s.beat.cardLines ?? []).length),
   ).length;
@@ -265,7 +268,7 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
     checks.push({
       level: 'warn',
       code: 'card-overload',
-      text: `${cardMoments} on-screen cards in ${ctx.totalDuration}s. Models reliably render about ${cap} at this length — in the Premier Motors reference the extra offer card was dropped entirely. Cut a card or lengthen the video.`,
+      text: `${cardMoments} on-screen cards in ${ctx.totalDuration}s — roughly one every ${(ctx.totalDuration / cardMoments).toFixed(1)}s. Around ${cap} is as many as a viewer can take in at this length. Cut a card or lengthen the video.`,
     });
   }
 
@@ -274,7 +277,7 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
     checks.push({
       level: 'warn',
       code: 'long-onscreen-string',
-      text: `${longCards.length} on-screen string(s) run past ${LONG_STRING_CHARS} characters and are likely to render garbled. Shorten: "${longCards[0]!.slice(0, 50)}…".`,
+      text: `${longCards.length} on-screen string(s) run past ${LONG_STRING_CHARS} characters. They are composited, so they will be spelled correctly and will fit — but the panel shrinks the type to make them fit, and a card this long is read as a paragraph rather than a figure. Shorten: "${longCards[0]!.slice(0, 50)}…".`,
     });
   }
 

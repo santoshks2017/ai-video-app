@@ -108,7 +108,8 @@ export function Storyboard({
         )}
         <div className="section-desc">
           Edit any scene’s script or shot below — changes flow straight into the master prompt on the right, no
-          full rebuild of the brief.
+          full rebuild of the brief. On-screen text is deliberately absent from that prompt: it is composited over
+          the finished video in post, like the logos and the end card, so a price is never misspelled by the model.
           {editCount > 0 && (
             <>
               {' '}

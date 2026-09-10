@@ -7,6 +7,8 @@ import {
   estimateSegmentsCost,
   applyFeedback,
   overlayCopy,
+  buildPrompt,
+  overlayCards,
   type Brief,
   type PromptPart,
 } from '@ava/shared';
@@ -817,13 +819,21 @@ async function loadBriefAssets(brief: Brief): Promise<{
   return { references, dealerLogo, brandLogo };
 }
 
-/** The deterministic brand furniture laid over the finished cut. */
+/**
+ * The deterministic brand furniture laid over the finished cut.
+ *
+ * The captions are derived here rather than sent up with the request, from the
+ * same brief the prompt was built from — so what the video says and what it
+ * shows can never disagree, and no client can post its own text into a video.
+ */
 function buildOverlay(brief: Brief, dealerLogo?: Buffer, brandLogo?: Buffer): BrandOverlay {
   const copy = overlayCopy(brief);
+  const plan = buildPrompt(brief)?.scenePlan;
   return {
     footerText: copy.footerText,
     dealerLogo,
     brandLogo,
+    cards: plan ? overlayCards(plan) : [],
     endCard:
       brief.endCardOn && copy.endCardLines.length ? { lines: copy.endCardLines, seconds: 3 } : undefined,
     transition: 0.5,

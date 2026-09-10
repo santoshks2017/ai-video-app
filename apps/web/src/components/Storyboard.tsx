@@ -117,6 +117,9 @@ function CaptionEditor({
         placeholder="No caption on this scene"
         onChange={(v) => onChange({ card: v })}
       />
+      {headline.trim().length > 32 && (
+        <span className="hint">Long captions are set smaller to fit — under about 30 characters reads best.</span>
+      )}
       {card && (
         <AutoTextarea
           minRows={1}

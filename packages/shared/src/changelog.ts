@@ -18,10 +18,19 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '2.4';
+export const APP_VERSION = '2.5';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '2.5',
+    date: '2026-09-10',
+    title: 'Omni videos survive a failed file on Google\u2019s side',
+    changes: [
+      'Omni runs were failing with "The file failed to be processed". That message comes from Google after the video has already been made — only Google\u2019s downloadable copy of it failed. The app now reads the finished video back from the run itself, so the video is kept instead of lost, and nothing is generated or paid for twice.',
+      'The generated video is now taken from the model\u2019s output, never from inputs Google echoes back in the same response.',
+    ],
+  },
   {
     version: '2.4',
     date: '2026-09-10',

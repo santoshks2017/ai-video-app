@@ -1307,3 +1307,15 @@ textarea.guide {
 .gen-timer-row b { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 15px; }
 .gen-timer-bar { height: 4px; border-radius: 4px; background: var(--line); overflow: hidden; }
 .gen-timer-bar span { display: block; height: 100%; background: var(--accent); transition: width 1s linear; }
+
+/* Sign-in-free preview: said on every screen, because it spends real money. */
+.preview-banner {
+  margin: 0 0 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-wash);
+  color: var(--ink, #0f1e33);
+  font-size: 12.5px;
+  font-weight: 600;
+}

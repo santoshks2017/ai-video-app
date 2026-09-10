@@ -21,7 +21,7 @@ import {
   type PromptPart,
 } from '@ava/shared';
 import { loadConfig } from './config.js';
-import { generateClip, downloadFile, OmniFlashError, type OmniRef } from './omniFlash.js';
+import { generateClip, downloadFile, fetchInteractionVideo, OmniFlashError, type OmniRef } from './omniFlash.js';
 import { generateSeedanceClip, testSeedanceKey, SeedanceError, type SeedanceRef } from './seedance.js';
 import { generateVeoClip, VeoError } from './veo.js';
 import {
@@ -50,6 +50,7 @@ import {
   recordActivity,
   listActivity,
   allows,
+  PREVIEW_UID,
   type Caller,
 } from './users.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
@@ -75,8 +76,31 @@ import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './crede
 const config = loadConfig();
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 
-app.addHook('onSend', async (_req, reply, payload) => {
-  reply.header('access-control-allow-origin', config.allowOrigin);
+/**
+ * Which pages may read the API's replies: the live site, and this project's
+ * Firebase preview channels (ai-video-app-cd--<channel>.web.app). A preview link
+ * is a different origin; answering it with the live one made the browser discard
+ * every reply, so signing in on a preview silently did nothing. This decides who
+ * may READ a reply, not who may call — sign-in still decides that.
+ */
+const previewSite = (() => {
+  try {
+    const host = new URL(config.allowOrigin).hostname;
+    if (!host.endsWith('.web.app')) return null;
+    const site = host.slice(0, -'.web.app'.length).replace(/[^a-z0-9-]/gi, '');
+    return new RegExp('^https://' + site + '--[a-z0-9-]+\\.web\\.app$');
+  } catch {
+    return null;
+  }
+})();
+const corsOrigin = (origin: string | undefined): string =>
+  config.allowOrigin !== '*' && origin && (origin === config.allowOrigin || previewSite?.test(origin))
+    ? origin
+    : config.allowOrigin;
+
+app.addHook('onSend', async (req, reply, payload) => {
+  reply.header('access-control-allow-origin', corsOrigin(req.headers.origin));
+  reply.header('vary', 'Origin');
   reply.header('access-control-allow-headers', 'content-type, authorization');
   reply.header('access-control-allow-methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
   return payload;
@@ -94,6 +118,24 @@ app.get<{ Querystring: { deep?: string } }>('/api/health', async (req) => ({
 /* ============================ auth (shared password) ============================ */
 
 const OPEN_PATHS = new Set(['/api/health', '/api/session']);
+
+/**
+ * A preview that opens without signing in, when asked for. Honoured only while
+ * all three hold: the request arrived on the preview tag's own address
+ * (preview---…), so the live address can never reach it however a revision is
+ * configured; PREVIEW_OPEN_UNTIL is set on that revision; and that moment has not
+ * passed. The visitor is a creator — generate, edit the libraries — and never an
+ * admin, so API keys, people and the audit log stay out of reach.
+ */
+const PREVIEW_CALLER: Caller = {
+  uid: PREVIEW_UID,
+  email: 'preview@no-sign-in',
+  name: 'Preview (no sign-in)',
+  role: 'creator',
+  isOwner: false,
+};
+const previewOpen = (host: string | undefined): boolean =>
+  Number(process.env.PREVIEW_OPEN_UNTIL ?? 0) > Date.now() && String(host ?? '').startsWith('preview---');
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -150,6 +192,8 @@ app.addHook('preHandler', async (req, reply) => {
     const caller = await resolveIdToken(token);
     if (caller) req.caller = caller;
   }
+  // No signed-in person: a sign-in-free preview may stand in (see previewOpen).
+  if (!req.caller && previewOpen(req.headers.host)) req.caller = PREVIEW_CALLER;
 
   if (OPEN_PATHS.has(url)) return;
   if (!req.caller) {
@@ -174,6 +218,7 @@ app.addHook('preHandler', async (req, reply) => {
 app.get('/api/session', async (req) => ({
   authEnabled: true,
   signedIn: Boolean(req.caller),
+  previewOpen: req.caller?.uid === PREVIEW_UID,
   user: req.caller
     ? {
         id: req.caller.uid,
@@ -844,11 +889,24 @@ async function renderSegment(
     },
     model.apiKey,
   );
-  const bytes = clip.base64
-    ? Buffer.from(clip.base64, 'base64')
-    : clip.fileId
-      ? (await downloadFile(clip.fileId, model.apiKey)).bytes
-      : null;
+  let bytes: Buffer | null = clip.base64 ? Buffer.from(clip.base64, 'base64') : null;
+  if (!bytes && clip.fileId) {
+    try {
+      bytes = (await downloadFile(clip.fileId, model.apiKey)).bytes;
+    } catch (err) {
+      // The video was generated; only Google's file copy of it failed. Read it
+      // back from the finished interaction instead of paying to make it again.
+      bytes = await fetchInteractionVideo(clip.interactionId, model.apiKey).catch(() => null);
+      if (!bytes) {
+        app.log.error(
+          { interactionId: clip.interactionId, fileId: clip.fileId, message: (err as Error).message },
+          'omni file failed and the interaction had no inline video',
+        );
+        throw err;
+      }
+      app.log.warn({ interactionId: clip.interactionId, fileId: clip.fileId }, 'omni file failed; recovered the video from the interaction');
+    }
+  }
   if (!bytes) throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
   return { bytes, interactionId: clip.interactionId, renderResolution: omniRes };
 }

@@ -74,25 +74,51 @@ function buildInput(prompt: string, refs: OmniRef[] | undefined): unknown {
 }
 
 /** Walk an arbitrary response object for the first video part. */
-function findVideo(obj: unknown): { mimeType: string; data?: string; fileId?: string } | null {
+type VideoPart = { mimeType: string; data?: string; fileId?: string };
+
+/** A content part, if it is a video with bytes or a file behind it. */
+function videoPart(node: unknown): VideoPart | null {
+  if (!node || typeof node !== 'object') return null;
+  const rec = node as Record<string, unknown>;
+  const mime = String(rec.mime_type ?? rec.mimeType ?? '');
+  if (!(mime.startsWith('video/') || rec.type === 'video')) return null;
+  const data = typeof rec.data === 'string' ? rec.data : undefined;
+  const uri = typeof rec.uri === 'string' ? rec.uri : undefined;
+  const fileId = uri ? uri.split('/').filter(Boolean).slice(-1)[0]?.replace(/:.*$/, '') : undefined;
+  return data || fileId ? { mimeType: mime || 'video/mp4', data, fileId } : null;
+}
+
+/**
+ * The generated video in an interaction.
+ *
+ * The REST response is a list of steps — the user's input echoed back, the
+ * model's thinking, then its output — so the video that was MADE is looked for
+ * in the last model_output step first. Only if that shape is absent is the whole
+ * response walked, which is all this used to do: it would take whichever
+ * video-shaped part it reached first, echoed inputs included.
+ */
+function findVideo(obj: unknown): VideoPart | null {
+  const steps = (obj as { steps?: unknown } | null)?.steps;
+  if (Array.isArray(steps)) {
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const step = steps[i] as { type?: string; content?: unknown } | null;
+      if (step?.type !== 'model_output' || !Array.isArray(step.content)) continue;
+      for (const part of step.content) {
+        const v = videoPart(part);
+        if (v) return v;
+      }
+    }
+  }
   const seen = new Set<unknown>();
   const stack: unknown[] = [obj];
   while (stack.length) {
     const node = stack.pop();
     if (!node || typeof node !== 'object' || seen.has(node)) continue;
     seen.add(node);
-    const rec = node as Record<string, unknown>;
-
-    const mime = String(rec.mime_type ?? rec.mimeType ?? '');
-    const looksVideo = mime.startsWith('video/') || rec.type === 'video';
-    if (looksVideo) {
-      const data = typeof rec.data === 'string' ? rec.data : undefined;
-      const uri = typeof rec.uri === 'string' ? rec.uri : undefined;
-      const fileId = uri ? uri.split('/').filter(Boolean).slice(-1)[0]?.replace(/:.*$/, '') : undefined;
-      if (data || fileId) return { mimeType: mime || 'video/mp4', data, fileId };
-    }
-    for (const v of Object.values(rec)) {
-      if (v && typeof v === 'object') stack.push(v);
+    const v = videoPart(node);
+    if (v) return v;
+    for (const child of Object.values(node as Record<string, unknown>)) {
+      if (child && typeof child === 'object') stack.push(child);
     }
   }
   return null;
@@ -172,6 +198,24 @@ export async function generateClip(input: GenerateClipInput, apiKey: string): Pr
     base64: video.data,
     fileId: video.fileId,
   };
+}
+
+/**
+ * Read a finished interaction's video back, inline.
+ *
+ * Google documents that GET /interactions/{id} returns the video as base64 even
+ * when it was created with delivery "uri". That is the way round a generated file
+ * that fails Google's processing ("The file failed to be processed"): the video
+ * was made and only its file copy failed, so it is read again rather than
+ * generated — and paid for — a second time.
+ */
+export async function fetchInteractionVideo(interactionId: string, apiKey: string): Promise<Buffer | null> {
+  if (!interactionId) return null;
+  const res = await fetch(`${BASE}/interactions/${encodeURIComponent(interactionId)}`, { headers: headers(apiKey) });
+  if (!res.ok) return null;
+  const json = await res.json().catch(() => null);
+  const video = json ? findVideo(json) : null;
+  return video?.data ? Buffer.from(video.data, 'base64') : null;
 }
 
 /** For delivery=uri: wait until the generated file is ACTIVE, then return its bytes. */

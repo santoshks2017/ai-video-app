@@ -80,7 +80,7 @@ export interface SessionUser {
 
 export const session = {
   status: () =>
-    get<{ authEnabled: boolean; signedIn: boolean; user: SessionUser | null }>('/api/session'),
+    get<{ authEnabled: boolean; signedIn: boolean; previewOpen?: boolean; user: SessionUser | null }>('/api/session'),
 };
 
 /* ---------------- generic collection CRUD ---------------- */

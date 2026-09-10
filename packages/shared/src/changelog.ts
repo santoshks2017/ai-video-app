@@ -18,10 +18,24 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '2.2';
+export const APP_VERSION = '2.3';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '2.3',
+    date: '2026-09-10',
+    title: 'Veo 3.1, 1080p, editable captions and a generation timer',
+    changes: [
+      'On-screen text is editable in the storyboard: change a caption, add one to a scene that had none, remove one, or reset to the template. What you type is exactly what is composited over the video.',
+      'Words no longer get spoken twice. "six airbags airbags" came from the prompt\u2019s own rules quoting the same phrase the line used — the spoken line is now the only place a phrase appears, and the model is told to say each word once and never voice a shot direction.',
+      '1080p for every model. Omni and Veo render it natively; Seedance renders 720p and the finished video is upscaled in post — the editor and the history both say which. Cost is priced at the resolution actually rendered.',
+      'Google Veo 3.1 and Veo 3.1 Fast, on the same Gemini key as Omni. Omni is now listed as Gemini Omni 1.1 Flash so it is clear which one it is. Veo renders only 4, 6 or 8 seconds, so each clip is trimmed to its planned length.',
+      'A live timer while a video generates, with an estimate of what is left learned from this app\u2019s own past runs on that model — no provider reports progress, so history is the only honest source. Before you start, it says roughly how long a video usually takes.',
+      'The generation history shows how long each video took to make.',
+      'Clips that came back at different frame sizes are now scaled to match before stitching, instead of failing the whole compose.',
+    ],
+  },
   {
     version: '2.2',
     date: '2026-09-10',

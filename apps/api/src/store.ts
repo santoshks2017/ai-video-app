@@ -33,6 +33,8 @@ export interface JobClip {
   error?: string;
   /** Carried over from an earlier job rather than generated — costs nothing. */
   reused?: boolean;
+  /** Wall-clock time the provider took for this segment. Feeds the next run's ETA. */
+  renderMs?: number;
 }
 
 export interface JobRecord {
@@ -47,6 +49,8 @@ export interface JobRecord {
   /** Human label for the history list, e.g. "27s · Product Feature". */
   label?: string;
   modelName?: string;
+  /** Provider model id — names get edited, ids do not, and the ETA groups runs by model. */
+  modelId?: string;
   /** Frame grabbed from the finished video, for the history thumbnail. */
   posterPath?: string;
   status: 'running' | 'done' | 'failed';
@@ -64,6 +68,14 @@ export interface JobRecord {
   /** The single finished video (a run's cumulative clip, or the ffmpeg-stitched result). */
   finalStoragePath?: string;
   error?: string;
+  /**
+   * When rendering began and when the finished video was saved — the source of
+   * "took 4m 12s" in history, and of the estimate shown on the next run.
+   */
+  startedAt?: number;
+  finishedAt?: number;
+  /** The resolution the model rendered at, when the deliverable was upscaled from it. */
+  renderResolution?: string;
   /* ---- refinement: a partial re-run of an earlier job ---- */
   /** The job this one was refined from — set only on refinements. */
   parentJobId?: string;
@@ -71,6 +83,13 @@ export interface JobRecord {
   refinedParts?: number[];
   /** The reviewer's note that drove the retake. */
   feedback?: string;
+}
+
+/** The newest generations across every project — the history an ETA is learned from. */
+export async function listRecentJobs(limit = 200): Promise<JobRecord[]> {
+  ensure();
+  const snap = await getFirestore().collection('generations').orderBy('createdAt', 'desc').limit(limit).get();
+  return snap.docs.map((d) => d.data() as JobRecord);
 }
 
 export async function saveJob(rec: JobRecord): Promise<void> {

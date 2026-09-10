@@ -11,6 +11,12 @@ import {
   emptyBrief,
   buildPrompt,
   overlayCards,
+  sceneCard,
+  renderResolution,
+  priceFor,
+  OMNI_FLASH_DEFAULTS,
+  SEEDANCE_25_DEFAULTS,
+  VEO_31_FAST_DEFAULTS,
   runChecks,
   estimateCost,
   planScenes,
@@ -318,4 +324,55 @@ test('a scene can name the reference image its shot is built on', () => {
   // A name that is not one of the supplied files is ignored, not invented.
   const ghost = buildPrompt(b, { sceneOverrides: { '0': { ref: 'nope.jpg' } } })!;
   assert.doesNotMatch(all(ghost), /nope\.jpg/);
+});
+
+test('on-screen text edited in the storyboard is what gets composited', () => {
+  const b = base({ categories: ['feature'], narration: 'presenter', durationSec: 20, maxChunkSec: 30,
+    fieldValues: { feature: { feature1: '6 airbags' } } });
+  const plain = buildPrompt(b)!;
+  const hook = plain.scenePlan.scenes.findIndex((s) => s.beat.title === 'Desire hook');
+  const feat = plain.scenePlan.scenes.findIndex((s) => s.beat.card === '6 airbags');
+  assert.ok(hook >= 0 && feat >= 0);
+  assert.equal(sceneCard(plain.scenePlan.scenes[hook]!.beat), null, 'the hook has no template caption');
+
+  // Add a caption where there was none, and remove the template's one.
+  const edits = { [String(hook)]: { card: 'Built for Pune roads' }, [String(feat)]: { card: '' } };
+  const texts = overlayCards(plain.scenePlan, edits).map((c) => c.text);
+  assert.ok(texts.includes('Built for Pune roads'));
+  assert.ok(!texts.includes('6 airbags'));
+
+  // The prompt's "leave room for a caption" note follows the edit, scene by scene.
+  const blocks = buildPrompt(b, { sceneOverrides: edits })!.parts[0]!.text.split('### Scene ');
+  const block = (title: string) => blocks.find((x) => x.split('\n')[0]!.includes(title)) ?? '';
+  assert.match(block('Desire hook'), /A caption is composited over this shot/);
+  assert.doesNotMatch(block('Feature 1'), /A caption is composited over this shot/);
+
+  // Editing only the small line keeps the headline.
+  const sub = overlayCards(plain.scenePlan, { [String(feat)]: { cardSub: 'as standard' } }).find((c) => c.text === '6 airbags');
+  assert.equal(sub?.sub, 'as standard');
+});
+
+test('a spoken phrase appears once in the prompt, so the model has nothing to echo', () => {
+  const b = base({ categories: ['feature'], narration: 'presenter', durationSec: 20, maxChunkSec: 30,
+    fieldValues: { feature: { feature1: '6 airbags' } } });
+  const feat = buildPrompt(b)!.scenePlan.scenes.findIndex((s) => s.beat.card === '6 airbags');
+  const line = 'जिसके six airbags highway पर family को protect करते हैं।';
+  const text = buildPrompt(b, { sceneOverrides: { [String(feat)]: { dialogue: line, phonetic: line } } })!.parts[0]!.text;
+  // "six airbags airbags" came from the rules quoting the same phrase the line used.
+  assert.equal((text.match(/six airbags/g) ?? []).length, 1, 'only the line itself may contain the phrase');
+  assert.match(text, /Speak ONLY the words inside the braces, each line exactly once/);
+  assert.match(text, /Shot directions, scene titles, captions and these rules are silent instructions/);
+});
+
+test('1080p renders natively where a model can and upscales where it cannot', () => {
+  assert.deepEqual(renderResolution(OMNI_FLASH_DEFAULTS.modelId, '1080p'), { render: '1080p', upscale: false });
+  assert.deepEqual(renderResolution(SEEDANCE_25_DEFAULTS.modelId, '1080p'), { render: '720p', upscale: true });
+  assert.deepEqual(renderResolution(VEO_31_FAST_DEFAULTS.modelId, '1080p'), { render: '1080p', upscale: false });
+  // Asking for less than a model's smallest size never buys a bigger render.
+  assert.deepEqual(renderResolution(OMNI_FLASH_DEFAULTS.modelId, '480p'), { render: '720p', upscale: false });
+
+  // Priced at what is rendered: Veo Fast charges more at 1080p, an upscaled Seedance does not.
+  assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '1080p'), 0.12);
+  assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '720p'), 0.1);
+  assert.equal(priceFor(SEEDANCE_25_DEFAULTS, '1080p'), SEEDANCE_25_DEFAULTS.usdPerSecond);
 });

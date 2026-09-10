@@ -15,6 +15,8 @@ import {
   type CategoryId,
   type Project,
   type ProjectVideoSpec,
+  renderResolution,
+  priceFor,
 } from '@ava/shared';
 import { useApp, api, projectTabId } from '../state/appStore.js';
 import { Field, Panel, ImageUpload, Thumb, Confirm, Banner, Collapse } from '../components/ui.js';
@@ -158,7 +160,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const cost = useMemo(
     () =>
       brief && !promptOnly
-        ? estimateCost(brief, activeModel ? { usdPerSecond: activeModel.usdPerSecond } : {})
+        ? estimateCost(brief, activeModel ? { usdPerSecond: priceFor(activeModel, brief.resolution ?? '720p') } : {})
         : null,
     [brief, promptOnly, activeModel],
   );
@@ -558,11 +560,21 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   />
                 </Field>
                 <div className="row2">
-                  <Field label="Resolution">
+                  <Field
+                    label="Resolution"
+                    hint={(() => {
+                      if (!activeModel) return undefined;
+                      const r = renderResolution(activeModel.modelId, project.spec.resolution, activeModel.resolutions);
+                      return r.upscale
+                        ? `${activeModel.name} renders ${r.render}; the finished video is upscaled to ${project.spec.resolution} in post.`
+                        : `${activeModel.name} renders ${r.render} natively.`;
+                    })()}
+                  >
                     <select
                       value={project.spec.resolution}
                       onChange={(e) => setSpec({ resolution: e.target.value as ProjectVideoSpec['resolution'] })}
                     >
+                      <option value="1080p">1080p — Full HD</option>
                       <option value="720p">720p</option>
                       <option value="480p">480p</option>
                     </select>
@@ -756,6 +768,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               modelId={project.spec.modelId ?? activeModel?.id}
               modelLabel={activeModel?.name}
               project={{ id: project.id, name: project.name }}
+              sceneOverrides={project.sceneEdits}
+              resolution={project.spec.resolution}
               onGenerated={(jobId, finalUrl) =>
                 set({ status: 'generated', lastJobId: jobId, lastFinalUrl: finalUrl ?? undefined })
               }

@@ -11,7 +11,7 @@ import { WORDS_PER_SECOND } from './constants.js';
 import { buildContext, type RenderContext } from './context.js';
 import { buildBeats, collectStrings } from './buildBeats.js';
 import { planScenes, fmtTime } from './planScenes.js';
-import type { ScenePlan } from './types.js';
+import type { Beat, ScenePlan } from './types.js';
 import { CATEGORY_BY_ID } from './categories.js';
 import { rulebookText } from './rulebook.js';
 
@@ -56,7 +56,9 @@ function spokenLock(brief: Brief): string {
       '- CAPITALS mark the stressed syllable. Give it the stress; do not shout it, and do not treat capitals as an acronym to be spelled letter by letter.',
       '- Doubled vowels are long vowels: "AAJ" is aaj, "DRAAIV" is drive, "ee" is a long e.',
       '- An em dash is a short breath, not a spoken word.',
-      '- Numbers, prices and units are already plain English — "fifteen lakh four thousand", "six airbags" — and are read as ordinary English.',
+      '- Numbers, prices and units inside a line are already written as plain English words; read them as ordinary English.',
+    '- Speak ONLY the words inside the braces, each line exactly once, in order. Never repeat, echo or double a word — say every word the number of times it is written and no more.',
+    '- Shot directions, scene titles, captions and these rules are silent instructions. Never say any of their words aloud, even a word that also appears in the line.',
       '- CRITICAL: this is for the VOICE ONLY. Never render any of it as on-screen text, a subtitle or a caption. Nothing with hyphens or mid-word capitals may ever appear on screen.',
     );
   }
@@ -99,6 +101,13 @@ export interface SceneOverride {
    * picking the showroom photo for a macro of the headlamp.
    */
   ref?: string;
+  /**
+   * The on-screen caption for this scene, as the designer edited it. Undefined
+   * keeps the template's caption; an empty string removes it.
+   */
+  card?: string;
+  /** The smaller line under the caption. Undefined keeps the template's. */
+  cardSub?: string;
 }
 
 export interface BuildPromptOptions {
@@ -336,7 +345,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       } else if (dialogue) {
         L.push(`Story beat, told visually with no speech: ${dialogue}`);
       }
-      if (sc.beat.card || sc.beat.cardLines?.length) {
+      if (sceneCard(sc.beat, ov)) {
         // Room, not words: a caption is laid over this moment in post.
         L.push(
           'A caption is composited over this shot afterwards — leave the lower third uncluttered and draw no text here yourself.',
@@ -461,7 +470,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
               : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(sc.duration)} words, composed from this intent: ${d}`,
         );
       }
-      if (sc.beat.card || sc.beat.cardLines?.length) {
+      if (sceneCard(sc.beat, ov)) {
         C.push('  A caption is composited over this shot afterwards — leave the lower third clear, draw no text.');
       }
     });
@@ -520,7 +529,23 @@ export interface OverlayCard {
   partSeconds: number;
 }
 
-export function overlayCards(plan: ScenePlan): OverlayCard[] {
+/**
+ * The caption a scene actually carries: the designer's edit if there is one,
+ * otherwise the template's. The one place this is decided, so the storyboard,
+ * the prompt's "leave room for a caption" note and the compositor agree.
+ */
+export function sceneCard(beat: Beat, ov?: SceneOverride): { text: string; sub?: string } | null {
+  if (beat.isEndCard) return null;
+  const stacked = (beat.cardLines ?? []).map((l) => l.trim()).filter(Boolean);
+  const templateText = beat.card?.trim() || stacked[0] || '';
+  const templateSub = beat.card?.trim() ? beat.cardSub?.trim() || '' : stacked.slice(1).join(' · ');
+  const text = (ov?.card !== undefined ? ov.card : templateText).trim();
+  if (!text) return null;
+  const sub = (ov?.cardSub !== undefined ? ov.cardSub : templateSub).trim();
+  return { text, sub: sub || undefined };
+}
+
+export function overlayCards(plan: ScenePlan, overrides: Record<string, SceneOverride> = {}): OverlayCard[] {
   const out: OverlayCard[] = [];
   for (let p = 0; p < plan.parts; p++) {
     const scenes = plan.scenes.filter((s) => s.part === p);
@@ -529,19 +554,14 @@ export function overlayCards(plan: ScenePlan): OverlayCard[] {
     const partSeconds = Math.round((scenes[scenes.length - 1]!.end - partStart) * 10) / 10;
 
     for (const sc of scenes) {
-      if (sc.beat.isEndCard) continue;
-      const headline = sc.beat.card?.trim();
-      const stacked = (sc.beat.cardLines ?? []).map((l) => l.trim()).filter(Boolean);
-      const text = headline || stacked[0];
-      if (!text) continue;
+      const card = sceneCard(sc.beat, overrides[String(plan.scenes.indexOf(sc))]);
+      if (!card) continue;
       // A caption that covers its whole shot is wallpaper. Hold it off the cut
       // at either end so the picture is seen before the words arrive.
       const lead = Math.min(0.4, sc.duration * 0.1);
       out.push({
-        text,
-        sub: headline
-          ? sc.beat.cardSub?.trim() || undefined
-          : stacked.slice(1).join(' · ') || undefined,
+        text: card.text,
+        sub: card.sub,
         part: p + 1,
         start: Math.round((sc.start - partStart + lead) * 10) / 10,
         end: Math.round((sc.end - partStart - lead) * 10) / 10,

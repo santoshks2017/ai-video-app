@@ -9,12 +9,21 @@ import {
   overlayCopy,
   buildPrompt,
   overlayCards,
+  renderResolution,
+  priceFor,
+  shortSideFor,
+  sceneCard,
+  VEO_31_DEFAULTS,
+  VEO_31_FAST_DEFAULTS,
+  type SceneOverride,
+  type Resolution,
   type Brief,
   type PromptPart,
 } from '@ava/shared';
 import { loadConfig } from './config.js';
 import { generateClip, downloadFile, OmniFlashError, type OmniRef } from './omniFlash.js';
 import { generateSeedanceClip, testSeedanceKey, SeedanceError, type SeedanceRef } from './seedance.js';
+import { generateVeoClip, VeoError } from './veo.js';
 import {
   saveJob,
   updateJob,
@@ -24,11 +33,12 @@ import {
   putRef,
   readObject,
   listJobsForProject,
+  listRecentJobs,
   type JobRecord,
   type JobClip,
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
-import { composeFinal, lastFrame, posterFrame, selfTest, type BrandOverlay } from './post.js';
+import { composeFinal, lastFrame, posterFrame, selfTest, trimClip, type BrandOverlay } from './post.js';
 import { bearer } from './auth.js';
 import {
   resolveIdToken,
@@ -381,6 +391,11 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
   const project = req.body?.projectId
     ? await getOne<Record<string, any>>('projects', req.body.projectId)
     : null;
+  // The writer must not say aloud what a caption already shows — and the caption
+  // to avoid is the one the designer edited, not the template's.
+  for (const sc of scenes) {
+    sc.card = sceneCard(plan.scenes[sc.index]!.beat, project?.sceneEdits?.[String(sc.index)])?.text;
+  }
   let carSubject: Record<string, unknown> | undefined;
   if (project?.carId) {
     const car = await getOne<Record<string, any>>('cars', project.carId).catch(() => null);
@@ -491,6 +506,15 @@ app.post('/api/models/seed', async () => {
   await addModel(gemini.id, { ...OMNI_FLASH_DEFAULTS, modelId: config.omniFlashModel }, {
     isDefault: !models.some((m) => m.isDefault),
   });
+  // Veo 3.1 runs on the same Gemini key as Omni.
+  await addModel(gemini.id, VEO_31_DEFAULTS);
+  await addModel(gemini.id, VEO_31_FAST_DEFAULTS);
+  // The Omni record predates the version in its name; say which Omni it is.
+  const staleOmni = models.find((m) => m.modelId === 'gemini-omni-1.1-flash' && m.name === 'Gemini Omni Flash');
+  if (staleOmni) {
+    await patch('models', staleOmni.id, { name: OMNI_FLASH_DEFAULTS.name, resolutions: OMNI_FLASH_DEFAULTS.resolutions });
+    added.push(`renamed to ${OMNI_FLASH_DEFAULTS.name}`);
+  }
 
   // Languages ship with the same additive guarantee: only what is missing.
   const languages = await listAll<Record<string, any>>('languages');
@@ -638,8 +662,13 @@ app.post<{ Body: { url?: string; query?: string } }>('/api/clients/gmb', async (
   }
 });
 
-/** Resolution for v1: Omni Flash is used at 720p (PRD P0.3 note). */
-const RES = '720p' as const;
+/**
+ * The resolution a brief asks for. Unset means 720p, which is what every
+ * project before 1080p was made at. The model may render lower — Seedance tops
+ * out at 720p — in which case post-production upscales (see renderSegment).
+ */
+const wantedResolution = (brief: Brief): Resolution =>
+  brief.resolution === '1080p' || brief.resolution === '480p' ? brief.resolution : '720p';
 
 interface GenerateBody {
   brief: Brief;
@@ -650,6 +679,8 @@ interface GenerateBody {
   /** Files this generation under a project so it shows in that project's history. */
   projectId?: string;
   projectName?: string;
+  /** Storyboard edits — the captions are composited from these. */
+  sceneOverrides?: Record<string, SceneOverride>;
 }
 
 interface ResolvedModel {
@@ -662,6 +693,8 @@ interface ResolvedModel {
   minClipSec: number;
   maxClipSec: number;
   label: string;
+  usdPerSecondByResolution?: Partial<Record<Resolution, number>>;
+  resolutions?: Resolution[];
 }
 
 /** Pick the model for this run and fetch the key it needs. */
@@ -713,6 +746,8 @@ async function resolveModel(requestedId?: string): Promise<ResolvedModel | { err
     minClipSec: Number(chosen.minClipSec ?? 3),
     maxClipSec: Number(chosen.maxClipSec ?? 10),
     label: chosen.name ?? chosen.modelId,
+    usdPerSecondByResolution: chosen.usdPerSecondByResolution,
+    resolutions: Array.isArray(chosen.resolutions) ? chosen.resolutions : undefined,
   };
 }
 
@@ -730,11 +765,14 @@ async function renderSegment(
     prompt: string;
     aspect: Brief['aspect'];
     duration: number;
+    /** The deliverable resolution. The model may render lower; post upscales. */
+    resolution: Resolution;
     seedFrame?: Buffer;
     references: OmniRef[];
   },
-): Promise<{ bytes: Buffer; interactionId: string }> {
+): Promise<{ bytes: Buffer; interactionId: string; renderResolution: Resolution }> {
   const seeded = Boolean(req.seedFrame) && model.supportsImageToVideo;
+  const { render } = renderResolution(model.modelId, req.resolution, model.resolutions);
 
   if (model.provider === 'byteplus-ark') {
     const refs: SeedanceRef[] = [];
@@ -747,7 +785,7 @@ async function renderSegment(
         prompt: req.prompt,
         model: model.modelId,
         aspect: req.aspect,
-        resolution: RES,
+        resolution: render,
         duration: req.duration,
         minSec: model.minClipSec,
         maxSec: model.maxClipSec,
@@ -756,7 +794,35 @@ async function renderSegment(
       },
       model.apiKey,
     );
-    return { bytes: clip.bytes, interactionId: clip.taskId };
+    return { bytes: clip.bytes, interactionId: clip.taskId, renderResolution: render };
+  }
+
+  // Veo 3.1 shares the Gemini key with Omni but is a different API: a
+  // long-running operation that renders only 4, 6 or 8 seconds. It comes back
+  // at least as long as planned, so it is trimmed to the segment before the
+  // crossfades, captions and seed frames downstream ever see it.
+  if (/^veo-/.test(model.modelId)) {
+    const veoRes = render === '1080p' ? '1080p' : '720p';
+    const clip = await generateVeoClip(
+      {
+        prompt: req.prompt,
+        model: model.modelId,
+        aspect: req.aspect,
+        resolution: veoRes,
+        duration: req.duration,
+        firstFrame: seeded ? { data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg' } : undefined,
+        references: req.references
+          .filter((r) => r.kind === 'image' && r.data)
+          .slice(0, Math.min(3, model.maxReferenceImages))
+          .map((r) => ({ data: r.data!, mimeType: r.mimeType })),
+      },
+      model.apiKey,
+    );
+    return {
+      bytes: await trimClip(clip.bytes, req.duration),
+      interactionId: clip.operation,
+      renderResolution: veoRes,
+    };
   }
 
   // Google Gemini (Omni Flash): the seed frame is frame 1, so the model
@@ -765,11 +831,12 @@ async function renderSegment(
   if (seeded) refs.push({ data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
   refs.push(...req.references.slice(0, Math.max(0, model.maxReferenceImages - refs.length)));
 
+  const omniRes = render === '480p' ? '720p' : render;
   const clip = await generateClip(
     {
       prompt: req.prompt,
       aspect: req.aspect,
-      resolution: RES,
+      resolution: omniRes,
       references: refs.length ? refs : undefined,
       task: seeded ? 'image_to_video' : refs.length ? 'reference_to_video' : 'text_to_video',
       model: model.modelId,
@@ -782,7 +849,7 @@ async function renderSegment(
       ? (await downloadFile(clip.fileId, model.apiKey)).bytes
       : null;
   if (!bytes) throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
-  return { bytes, interactionId: clip.interactionId };
+  return { bytes, interactionId: clip.interactionId, renderResolution: omniRes };
 }
 
 /**
@@ -822,23 +889,87 @@ async function loadBriefAssets(brief: Brief): Promise<{
 /**
  * The deterministic brand furniture laid over the finished cut.
  *
- * The captions are derived here rather than sent up with the request, from the
- * same brief the prompt was built from — so what the video says and what it
- * shows can never disagree, and no client can post its own text into a video.
+ * Captions are laid out from the same brief and storyboard edits the prompt was
+ * built from, so the text the designer typed lands on exactly the scene they
+ * typed it on, and what the video shows cannot drift from what it says.
  */
-function buildOverlay(brief: Brief, dealerLogo?: Buffer, brandLogo?: Buffer): BrandOverlay {
+function buildOverlay(
+  brief: Brief,
+  sceneOverrides: Record<string, SceneOverride> | undefined,
+  dealerLogo?: Buffer,
+  brandLogo?: Buffer,
+): BrandOverlay {
   const copy = overlayCopy(brief);
-  const plan = buildPrompt(brief)?.scenePlan;
+  const plan = buildPrompt(brief, { sceneOverrides })?.scenePlan;
   return {
     footerText: copy.footerText,
     dealerLogo,
     brandLogo,
-    cards: plan ? overlayCards(plan) : [],
+    cards: plan ? overlayCards(plan, sceneOverrides ?? {}) : [],
     endCard:
       brief.endCardOn && copy.endCardLines.length ? { lines: copy.endCardLines, seconds: 3 } : undefined,
+    // A 1080p deliverable from a model that rendered 720p is upscaled here.
+    targetShortSide: shortSideFor(wantedResolution(brief)),
     transition: 0.5,
   };
 }
+
+/**
+ * How long a generation should take, learned from this app's own finished runs.
+ *
+ * No provider reports progress: Omni answers synchronously, Seedance and Veo only
+ * say queued or running. So the honest figure is what the same model has
+ * actually taken here — wall-clock seconds per second of video, the median of its
+ * recent runs — scaled to this video. A model with no history yet gets a
+ * cautious default, and the estimate sharpens as runs accumulate.
+ */
+const DEFAULT_SECONDS_PER_VIDEO_SECOND = 12;
+
+app.get<{ Querystring: { modelId?: string; resolution?: string; seconds?: string; parts?: string } }>(
+  '/api/generate/eta',
+  async (req) => {
+    const videoSeconds = Math.max(1, Number(req.query.seconds) || 1);
+    const parts = Math.max(1, Math.round(Number(req.query.parts) || 1));
+    const resolution = req.query.resolution || '720p';
+    const picked = await resolveModel(req.query.modelId);
+    const modelId = 'error' in picked ? '' : picked.modelId;
+    // Runs saved before jobs carried a model id are matched by name — including
+    // Omni's name from before it said which version it was.
+    const names = new Set(
+      'error' in picked
+        ? []
+        : [picked.label, ...(picked.modelId === 'gemini-omni-1.1-flash' ? ['Gemini Omni Flash'] : [])],
+    );
+    const sameModel = (j: JobRecord): boolean =>
+      j.modelId ? j.modelId === modelId : Boolean(j.modelName && names.has(j.modelName));
+
+    // Fresh generations only: a retake re-uses most of its segments and finishes
+    // in a fraction of the time, which would drag the estimate down.
+    const finished = (await listRecentJobs(300)).filter(
+      (j) => j.status === 'done' && !j.parentJobId && sameModel(j),
+    );
+    const sameRes = finished.filter((j) => (j.resolution || '720p') === resolution);
+    const rate = (j: JobRecord): number => {
+      const ms = (j.finishedAt ?? j.updatedAt) - (j.startedAt ?? j.createdAt);
+      return j.totalSeconds > 0 && ms > 0 ? ms / 1000 / j.totalSeconds : 0;
+    };
+    const pool = (sameRes.length >= 2 ? sameRes : finished)
+      .slice(0, 20)
+      .map(rate)
+      .filter((r) => r > 0);
+
+    if (!pool.length) {
+      return {
+        seconds: Math.round(videoSeconds * DEFAULT_SECONDS_PER_VIDEO_SECOND + parts * 10 + 20),
+        basis: 'default' as const,
+        samples: 0,
+      };
+    }
+    const sorted = [...pool].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)]!;
+    return { seconds: Math.round(videoSeconds * median), basis: 'history' as const, samples: pool.length };
+  },
+);
 
 /**
  * P0.1 / P0.7 — generate the video by running the parts as a create-then-extend
@@ -863,7 +994,19 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   // Narrowing doesn't survive into the closures below, so bind it explicitly.
   const resolved: ResolvedModel = picked;
 
-  const cost = estimateCost(brief, { usdPerSecond: resolved.usdPerSecond });
+  const wanted = wantedResolution(brief);
+  const plannedRes = renderResolution(resolved.modelId, wanted, resolved.resolutions);
+  // Priced at what the model renders: an upscaled 1080p costs what 720p costs.
+  const usdPerSecond = priceFor(
+    {
+      modelId: resolved.modelId,
+      usdPerSecond: resolved.usdPerSecond,
+      usdPerSecondByResolution: resolved.usdPerSecondByResolution,
+      resolutions: resolved.resolutions ?? ['720p'],
+    },
+    wanted,
+  );
+  const cost = estimateCost(brief, { usdPerSecond });
   if (cost.needsConfirmation && (confirmedCostInr ?? 0) < cost.inr) {
     return reply.code(428).send({
       code: 'cost-confirmation-required',
@@ -893,17 +1036,20 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     projectName: req.body?.projectName,
     label: `${cost.totalSeconds}s · ${brief.categories.length} use case${brief.categories.length === 1 ? '' : 's'}`,
     modelName: resolved.label,
+    modelId: resolved.modelId,
     status: 'running',
     createdAt: now,
+    startedAt: now,
     updatedAt: now,
     categories: brief.categories,
     dealerName: brief.dealer.dealerName,
     aspect: brief.aspect,
-    resolution: RES,
+    resolution: wanted,
+    renderResolution: plannedRes.upscale ? plannedRes.render : undefined,
     totalSeconds: cost.totalSeconds,
     costInr: cost.inr,
     costUsd: cost.usd,
-    usdPerSecond: resolved.usdPerSecond,
+    usdPerSecond,
     clips,
   };
   await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
@@ -924,16 +1070,18 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       const isFirst = i === 0;
       const seedFrame = !isFirst && prevBytes ? ((await lastFrame(prevBytes)) ?? undefined) : undefined;
 
+      const renderStart = Date.now();
       const { bytes, interactionId } = await renderSegment(resolved, {
         prompt: isFirst ? part.text : part.continuationText || part.text,
         aspect: brief.aspect,
         duration: part.duration,
+        resolution: wanted,
         seedFrame,
         references,
       });
 
       const storagePath = await uploadClip(jobId, part.partNum, bytes, 'video/mp4');
-      clips[i] = { ...clips[i]!, interactionId, storagePath, status: 'done' };
+      clips[i] = { ...clips[i]!, interactionId, storagePath, status: 'done', renderMs: Date.now() - renderStart };
       await updateJob(jobId, { clips });
 
       segmentBytes.push(bytes);
@@ -943,7 +1091,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     // Post-production: crossfade the segments, append a real end card, and
     // overlay the footer bar + logos. Everything that must be legible is drawn
     // here rather than generated.
-    const finalBytes = await composeFinal(segmentBytes, buildOverlay(brief, dealerLogo, brandLogo));
+    const finalBytes = await composeFinal(segmentBytes, buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo));
     const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 
     // Thumbnail for the project's generation history.
@@ -954,7 +1102,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       posterPath = put?.storagePath;
     }
 
-    await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath });
+    await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath, finishedAt: Date.now() });
     if (req.caller) {
       await recordActivity(req.caller, {
         type: 'generate',
@@ -990,7 +1138,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       clips: clipsForClient(jobId, clips),
     };
   } catch (err) {
-    const e = err as OmniFlashError | SeedanceError;
+    const e = err as OmniFlashError | SeedanceError | VeoError;
     const failedIdx = clips.findIndex((c) => c.status === 'pending');
     if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
     // Bill what actually rendered, not what was planned. A run that dies on
@@ -1063,6 +1211,7 @@ interface RefineBody {
   projectId?: string;
   projectName?: string;
   confirmedCostInr?: number;
+  sceneOverrides?: Record<string, SceneOverride>;
 }
 
 app.post<{ Params: { jobId: string }; Body: RefineBody }>(
@@ -1109,7 +1258,17 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       if ('error' in picked) return reply.code(503).send({ code: picked.code, message: picked.error });
       resolved = picked;
     }
-    const usdPerSecond = resolved?.usdPerSecond ?? source.usdPerSecond ?? config.usdPerSecond;
+    const usdPerSecond = resolved
+      ? priceFor(
+          {
+            modelId: resolved.modelId,
+            usdPerSecond: resolved.usdPerSecond,
+            usdPerSecondByResolution: resolved.usdPerSecondByResolution,
+            resolutions: resolved.resolutions ?? ['720p'],
+          },
+          wantedResolution(brief),
+        )
+      : (source.usdPerSecond ?? config.usdPerSecond);
     const redoSeconds = parts
       .filter((p) => redo.includes(p.partNum))
       .reduce((a, p) => a + p.duration, 0);
@@ -1149,13 +1308,15 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         ? `Retake · segment${redo.length > 1 ? 's' : ''} ${redo.join(', ')} of ${parts.length}`
         : 'Restitch · overlays only',
       modelName: resolved?.label ?? source.modelName,
+      modelId: resolved?.modelId,
       status: 'running',
       createdAt: now,
+      startedAt: now,
       updatedAt: now,
       categories: brief.categories,
       dealerName: brief.dealer.dealerName,
       aspect: brief.aspect,
-      resolution: RES,
+      resolution: wantedResolution(brief),
       totalSeconds: Math.round(totalSeconds * 10) / 10,
       costInr: cost.inr,
       costUsd: cost.usd,
@@ -1191,10 +1352,12 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
           // Seed from whatever now precedes this segment — a re-used clip or a
           // freshly retaken one — so the retake still cuts against its neighbour.
           const seedFrame = !isFirst && prevBytes ? ((await lastFrame(prevBytes)) ?? undefined) : undefined;
+          const renderStart = Date.now();
           const rendered = await renderSegment(resolved!, {
             prompt: applyFeedback(isFirst ? part.text : part.continuationText || part.text, feedback),
             aspect: brief.aspect,
             duration: part.duration,
+            resolution: wantedResolution(brief),
             seedFrame,
             references,
           });
@@ -1204,6 +1367,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
             interactionId: rendered.interactionId,
             storagePath: await uploadClip(jobId, part.partNum, bytes, 'video/mp4'),
             status: 'done',
+            renderMs: Date.now() - renderStart,
           };
         }
 
@@ -1214,7 +1378,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
 
       // Overlay copy is rebuilt from the current brief, so a footer or end-card
       // correction lands here even on the free restitch path.
-      const finalBytes = await composeFinal(segmentBytes, buildOverlay(brief, dealerLogo, brandLogo));
+      const finalBytes = await composeFinal(segmentBytes, buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo));
       const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 
       let posterPath: string | undefined;
@@ -1223,7 +1387,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         posterPath = (await putRef(`poster-${jobId}.jpg`, 'image/jpeg', poster).catch(() => null))?.storagePath;
       }
 
-      await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath });
+      await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath, finishedAt: Date.now() });
       if (req.caller) {
         await recordActivity(req.caller, {
           type: 'retake',
@@ -1256,7 +1420,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         clips: clipsForClient(jobId, clips),
       };
     } catch (err) {
-      const e = err as OmniFlashError | SeedanceError;
+      const e = err as OmniFlashError | SeedanceError | VeoError;
       const failedIdx = clips.findIndex((c) => c.status === 'pending');
       if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
       await updateJob(jobId, { status: 'failed', error: e.message, clips }).catch(() => {});
@@ -1293,6 +1457,13 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req)
       parentJobId: j.parentJobId,
       refinedParts: j.refinedParts,
       feedback: j.feedback,
+      // Older runs predate startedAt/finishedAt; their record timestamps are
+      // the same span, measured from job creation to the last write.
+      durationMs:
+        j.status === 'running'
+          ? undefined
+          : Math.max(0, (j.finishedAt ?? j.updatedAt) - (j.startedAt ?? j.createdAt)) || undefined,
+      renderResolution: j.renderResolution,
       finalUrl: j.finalStoragePath ? `/api/clips/${j.jobId}/final` : null,
       posterUrl: j.posterPath ? `/api/clips/${j.jobId}/poster` : null,
     })),

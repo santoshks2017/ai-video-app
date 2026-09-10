@@ -9,6 +9,7 @@ import {
   type GenerateResult,
   type GenerationHistoryItem,
 } from '../lib/api.js';
+import { GenTimer, fmtDur, type Eta } from './GenTimer.js';
 
 /**
  * PRD P0.1 + P0.10 — runs the real generation and shows the ONE finished video
@@ -25,6 +26,8 @@ export function GenerationPanel({
   modelId,
   modelLabel,
   project,
+  sceneOverrides,
+  resolution,
   onGenerated,
 }: {
   brief: Brief;
@@ -36,6 +39,10 @@ export function GenerationPanel({
   /** Which registered model to generate with. */
   modelId?: string;
   modelLabel?: string;
+  /** Storyboard edits — the edited captions are composited from these. */
+  sceneOverrides?: Record<string, unknown>;
+  /** The deliverable resolution, for the time estimate. */
+  resolution?: string;
   /** Files each run under this project so its history survives regeneration. */
   project?: { id: string; name: string };
   /** Lets the caller record the finished job against a project. */
@@ -76,11 +83,42 @@ export function GenerationPanel({
     void loadHistory();
   }, [loadHistory]);
 
+  // How long a run should take, from this app's own history on the model.
+  const videoSeconds = Math.round(parts.reduce((a, p) => a + p.duration, 0));
+  const [eta, setEta] = useState<Eta | null>(null);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const loadEta = useCallback(async () => {
+    if (!videoSeconds) return;
+    const r = await api.eta({ modelId, resolution: resolution ?? '720p', seconds: videoSeconds, parts: parts.length });
+    if (!isApiError(r)) setEta(r);
+  }, [modelId, resolution, videoSeconds, parts.length]);
+  useEffect(() => {
+    void loadEta();
+  }, [loadEta]);
+  // A one-second tick, only while a run is in flight.
+  useEffect(() => {
+    if (!startedAt) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
+
   const run = async () => {
     setStatus('running');
     setError('');
     setResult(null);
-    const r = await api.generate(brief, parts, needsCostConfirm ? costInr : undefined, modelId, project);
+    setStartedAt(Date.now());
+    setNow(Date.now());
+    const r = await api.generate(
+      brief,
+      parts,
+      needsCostConfirm ? costInr : undefined,
+      modelId,
+      project,
+      sceneOverrides,
+    );
+    setStartedAt(null);
+    void loadEta();
     if (isApiError(r)) {
       setStatus('error');
       setError(`${r.code}: ${r.message}`);
@@ -163,6 +201,7 @@ export function GenerationPanel({
       refineNeedsConfirm ? refineInr : undefined,
       modelId,
       project,
+      sceneOverrides,
     );
     setRefineStatus('idle');
     if (isApiError(r)) {
@@ -216,13 +255,14 @@ export function GenerationPanel({
                 ? 'Regenerate'
                 : 'Generate video'}
           </button>
-          {status === 'running' && (
-            <span className="hint">
-              {parts.length > 1 ? `${parts.length} segments, ` : ''}a minute or two per segment — keep this tab
-              open.
-            </span>
+          {status !== 'running' && eta && (
+            <span className="hint">Usually ready in about {fmtDur(eta.seconds)}</span>
           )}
         </div>
+
+        {status === 'running' && startedAt && (
+          <GenTimer startedAt={startedAt} now={now} eta={eta} segments={parts.length} />
+        )}
 
         {status === 'error' && (
           <div className="check bad" style={{ marginTop: 10 }}>
@@ -437,9 +477,12 @@ export function GenerationPanel({
                         h.parentJobId ? h.label : null,
                         h.totalSeconds ? `${h.totalSeconds}s` : null,
                         h.aspect,
-                        h.resolution,
+                        h.renderResolution ? `${h.resolution} (upscaled from ${h.renderResolution})` : h.resolution,
                         h.segments ? `${h.segments} segment${h.segments > 1 ? 's' : ''}` : null,
                         h.modelName,
+                        h.durationMs
+                          ? `${h.status === 'failed' ? 'failed after' : 'took'} ${fmtDur(h.durationMs / 1000)}`
+                          : null,
                       ]
                         .filter(Boolean)
                         .join(' · ')}

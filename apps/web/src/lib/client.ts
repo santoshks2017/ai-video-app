@@ -116,6 +116,7 @@ export async function uploadRef(file: File, label: string, kind = 'dealer') {
     storagePath: r.storagePath,
     filename: r.filename,
     label: r.label,
-    url: `${BASE}/api/refs/${r.refId}/${r.filename}`,
+    // Link to the name storage actually keeps, not the name it was uploaded as.
+    url: `${BASE}/api/${r.storagePath}`,
   };
 }

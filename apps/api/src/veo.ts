@@ -102,11 +102,14 @@ export async function generateVeoClip(input: VeoInput, apiKey: string): Promise<
     withReferences: references.length > 0,
   });
 
-  const inline = (img: VeoImage) => ({ inlineData: { mimeType: img.mimeType, data: img.data } });
+  // Veo on the Gemini API takes image bytes as {bytesBase64Encoded, mimeType} —
+  // the shape Google's own SDK sends. The generateContent image shape is
+  // rejected here, which failed every Veo request that carried an image.
+  const encoded = (img: VeoImage) => ({ bytesBase64Encoded: img.data, mimeType: img.mimeType });
   const instance: Record<string, unknown> = { prompt: veoPrompt(input.prompt) };
-  if (firstFrame) instance.image = inline(firstFrame);
+  if (firstFrame) instance.image = encoded(firstFrame);
   if (references.length) {
-    instance.referenceImages = references.map((r) => ({ image: inline(r), referenceType: 'asset' }));
+    instance.referenceImages = references.map((r) => ({ image: encoded(r), referenceType: 'asset' }));
   }
 
   const body = {
@@ -114,10 +117,11 @@ export async function generateVeoClip(input: VeoInput, apiKey: string): Promise<
     parameters: {
       aspectRatio: input.aspect === '1:1' ? '16:9' : input.aspect,
       resolution: input.resolution,
-      durationSeconds: String(seconds),
+      durationSeconds: seconds,
       // Veo refuses "allow_all" once any image is supplied.
       personGeneration: firstFrame || references.length ? 'allow_adult' : 'allow_all',
-      numberOfVideos: 1,
+      // The wire name; `numberOfVideos` is only the SDK's name for it.
+      sampleCount: 1,
     },
   };
 

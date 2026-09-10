@@ -21,7 +21,7 @@ import {
   type PromptPart,
 } from '@ava/shared';
 import { loadConfig } from './config.js';
-import { generateClip, downloadFile, OmniFlashError, type OmniRef } from './omniFlash.js';
+import { generateClip, downloadFile, fetchInteractionVideo, OmniFlashError, type OmniRef } from './omniFlash.js';
 import { generateSeedanceClip, testSeedanceKey, SeedanceError, type SeedanceRef } from './seedance.js';
 import { generateVeoClip, VeoError } from './veo.js';
 import {
@@ -844,11 +844,24 @@ async function renderSegment(
     },
     model.apiKey,
   );
-  const bytes = clip.base64
-    ? Buffer.from(clip.base64, 'base64')
-    : clip.fileId
-      ? (await downloadFile(clip.fileId, model.apiKey)).bytes
-      : null;
+  let bytes: Buffer | null = clip.base64 ? Buffer.from(clip.base64, 'base64') : null;
+  if (!bytes && clip.fileId) {
+    try {
+      bytes = (await downloadFile(clip.fileId, model.apiKey)).bytes;
+    } catch (err) {
+      // The video was generated; only Google's file copy of it failed. Read it
+      // back from the finished interaction instead of paying to make it again.
+      bytes = await fetchInteractionVideo(clip.interactionId, model.apiKey).catch(() => null);
+      if (!bytes) {
+        app.log.error(
+          { interactionId: clip.interactionId, fileId: clip.fileId, message: (err as Error).message },
+          'omni file failed and the interaction had no inline video',
+        );
+        throw err;
+      }
+      app.log.warn({ interactionId: clip.interactionId, fileId: clip.fileId }, 'omni file failed; recovered the video from the interaction');
+    }
+  }
   if (!bytes) throw new OmniFlashError('omni-flash-no-video', 'Clip had neither base64 nor a file id.');
   return { bytes, interactionId: clip.interactionId, renderResolution: omniRes };
 }

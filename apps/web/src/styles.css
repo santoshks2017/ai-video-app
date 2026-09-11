@@ -942,8 +942,24 @@ code {
 .rail-item.on { background: var(--accent-wash); color: var(--accent); }
 .rail-icon { width: 20px; text-align: center; flex: none; font-size: 15px; }
 .rail-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.layout.collapsed .rail-item { justify-content: center; padding: 9px 0; }
-.layout.collapsed .rail-brand { justify-content: center; padding-left: 0; padding-right: 0; }
+/* Collapsed (the default): an icon strip. Hovering it — or tabbing into it — opens the
+   full menu over the page, so the page is never pushed aside or squeezed. */
+.layout.collapsed .rail:not(:hover):not(:has(:focus-visible)) .rail-label,
+.layout.collapsed .rail:not(:hover):not(:has(:focus-visible)) .rail-brand-text,
+.layout.collapsed .rail:not(:hover):not(:has(:focus-visible)) .rail-me,
+.layout.collapsed .rail:not(:hover):not(:has(:focus-visible)) .rail-loading { display: none; }
+.layout.collapsed .rail:not(:hover):not(:has(:focus-visible)) .rail-item { justify-content: center; padding: 9px 0; }
+.layout.collapsed .rail:not(:hover):not(:has(:focus-visible)) .rail-brand { justify-content: center; padding-left: 0; padding-right: 0; }
+@media (min-width: 821px) {
+  .layout.collapsed .rail {
+    width: 64px;
+    overflow: hidden;
+    z-index: 40;
+    transition: width 160ms ease, box-shadow 160ms ease;
+  }
+  .layout.collapsed .rail:hover,
+  .layout.collapsed .rail:has(:focus-visible) { width: 232px; box-shadow: var(--shadow); }
+}
 
 /* The main frame is a column: tab strip on top, one visible pane below. */
 .main { max-width: 1420px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }

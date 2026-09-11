@@ -13,6 +13,7 @@ import { buildBeats, collectStrings, storyGuidance, storyTheme, themeDirection }
 import { planScenes, fmtTime, speakingSeconds } from './planScenes.js';
 import type { Beat, Scene, ScenePlan } from './types.js';
 import { sceneVisual, sceneVisualLine } from './visuals.js';
+import { plainSpoken } from './spoken.js';
 import { CATEGORY_BY_ID } from './categories.js';
 import { rulebookText } from './rulebook.js';
 
@@ -74,16 +75,15 @@ function spokenLock(brief: Brief): string {
   if (respelled) {
     lines.push(
       '',
-      'HOW TO READ THE BRACES — they are written as a pronunciation guide, not as ordinary text:',
-      `- The language is spoken ${lang}, respelled in Latin letters so the sounds are unambiguous. Read it as ${lang}, not as English.`,
-      '- A hyphen splits syllables of ONE word. Say the word smoothly as a single word — do not pause, stutter or spell it out. "KEE-ji-ye" is one word, "keejiye".',
-      '- CAPITALS mark the stressed syllable. Give it the stress; do not shout it, and do not treat capitals as an acronym to be spelled letter by letter.',
-      '- Doubled vowels are long vowels: "AAJ" is aaj, "DRAAIV" is drive, "ee" is a long e.',
+      'HOW TO READ THE BRACES:',
+      `- The line is spoken ${lang}. Every word — in Devanagari or in Latin letters — is read as one ordinary, natural word.`,
+      '- Only acronyms are said letter by letter: EMI, SUV, ABS. No other word is ever spelled out.',
+      '- Doubled vowels are long vowels: "aaj" is aaj, "shuru" is shuru.',
       '- An em dash is a short breath, not a spoken word.',
       '- Numbers, prices and units inside a line are already written as plain English words; read them as ordinary English.',
     '- Speak ONLY the words inside the braces, each line exactly once, in order. Never repeat, echo or double a word — say every word the number of times it is written and no more.',
     '- Shot directions, scene titles, captions and these rules are silent instructions. Never say any of their words aloud, even a word that also appears in the line.',
-      '- CRITICAL: this is for the VOICE ONLY. Never render any of it as on-screen text, a subtitle or a caption. Nothing with hyphens or mid-word capitals may ever appear on screen.',
+      '- CRITICAL: this is for the VOICE ONLY. Never render any of it as on-screen text, a subtitle or a caption.',
     );
   }
   return lines.join('\n');
@@ -125,11 +125,10 @@ export interface SceneOverride {
   /** The line in plain readable Hindi/Hinglish — for the designer to check the meaning. */
   dialogue?: string;
   /**
-   * The same line respelled for pronunciation, which is what actually reaches
-   * the video model: syllables hyphenated, the stressed syllable capitalised
-   * ("do LAKH pach-CHEES ha-ZAAR ru-Pae tak ka CASH dis-KAAUNT"). Devanagari
-   * tells a model what the words are but not how an Indian presenter says them,
-   * which is where the delivery was breaking.
+   * The line as the video model says it: the readable line, with the few words that
+   * come out wrong respelled as plain words. It never carries stress capitals or
+   * syllable hyphens — the model spelled capitals out letter by letter — and
+   * plainSpoken() takes out any that an older script still has.
    */
   phonetic?: string;
   shot?: string;
@@ -404,7 +403,8 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       // than bend a photo of something else into it.
       const visualLine = sceneVisualLine(sceneVisual(shotText ?? '', ov.ref, attachments, ctx.vehicle), ctx.vehicle);
       if (visualLine) L.push(visualLine);
-      const scripted = ov.phonetic?.trim() || ov.dialogue?.trim();
+      // Plain words only: no stress capitals, no syllable hyphens, no doubled word.
+      const scripted = (ov.phonetic?.trim() ? plainSpoken(ov.phonetic.trim(), ov.dialogue) : '') || ov.dialogue?.trim();
       const dialogue = scripted || sc.beat.dialogue;
       if (mode.speaks && scripted) {
         // Braces are Seedance's dialogue marker and read as an exact quote to
@@ -573,7 +573,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         ctx.vehicle,
       );
       if (contVisual) C.push(`  ${contVisual}`);
-      const scriptedC = ov.phonetic?.trim() || ov.dialogue?.trim();
+      const scriptedC = (ov.phonetic?.trim() ? plainSpoken(ov.phonetic.trim(), ov.dialogue) : '') || ov.dialogue?.trim();
       const d = scriptedC || sc.beat.dialogue;
       if (d) {
         C.push(

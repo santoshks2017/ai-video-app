@@ -29,8 +29,8 @@ the exception you have to justify.
 
 Respell a word ONLY if one of these is true:
 - It is in the locked-spellings list you are given.
-- It is a Hindi word with a real trap: a dropped schwa (करना is KAR-na, not
-  ka-ra-na), a long vowel that changes the word, or a stress that lands wrong.
+- It is a Hindi word with a real trap: a dropped schwa (करना is karna, not
+  karana), a long vowel that changes the word, or a stress that lands wrong.
 
 NUMBERS ARE NEVER RESPELLED. Prices, quantities and units are written in plain
 English words — see section 3.
@@ -54,7 +54,6 @@ put the rest back.
 | Failure | Cause | Fix |
 |---|---|---|
 | Wrong vowel length ("बात" read like "but", not "baat") | Roman \`a\` is ambiguous between अ (short) and आ (long) | When you do respell, mark long vowels: \`aa\`, \`ee\`, \`oo\` |
-| Flat or foreign stress on Hindi words | English TTS applies English stress rules | Mark the stressed syllable in CAPS |
 | Over-pronounced words ("करता" as ka-ra-ta, 3 beats, not kar-ta, 2) | Devanagari does not mark that Hindi drops the inherent vowel in speech | Spell the word as SPOKEN, never as Devanagari is structured |
 
 ## 2. The encoding system
@@ -63,7 +62,7 @@ put the rest back.
 अ / inherent → \`a\` (कब → kab) · आ ा → \`aa\` (काम → kaam) · इ ि → \`i\` (दिन → din)
 ई ी → \`ee\` (सीट → seet) · उ ु → \`u\` (सुन → sun) · ऊ ू → \`oo\` (दूर → door)
 ए े → \`e\` (मेरा → mera) · ऐ ै → \`ai\` (है → hai) · ओ ो → \`o\` (को → ko)
-औ ौ → \`au\` (और → aur) · ऑ → \`aw\` (डॉक्टर → DAWK-tar)
+औ ौ → \`au\` (और → aur) · ऑ → \`aw\` (डॉक्टर → dawktar)
 Nasal अं ं → trailing \`n\` (रंग → rang, हैं → hain, नहीं → nahin)
 
 If unsure whether a vowel is short or long, say the word slowly: a held sound
@@ -73,31 +72,33 @@ sounding like it is reading English.
 ### 2.2 Consonants — never drop aspiration
 An aspirated consonant is a different sound from its unaspirated pair, and
 models collapse the two when the \`h\` is missing. Always keep it:
-क k / ख kh (खर्च → KHARCH) · ग g / घ gh (घर → GHAR) · च ch / छ chh (छूट → CHHOOT)
-ज j / झ jh (झूला → JHOO-la) · ट त t / ठ थ th (थैला → THAI-la)
-ड द d / ढ ध dh (धन → DHAN) · प p / फ f (फायदा → FAA-y-da) · ब b / भ bh (भाई → BHAAI)
+क k / ख kh (खर्च → kharch) · ग g / घ gh (घर → ghar) · च ch / छ chh (छूट → chhoot)
+ज j / झ jh (झूला → jhoola) · ट त t / ठ थ th (थैला → thaila)
+ड द d / ढ ध dh (धन → dhan) · प p / फ f (फायदा → faayda) · ब b / भ bh (भाई → bhaai)
 
 Write फ as \`f\`, not \`ph\`. Spoken Hindi in the ad register realises it as /f/,
 and \`f\` renders more reliably.
 
 Do NOT try to encode retroflex vs dental (त/ट, द/ड, न/ण). Models resolve it from
-context, and the extra marking collides with CAPS-for-stress.
+context.
 
 ### 2.3 Schwa deletion — spell as spoken, not as structured
 Hindi drops the inherent "a" mid-word even though Devanagari implies it:
-ka-ra-na → KAR-na (to do) · ka-ha-te → kah-TE (they say) · mi-la-ga → mi-le-GA (will get)
-sa-ma-jha → sam-JHA (understood) · ba-na-i-ye → ba-NAA-i-ye (please make)
+karana → karna (to do) · kahate → kehte (they say) · milaga → milega (will get)
+samajha → samjha (understood) · banaiye → banaaiye (please make)
 Read the word as you would say it in a sentence, then transcribe THAT — never
 consonant by consonant from the spelling.
 
-### 2.4 Stress — CAPS on the stressed syllable
-- Hyphenate multi-syllable words: kar-TA, pach-CHEES, ha-ZAAR.
-- CAPS the one syllable carrying the emphasis. A short word you want stressed
-  goes fully capitalised: AAJ, AB.
-- Function words (का की के, को, से, में, पर, और, तो, ही) stay lowercase and
-  unstressed — capitalising them dilutes the words that matter: price, offer, CTA.
-- One clear stress point per phrase. Capitalising everything flattens emphasis
-  as badly as capitalising nothing.
+### 2.4 Plain words — no capitals, no hyphens
+- A respelled word is ONE ordinary lowercase word, the way Hindi is normally
+  written in Latin letters: shuru, aaj, kijiye, karna, milega.
+- Never split a word into syllables with hyphens, and never mark stress with
+  capitals. The video model spells a capitalised word out letter by letter
+  (AAJ comes out as A-A-J) and stumbles over syllable breaks, doubling words.
+- Capitals only for acronyms said as letters: ABS, EMI, SUV, ADAS, CNG — and
+  names already written in capitals, like XUV.
+- Everyday words — shuru, aaj, abhi, kijiye, milega, dekhiye — are said
+  correctly as they are. Leave them.
 
 ### 2.5 The natural line is the base; respellings sit inside it
 Keep the sentence as it was written — Devanagari for the Hindi, ordinary English
@@ -143,6 +144,8 @@ Rules:
   respelled; often none were.
 - No English word, brand name, model name or place name was respelled.
 - No function word was respelled.
+- No capital letters except acronyms said as letters (ABS, EMI, SUV), and no
+  hyphens inside a word.
 - In the words you DID respell: long vowels marked (aa / ee / oo), aspirated
   consonants keep their h, and no schwa written that is dropped in speech.
 - Every number, price and unit is plain English words in Latin letters — no
@@ -185,24 +188,24 @@ const HINDI_GLOSSARY: LanguageProfile['glossary'] = [
   // --- CTA and offer language ---
   { term: 'Test Drive', say: 'test drive', mode: 'english', group: 'CTA & offers' },
   { term: 'Test Ride', say: 'test ride', mode: 'english', group: 'CTA & offers' },
-  { term: 'Book kijiye / Book now', say: 'buk KEE-ji-ye', group: 'CTA & offers' },
+  { term: 'Book kijiye / Book now', say: 'book kijiye', group: 'CTA & offers' },
   { term: 'Booking', say: 'booking', mode: 'english', group: 'CTA & offers' },
   { term: 'Offer', say: 'offer', mode: 'english', group: 'CTA & offers' },
   { term: 'Discount (English)', say: 'discount', mode: 'english', group: 'CTA & offers' },
-  { term: 'Discount (छूट)', say: 'CHHOOT', group: 'CTA & offers' },
+  { term: 'Discount (छूट)', say: 'chhoot', group: 'CTA & offers' },
   { term: 'Cash Discount', say: 'cash discount', mode: 'english', group: 'CTA & offers' },
   { term: 'Exchange Bonus', say: 'exchange bonus', mode: 'english', group: 'CTA & offers' },
   { term: 'Finance', say: 'finance', mode: 'english', group: 'CTA & offers' },
   { term: 'Insurance', say: 'insurance', mode: 'english', group: 'CTA & offers' },
   { term: 'Limited Period', say: 'limited period', mode: 'english', group: 'CTA & offers' },
-  { term: 'Aaj hi / today only', say: 'AAJ hi', group: 'CTA & offers' },
-  { term: 'Jaldi karen / hurry', say: 'jal-DEE ka-REN', group: 'CTA & offers' },
+  { term: 'Aaj hi / today only', say: 'aaj hi', group: 'CTA & offers' },
+  { term: 'Jaldi karen / hurry', say: 'jaldi karen', group: 'CTA & offers' },
   { term: 'Visit', say: 'visit', mode: 'english', group: 'CTA & offers' },
-  { term: 'Toh der kis baat ki', say: 'toh DER kis BAAT ki', group: 'CTA & offers' },
-  { term: 'Aaiye / come', say: 'AA-i-ye', group: 'CTA & offers' },
-  { term: 'Dekhiye / see', say: 'DE-khi-ye', group: 'CTA & offers' },
-  { term: 'Jaaniye / know', say: 'JAA-ni-ye', group: 'CTA & offers' },
-  { term: 'Samajhiye / understand', say: 'sam-JHI-ye', group: 'CTA & offers' },
+  { term: 'Toh der kis baat ki', say: 'toh der kis baat ki', group: 'CTA & offers' },
+  { term: 'Aaiye / come', say: 'aaiye', group: 'CTA & offers' },
+  { term: 'Dekhiye / see', say: 'dekhiye', group: 'CTA & offers' },
+  { term: 'Jaaniye / know', say: 'jaaniye', group: 'CTA & offers' },
+  { term: 'Samajhiye / understand', say: 'samjhiye', group: 'CTA & offers' },
 
   // --- product and showroom ---
   { term: 'Showroom', say: 'showroom', mode: 'english', group: 'Product & showroom' },
@@ -217,8 +220,8 @@ const HINDI_GLOSSARY: LanguageProfile['glossary'] = [
   { term: 'Mileage', say: 'mileage', mode: 'english', group: 'Product & showroom' },
   { term: 'Warranty', say: 'warranty', mode: 'english', group: 'Product & showroom' },
   { term: 'Service', say: 'service', mode: 'english', group: 'Product & showroom' },
-  { term: 'Shaandaar / great', say: 'sha-aan-DAAR', group: 'Product & showroom' },
-  { term: 'Faayde / benefits', say: 'FAA-y-de', group: 'Product & showroom' },
+  { term: 'Shaandaar / great', say: 'shaandaar', group: 'Product & showroom' },
+  { term: 'Faayde / benefits', say: 'faayde', group: 'Product & showroom' },
 
   // --- EV ---
   { term: 'Electric Vehicle', say: 'electric vehicle', mode: 'english', group: 'EV' },
@@ -231,36 +234,36 @@ const HINDI_GLOSSARY: LanguageProfile['glossary'] = [
 
   // --- launch ---
   { term: 'New Launch', say: 'new launch', mode: 'english', group: 'New launch' },
-  { term: 'Pesh hai / introducing', say: 'PESH hai', group: 'New launch' },
-  { term: 'Pehli jhalak / first look', say: 'PEH-li jha-LAK', group: 'New launch' },
-  { term: 'Ab uplabdh / now available', say: 'ab up-LABDH', group: 'New launch' },
+  { term: 'Pesh hai / introducing', say: 'pesh hai', group: 'New launch' },
+  { term: 'Pehli jhalak / first look', say: 'pehli jhalak', group: 'New launch' },
+  { term: 'Ab uplabdh / now available', say: 'ab uplabdh', group: 'New launch' },
 
   // --- delivery ---
   { term: 'Delivery', say: 'delivery', mode: 'english', group: 'Delivery' },
   { term: 'Handover', say: 'handover', mode: 'english', group: 'Delivery' },
-  { term: 'Badhaai / congratulations', say: 'ba-DHAA-ee', group: 'Delivery' },
+  { term: 'Badhaai / congratulations', say: 'badhaai', group: 'Delivery' },
   { term: 'Customer', say: 'customer', mode: 'english', group: 'Delivery' },
-  { term: 'Aap ki nayi gaadi', say: 'aap kee NA-yee GAA-dee', group: 'Delivery' },
+  { term: 'Aap ki nayi gaadi', say: 'aap ki nayi gaadi', group: 'Delivery' },
 
   // --- testimonial ---
   { term: 'Testimonial', say: 'testimonial', mode: 'english', group: 'Testimonial' },
-  { term: 'Anubhav / experience', say: 'a-nu-BHAV', group: 'Testimonial' },
-  { term: 'Santusht / satisfied', say: 'san-TUSHT', group: 'Testimonial' },
-  { term: 'Mujhe bahut pasand aayi', say: 'MU-jhe ba-HUT pa-SAND aa-yee', group: 'Testimonial' },
+  { term: 'Anubhav / experience', say: 'anubhav', group: 'Testimonial' },
+  { term: 'Santusht / satisfied', say: 'santusht', group: 'Testimonial' },
+  { term: 'Mujhe bahut pasand aayi', say: 'mujhe bahut pasand aayi', group: 'Testimonial' },
 
   // --- festival ---
   { term: 'Festival', say: 'festival', mode: 'english', group: 'Festival' },
-  { term: 'Tyohaar', say: 'TYO-haar', group: 'Festival' },
-  { term: 'Shubhkamnayein / wishes', say: 'shubh-kaam-NA-yen', group: 'Festival' },
-  { term: 'Shubh / auspicious', say: 'SHUBH', group: 'Festival' },
+  { term: 'Tyohaar', say: 'tyohaar', group: 'Festival' },
+  { term: 'Shubhkamnayein / wishes', say: 'shubhkaamnayein', group: 'Festival' },
+  { term: 'Shubh / auspicious', say: 'shubh', group: 'Festival' },
 
   // --- money ---
   { term: 'Rupaye', say: 'rupaye', mode: 'english', note: 'Numbers stay English.', group: 'Money' },
   { term: 'Lakh', say: 'lakh', mode: 'english', note: 'Numbers stay English.', group: 'Money' },
   { term: 'Hazaar', say: 'thousand', mode: 'english', note: 'Numbers stay English.', group: 'Money' },
   { term: 'Crore', say: 'crore', mode: 'english', note: 'Numbers stay English.', group: 'Money' },
-  { term: 'Se shuru / starting from', say: 'se sha-ROO', group: 'Money' },
-  { term: 'Har maheene / every month', say: 'har ma-HEE-ne', group: 'Money' },
+  { term: 'Se shuru / starting from', say: 'se shuru', group: 'Money' },
+  { term: 'Har maheene / every month', say: 'har maheene', group: 'Money' },
   { term: 'Down payment', say: 'down payment', mode: 'english', group: 'Money' },
   { term: 'EMI', say: 'EMI', mode: 'english', note: 'Read as letters.', group: 'Money' },
 ];

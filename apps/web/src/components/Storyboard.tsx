@@ -561,7 +561,7 @@ export function Storyboard({
                             <AutoTextarea
                               className={ov.phonetic?.trim() ? '' : 'unset'}
                               value={ov.phonetic ?? ''}
-                              placeholder="आज ही अपनी test drive book KEE-ji-ye"
+                              placeholder="आज ही अपनी test drive book kijiye"
                               onChange={(v) => editScene(key, { phonetic: v })}
                             />
                           </div>

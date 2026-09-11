@@ -18,6 +18,8 @@
  * rupee against Rs 100+ for a video segment.
  */
 
+import { plainSpoken } from '@ava/shared';
+
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 export interface ScriptScene {
@@ -447,6 +449,8 @@ function phoneticInstruction(
     '',
     'NEVER respell a number, price, quantity or unit. Those are already in English and must stay exactly as they are: "fifteen lakh four thousand" stays "fifteen lakh four thousand", not "pandrah LAAKH chaar ha-ZAAR".',
     '',
+    'PLAIN WORDS — this outranks anything below that says otherwise. Never write an ordinary word in capital letters: the video model spells capitals out letter by letter, so "AAJ" comes out as A-A-J. Capitals only for acronyms said as letters (ABS, EMI, SUV) and names already written in capitals. Never split a word with hyphens or mark stress. A respelled word is one plain lowercase word — shuru, aaj, kijiye — and everyday words like these need no respelling at all.',
+    '',
     language.spokenGuide.trim(),
     '',
     ...(respell.length
@@ -576,7 +580,8 @@ export async function addPhonetics(
     ]),
   );
   // A line the pass missed keeps its readable form — still better than nothing.
-  return usable.map((l) => ({ index: l.index, line: l.line, say: said.get(l.index) || l.line }));
+  // Plain words, whatever came back: no stress capitals, no syllable hyphens, no doubled word.
+  return usable.map((l) => ({ index: l.index, line: l.line, say: plainSpoken(said.get(l.index) || l.line, l.line) }));
 }
 
 /** JSON mode is not guaranteed, so pull the array out of whatever came back. */

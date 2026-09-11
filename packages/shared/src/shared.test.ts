@@ -34,6 +34,7 @@ import {
   applyFeedback,
   estimateSegmentsCost,
   LANGUAGE_SEEDS,
+  plainSpoken,
   storyGuidance,
   adaptTrial,
   overlayCopy,
@@ -243,13 +244,14 @@ test('the pronunciation spelling is what the model is told to say', () => {
 
   // The respelling goes in the braces; the readable Devanagari stays out of the
   // prompt entirely, so the model can't perform the unstressed version.
-  assert.match(text, /Says, word for word: \{aur ab BAAIT pre-MEER MO-tarz/);
+  assert.match(text, /Says, word for word: \{aur ab baait premeer motarz par mil rahe hain shaandaar faayde\}/);
   assert.ok(!text.includes('शानदार फायदे'), 'the readable line is for humans, not the model');
 
-  // Hyphens and capitals are a pronunciation guide — the model must not voice
-  // them as punctuation or burn them on screen as a caption.
+  // No stress capitals or syllable hyphens reach the model: it spelled capitals out
+  // letter by letter. Only acronyms are said as letters.
   assert.match(text, /## SPOKEN LINES — SAY THESE EXACTLY/);
-  assert.match(text, /hyphen splits syllables/i);
+  assert.doesNotMatch(text, /hyphen splits syllables|CAPITALS mark the stressed syllable/i);
+  assert.match(text, /Only acronyms are said letter by letter: EMI, SUV, ABS/);
   assert.match(text, /Never render any of it as on-screen text/i);
 
   // With no respelling the readable line is still better than nothing.
@@ -677,5 +679,24 @@ test('several use cases make one ad: one opening, one close, the festival as the
   assert.ok(story.avoid.some((a) => /one after another/.test(a)));
   // A single use case still plays its own arc.
   assert.equal(buildPrompt(base({ categories: ['offer'], fieldValues: { offer: { offer1: 'x' } } }))!.scenePlan.scenes[0]!.beat.title, 'Attention hook');
+});
+
+test('spoken lines reach the model as plain words — no stress capitals, no syllable hyphens, no doubled words', () => {
+  assert.equal(
+    plainSpoken('AAJ hi Sahyadri Motors Pune में test drive book करें।', 'आज ही Sahyadri Motors Pune में test drive book करें।'),
+    'aaj hi Sahyadri Motors Pune में test drive book करें।',
+  );
+  assert.equal(plainSpoken('seven lakh seventy nine thousand se sha-ROO, यानी आसान upgrade।'), 'seven lakh seventy nine thousand se shuru, यानी आसान upgrade।');
+  assert.equal(plainSpoken('six airbags airbags aur ABS', 'छह airbags और ABS'), 'six airbags aur ABS');
+  assert.equal(plainSpoken('XUV 3XO पर EMI', 'XUV 3XO पर EMI'), 'XUV 3XO पर EMI');
+  assert.equal(plainSpoken('bahut bahut dhanyavaad', 'बहुत बहुत धन्यवाद'), 'bahut bahut dhanyavaad');
+  assert.equal(plainSpoken('buk KEE-ji-ye'), 'book kijiye');
+  // The seeded guide no longer teaches capitals or hyphens.
+  const hindi = LANGUAGE_SEEDS.find((l) => l.code === 'hi')!;
+  assert.ok(!/CAPS on the stressed syllable/.test(hindi.spokenGuide));
+  for (const g of hindi.glossary) {
+    assert.ok(!/[A-Z]{2,}/.test(g.say.replace(/\b(SUV|EV|EMI)\b/g, '')), g.say);
+    assert.ok(!/[A-Za-z]-[A-Za-z]/.test(g.say), g.say);
+  }
 });
 

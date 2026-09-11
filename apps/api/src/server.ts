@@ -80,6 +80,7 @@ import {
   storyGuidance,
   storyTheme,
   themeDirection,
+  plainSpoken,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
 import { importPlace, PlacesError } from './places.js';
@@ -359,8 +360,36 @@ app.delete<{ Params: { id: string } }>('/api/credentials/:id/key', async (req) =
  * video call.
  */
 /** The language's rules, resolved from the library for a script pass. */
+/**
+ * Languages seeded before plain spellings still teach stress capitals and syllable
+ * hyphens, which the video model spelled out letter by letter. A guide that still has
+ * that section is brought up to the current seed: its guide, and every locked spelling
+ * the seed also has. A spelling the team added keeps its word, in plain letters.
+ */
+const OLD_STRESS_RULE = 'CAPS on the stressed syllable';
+function upgradeLanguage(stored: Record<string, any>): Record<string, any> | null {
+  const seed = LANGUAGE_SEEDS.find((s) => s.code === stored.code);
+  if (!seed || !String(stored.spokenGuide ?? '').includes(OLD_STRESS_RULE)) return null;
+  const seeded = new Map(seed.glossary.map((g) => [g.term, g.say]));
+  const glossary = (Array.isArray(stored.glossary) ? stored.glossary : []).map((g: Record<string, any>) => ({
+    ...g,
+    say: seeded.get(g.term) ?? plainSpoken(String(g.say ?? '')),
+  }));
+  return { ...stored, spokenGuide: seed.spokenGuide, glossary };
+}
+
+async function upgradeStoredLanguages(): Promise<void> {
+  for (const lang of await listAll<Record<string, any>>('languages')) {
+    const next = upgradeLanguage(lang);
+    if (!next) continue;
+    await patch('languages', lang.id, { spokenGuide: next.spokenGuide, glossary: next.glossary });
+    app.log.info({ language: lang.name }, 'language guide moved to plain spellings');
+  }
+}
+upgradeStoredLanguages().catch((e) => app.log.warn({ err: (e as Error).message }, 'language upgrade failed'));
+
 async function resolveLanguage(languageId?: string): Promise<ScriptLanguage> {
-  const all = await listAll<Record<string, any>>('languages');
+  const all = (await listAll<Record<string, any>>('languages')).map((l) => upgradeLanguage(l) ?? l);
   const chosen =
     (languageId && all.find((l) => l.id === languageId)) ||
     all.find((l) => l.isDefault && l.enabled !== false) ||

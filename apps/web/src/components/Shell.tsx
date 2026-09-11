@@ -71,19 +71,34 @@ export function SignIn() {
 export function Shell({ children }: { children: ReactNode }) {
   const { tabs, activeTabId, go, signOut, loading, me, can } = useApp();
   const active = tabs.find((t) => t.id === activeTabId);
-  const [collapsed, setCollapsed] = useState(false);
+  // Collapsed unless someone expands it with the toggle; that choice is remembered on
+  // this device. Collapsed, the rail opens over the page on hover instead of pushing it.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('ava.rail') !== 'expanded';
+    } catch {
+      return true;
+    }
+  });
+  const toggleRail = () =>
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem('ava.rail', c ? 'expanded' : 'collapsed');
+      } catch {
+        /* storage unavailable — the choice lasts this session */
+      }
+      return !c;
+    });
 
   return (
     <div className={`layout${collapsed ? ' collapsed' : ''}`}>
       <aside className="rail">
         <div className="rail-brand">
           <div className="mark">AV</div>
-          {!collapsed && (
-            <div>
-              <h1>AI Video App</h1>
-              <div className="sub">CarDekho dealer ad-slots</div>
-            </div>
-          )}
+          <div className="rail-brand-text">
+            <h1>AI Video App</h1>
+            <div className="sub">CarDekho dealer ad-slots</div>
+          </div>
         </div>
 
         <nav className="rail-nav">
@@ -100,14 +115,14 @@ export function Shell({ children }: { children: ReactNode }) {
               <span className="rail-icon" aria-hidden>
                 {n.icon}
               </span>
-              {!collapsed && <span className="rail-label">{n.label}</span>}
+              <span className="rail-label">{n.label}</span>
             </button>
           ))}
         </nav>
 
         <div className="rail-foot">
-          {loading && !collapsed && <div className="hint">Loading…</div>}
-          {me && !collapsed && (
+          {loading && <div className="hint rail-loading">Loading…</div>}
+          {me && (
             <div className="rail-me" title={`${me.email} · ${me.role}`}>
               {me.photo ? (
                 <img src={me.photo} alt="" referrerPolicy="no-referrer" />
@@ -129,26 +144,26 @@ export function Shell({ children }: { children: ReactNode }) {
             <span className="rail-icon" aria-hidden>
               ✨
             </span>
-            {!collapsed && <span className="rail-label">v{APP_VERSION} · What&rsquo;s new</span>}
+            <span className="rail-label">v{APP_VERSION} · What&rsquo;s new</span>
           </button>
           {me && (
             <button className="rail-item" type="button" onClick={signOut} title="Sign out">
               <span className="rail-icon" aria-hidden>
                 ⏻
               </span>
-              {!collapsed && <span className="rail-label">Sign out</span>}
+              <span className="rail-label">Sign out</span>
             </button>
           )}
           <button
             className="rail-item"
             type="button"
-            onClick={() => setCollapsed((c) => !c)}
-            title={collapsed ? 'Expand' : 'Collapse'}
+            onClick={toggleRail}
+            title={collapsed ? 'Keep the menu open' : 'Collapse the menu'}
           >
             <span className="rail-icon" aria-hidden>
               {collapsed ? '▶' : '◀'}
             </span>
-            {!collapsed && <span className="rail-label">Collapse</span>}
+            <span className="rail-label">{collapsed ? 'Keep open' : 'Collapse'}</span>
           </button>
         </div>
       </aside>

@@ -34,6 +34,16 @@ import {
   applyFeedback,
   estimateSegmentsCost,
   LANGUAGE_SEEDS,
+  adaptTrial,
+  overlayCopy,
+  suggestDuration,
+  pacedDuration,
+  sceneVisual,
+  sceneEditFor,
+  speakingSeconds,
+  wordBudget,
+  PART_TAIL_SILENCE,
+  PART_HEAD_SILENCE,
   type Brief,
   type CarModelProfile,
 } from '@ava/shared';
@@ -474,3 +484,124 @@ test('offers saved in the old fixed boxes open as free-text offers', () => {
   assert.equal(fieldLabel(CATEGORY_BY_ID.feature, 'benefit2'), 'Why feature 2 matters');
   assert.equal(fieldLabel(CATEGORY_BY_ID.offer, 'offerRows'), 'offerRows');
 });
+
+test('two-wheelers are ridden: test ride in the CTA, the end card and the scenes', () => {
+  const bike = base({
+    vehicleKind: 'bike',
+    categories: ['testdrive'],
+    narration: 'presenter',
+    cta: 'Book your test drive today',
+    fieldValues: { testdrive: { location: 'the showroom' } },
+  });
+  const res = buildPrompt(bike)!;
+  assert.equal(res.context.cta, 'Book your test ride today');
+  const titles = res.scenePlan.scenes.map((s) => s.beat.title);
+  assert.ok(titles.includes('The ride') && !titles.includes('The drive'), titles.join(' | '));
+  for (const s of res.scenePlan.scenes) {
+    assert.ok(!/test drive/i.test(`${s.beat.dialogue ?? ''} ${s.beat.card ?? ''} ${s.beat.shot}`), s.beat.title);
+  }
+  const lines = overlayCopy({ ...bike, endCardOn: true, endCard: 'Sahyadri Honda | Book your Test Drive now' }).endCardLines;
+  assert.ok(lines.includes('Book your Test Ride now'), lines.join(' | '));
+  // Cars keep driving.
+  assert.equal(adaptTrial('Book your test drive today', 'car'), 'Book your test drive today');
+  assert.equal(buildPrompt(base({ categories: ['testdrive'], fieldValues: { testdrive: { location: 'x' } } }))!.context.cta, 'Book your test drive today');
+});
+
+test('storyboard edits stay on their scene when another scene is deleted', () => {
+  const b = base({
+    categories: ['feature'],
+    narration: 'presenter',
+    durationSec: 40,
+    maxChunkSec: 10,
+    fieldValues: { feature: { feature1: 'Sunroof', feature2: '26.03 cm touchscreen', feature3: '6 airbags' } },
+  });
+  const plan = buildPrompt(b)!.scenePlan;
+  const keys = plan.scenes.map((s) => s.beat.key);
+  assert.ok(keys.includes('feature:feature-2') && keys.includes('feature:feature-3'), keys.join(' | '));
+  assert.equal(new Set(keys).size, keys.length, 'every scene has its own key');
+
+  const edits = { 'feature:feature-3': { card: 'Six airbags, standard' } };
+  const res = buildPrompt({ ...b, omitScenes: ['feature:feature-2'] }, { sceneOverrides: edits })!;
+  const titles = res.scenePlan.scenes.map((s) => s.beat.title);
+  assert.ok(!titles.includes('Feature 2') && titles.includes('Feature 3'), titles.join(' | '));
+  assert.ok(overlayCards(res.scenePlan, edits).some((c) => c.text === 'Six airbags, standard'), 'the edit stays on Feature 3');
+
+  // Projects edited before scenes had keys are still read by position.
+  assert.equal(sceneEditFor({ '0': { card: 'Old caption' } }, plan, plan.scenes[0]!)?.card, 'Old caption');
+});
+
+test('the app sizes the film, and a faster pace says the same script in a shorter one', () => {
+  const b = base({
+    categories: ['feature'],
+    narration: 'presenter',
+    maxChunkSec: 10,
+    fieldValues: { feature: { feature1: 'Sunroof', feature2: 'Touchscreen', feature3: '6 airbags' } },
+  });
+  const auto = suggestDuration(b);
+  const scenes = buildBeats(buildContext(b)).length;
+  assert.ok(auto >= scenes * 4 && auto <= 90, `${auto}s for ${scenes} scenes`);
+  assert.ok(suggestDuration({ ...b, omitScenes: ['feature:feature-2'] }) < auto, 'deleting a scene shortens the suggestion');
+  assert.equal(pacedDuration(44, 1.1), 40);
+  assert.equal(pacedDuration(44, 1), 44);
+
+  const project = { ...emptyProject(), useCases: b.categories, fieldValues: b.fieldValues };
+  project.spec = { ...project.spec, narration: 'presenter', durationAuto: true, pace: 1.1 };
+  const composed = composeBrief(project);
+  assert.equal(composed.durationSec, pacedDuration(suggestDuration(composed), 1.1));
+
+  const fast = buildPrompt({ ...b, durationSec: 40, pace: 1.1 })!;
+  const natural = buildPrompt({ ...b, durationSec: 44, pace: 1 })!;
+  assert.equal(fast.scenePlan.scenes.length, natural.scenePlan.scenes.length, 'a faster pace drops no scene');
+  assert.match(fast.parts.map((p) => p.text).join('\n'), /brisk/);
+  assert.ok(wordBudget(5, 1.1) > wordBudget(5));
+});
+
+test('a part stops talking before its cut, and the model makes no music of its own', () => {
+  const b = base({
+    categories: ['feature'],
+    narration: 'presenter',
+    durationSec: 40,
+    maxChunkSec: 10,
+    fieldValues: { feature: { feature1: 'Sunroof', feature2: 'Touchscreen', feature3: '6 airbags' } },
+  });
+  const res = buildPrompt(b)!;
+  const plan = res.scenePlan;
+  assert.ok(plan.parts > 1);
+  const first = plan.scenes.filter((s) => s.part === 0);
+  const lastOfFirst = first[first.length - 1]!;
+  assert.equal(speakingSeconds(plan, lastOfFirst), Math.max(1.5, Math.round((lastOfFirst.duration - PART_TAIL_SILENCE) * 10) / 10));
+  const final = plan.scenes[plan.scenes.length - 1]!;
+  assert.ok(speakingSeconds(plan, final) >= final.duration - PART_HEAD_SILENCE - 0.001, 'the film\'s last scene keeps its time');
+  for (const p of res.parts.filter((x) => !x.isLast)) {
+    assert.match(`${p.text}\n${p.continuationText ?? ''}`, /stop speaking and hold a natural silent beat/);
+  }
+  const all = res.parts.map((p) => `${p.text}\n${p.continuationText ?? ''}`).join('\n');
+  assert.match(all, /No background music/);
+  assert.ok(!/^Music:/m.test(all), 'one track goes under the whole film instead');
+});
+
+test('a shot is built on a photo of what it frames, or called out as generic — never force-fitted', () => {
+  const front = { label: 'Front', filename: 'front.jpg', kind: 'car-model' as const, angle: 'front' as const };
+  const cabin = { label: 'Dashboard', filename: 'cabin.jpg', kind: 'car-model' as const, angle: 'interior' as const };
+  assert.deepEqual(sceneVisual('Macro of the touchscreen on the dashboard', undefined, [front]), { kind: 'generic', topic: 'interior' });
+  assert.equal(sceneVisual('Macro of the touchscreen on the dashboard', undefined, [front, cabin]).kind, 'matched');
+  assert.equal(sceneVisual('Presenter greets the viewer at the showroom door', undefined, [front]).kind, 'open');
+  assert.equal(sceneVisual('Anything at all', 'front.jpg', [front, cabin]).kind, 'picked');
+  assert.deepEqual(sceneVisual('Close on the handlebar and console', undefined, [front], 'bike'), {
+    kind: 'generic',
+    topic: 'handlebar and console',
+  });
+
+  const b = base({
+    categories: ['feature'],
+    narration: 'presenter',
+    durationSec: 30,
+    maxChunkSec: 30,
+    attachments: [front],
+    fieldValues: { feature: { feature1: 'Sunroof' } },
+  });
+  const scene = buildPrompt(b)!.scenePlan.scenes[0]!;
+  const res = buildPrompt(b, { sceneOverrides: { [scene.beat.key!]: { shot: 'Slow push-in on the dashboard touchscreen' } } })!;
+  assert.match(res.parts[0]!.text, /No supplied photo shows the interior/);
+});
+

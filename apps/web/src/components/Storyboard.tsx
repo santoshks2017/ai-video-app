@@ -7,6 +7,11 @@ import {
   type Beat,
   type DealerPhoto,
   type ScenePlan,
+  speakingSeconds,
+  sceneEditFor,
+  sceneVisual,
+  PACES,
+  type SceneVisual,
 } from '@ava/shared';
 import type { NarrationKey } from '@ava/shared';
 
@@ -17,6 +22,7 @@ type SceneEdit = {
   ref?: string;
   card?: string;
   cardSub?: string;
+  deleted?: boolean;
 };
 
 /**
@@ -152,43 +158,59 @@ function CaptionEditor({
   );
 }
 
-/** The reference image a shot is built on, with the option to change it. */
+/**
+ * The photo a shot is built on, with the option to change it. When the shot frames a
+ * part of the vehicle that no supplied photo shows, it says so: the model will make a
+ * generic one, and the designer decides whether that will do.
+ */
 function RefPicker({
   chosen,
   options,
+  visual,
   onPick,
 }: {
   chosen?: string;
   options: DealerPhoto[];
+  visual: SceneVisual;
   onPick: (filename: string | undefined) => void;
 }) {
-  const pick = options.find((o) => o.filename === chosen);
-  if (!options.length) {
-    return <span className="hint">No reference images on this project yet.</span>;
-  }
+  const shown = visual.kind === 'picked' || visual.kind === 'matched' ? visual.photo : undefined;
   return (
     <div className="sb-ref">
-      <div className="sb-ref-thumb">
-        {pick?.src ? (
-          <img src={pick.src} alt={pick.label} loading="lazy" />
+      <div className={`sb-ref-thumb${visual.kind === 'generic' ? ' generic' : ''}`}>
+        {shown?.src ? (
+          <img src={shown.src} alt={shown.label} loading="lazy" />
+        ) : visual.kind === 'generic' ? (
+          <div className="sb-ref-auto" title="No supplied photo shows this">
+            generic
+          </div>
         ) : (
           <div className="sb-ref-auto" title="The model picks from all supplied references">
             auto
           </div>
         )}
       </div>
-      <select
-        value={chosen ?? ''}
-        onChange={(e) => onPick(e.target.value || undefined)}
-        title="Which supplied image this shot is built on"
-      >
-        <option value="">Auto — any reference</option>
-        {options.map((o) => (
-          <option key={o.filename} value={o.filename}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      {options.length > 0 ? (
+        <select
+          value={chosen ?? ''}
+          onChange={(e) => onPick(e.target.value || undefined)}
+          title="Which supplied image this shot is built on"
+        >
+          <option value="">{visual.kind === 'matched' ? `Auto — ${visual.topic} photo` : 'Auto — any reference'}</option>
+          {options.map((o) => (
+            <option key={o.filename} value={o.filename}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="hint">No reference images on this project yet.</span>
+      )}
+      {visual.kind === 'generic' && (
+        <span className="sb-ref-generic">
+          No photo of the {visual.topic} — a generic visual will be used. Pick a photo if that won’t do.
+        </span>
+      )}
     </div>
   );
 }
@@ -209,6 +231,12 @@ export function Storyboard({
   onWriteScript,
   onRedoPhonetics,
   languageName,
+  vehicle = 'car',
+  length,
+  onLength,
+  deletedScenes = [],
+  onDeleteScene,
+  onRestoreScene,
 }: {
   scenePlan: ScenePlan | null;
   sceneEdits: Record<string, SceneEdit>;
@@ -224,6 +252,15 @@ export function Storyboard({
   /** Re-applies the language's pronunciation guide to the existing copy. */
   onRedoPhonetics?: () => Promise<string>;
   languageName?: string;
+  /** Cars and bikes name their parts differently. */
+  vehicle?: 'car' | 'bike';
+  /** The film's length — auto, or set by hand at 1x — and the pace it is played at. */
+  length?: { auto: boolean; seconds: number; suggested: number; pace: number; endCard: number };
+  onLength?: (patch: { durationAuto?: boolean; durationSec?: number; pace?: number }) => void;
+  /** Scenes taken out of the film, so they can be put back. */
+  deletedScenes?: { key: string; title: string; cat: string }[];
+  onDeleteScene?: (key: string) => void;
+  onRestoreScene?: (key: string) => void;
 }) {
   const [writing, setWriting] = useState(false);
   const [scriptNote, setScriptNote] = useState('');
@@ -238,11 +275,23 @@ export function Storyboard({
   // Logos are overlay furniture, never something a shot is framed on.
   const refOptions = attachments.filter((a) => a.kind !== 'logo' && a.kind !== 'brand-logo');
 
+  // Every scene's photo, worked out once: the table shows it per row, and the scenes
+  // that will get a generic visual are called out together above it.
+  const visuals = scenePlan.scenes.map((sc) => {
+    const ov = sceneEditFor(sceneEdits, scenePlan, sc) ?? {};
+    const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
+    return sceneVisual(ov.shot?.trim() || baseShot || '', ov.ref, refOptions, vehicle);
+  });
+  const generic = scenePlan.scenes
+    .map((sc, i) => ({ sc, i, visual: visuals[i]! }))
+    .filter((x) => x.visual.kind === 'generic');
+  const filmSeconds = Math.round(scenePlan.scenes.at(-1)?.end ?? 0);
+
   const editCount = Object.keys(sceneEdits).length;
   const spokenScenes = mode.speaks ? scenePlan.scenes.filter((sc) => sc.beat.dialogue).length : 0;
   const scripted = mode.speaks
-    ? scenePlan.scenes.filter((_, i) => {
-        const o = sceneEdits[String(i)];
+    ? scenePlan.scenes.filter((sc) => {
+        const o = sceneEditFor(sceneEdits, scenePlan, sc);
         return (o?.phonetic ?? o?.dialogue ?? '').trim();
       }).length
     : 0;
@@ -332,6 +381,80 @@ export function Storyboard({
           </div>
         )}
 
+        {length && onLength && (
+          <div className="sb-length">
+            <div className="sb-length-group">
+              <label>Length at 1x</label>
+              <div className="sb-seg">
+                <button type="button" className={length.auto ? 'on' : ''} onClick={() => onLength({ durationAuto: true })}>
+                  Auto · {length.suggested}s
+                </button>
+                <button
+                  type="button"
+                  className={length.auto ? '' : 'on'}
+                  onClick={() =>
+                    onLength({ durationAuto: false, durationSec: length.auto ? length.suggested : length.seconds })
+                  }
+                >
+                  Set by hand
+                </button>
+              </div>
+              {!length.auto && (
+                <input
+                  type="number"
+                  min={6}
+                  max={120}
+                  value={length.seconds}
+                  onChange={(e) => onLength({ durationSec: Number(e.target.value) })}
+                />
+              )}
+            </div>
+            <div className="sb-length-group">
+              <label>Pace</label>
+              <div className="sb-seg">
+                {PACES.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    className={Math.abs(length.pace - p) < 0.001 ? 'on' : ''}
+                    onClick={() => onLength({ pace: p })}
+                  >
+                    {p}x
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="sb-length-result">
+              <b>
+                ≈ {filmSeconds}s video{length.endCard ? ` + ${length.endCard}s end card` : ''}
+              </b>
+              <span className="hint">
+                {length.pace > 1.001
+                  ? 'Same script, said faster — a shorter film.'
+                  : length.pace < 0.999
+                    ? 'Same script, more room to breathe — a longer film.'
+                    : length.auto
+                      ? 'Sized to the scenes below at a natural read.'
+                      : 'Set by hand. Deleting a scene takes its seconds off.'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {generic.length > 0 && (
+          <div className="sb-generic-note">
+            <b>
+              {generic.length} scene{generic.length > 1 ? 's have' : ' has'} no matching photo, so a generic visual
+              will be used:
+            </b>{' '}
+            {generic
+              .map((x) => `scene ${x.i + 1} (${x.visual.kind === 'generic' ? x.visual.topic : ''})`)
+              .join(', ')}
+            . Pick a photo for {generic.length > 1 ? 'those scenes' : 'it'}, change the shot, or delete the scene if a
+            generic look won’t do.
+          </div>
+        )}
+
         <div className="section-desc">
           Edit any scene’s script, shot or reference image below — changes flow straight into the master prompt on
           the right, no full rebuild of the brief. On-screen text is deliberately absent from that prompt: it is
@@ -378,10 +501,11 @@ export function Storyboard({
                     </tr>,
                   );
                 }
-                const ov = sceneEdits[String(gi)] ?? {};
+                const key = sc.beat.key ?? String(gi);
+                const ov = sceneEditFor(sceneEdits, scenePlan, sc) ?? {};
                 const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
                 rows.push(
-                  <tr key={gi}>
+                  <tr key={key}>
                     <td className="sb-scene">
                       <div className="sb-scene-no">{gi + 1}</div>
                       <div className="sb-scene-title">{sc.beat.title}</div>
@@ -391,28 +515,44 @@ export function Storyboard({
                         <br />
                         {sc.duration}s
                       </div>
+                      {onDeleteScene && (
+                        <button
+                          type="button"
+                          className="btn ghost small sb-del"
+                          disabled={scenePlan.scenes.length <= 2}
+                          title={
+                            scenePlan.scenes.length <= 2
+                              ? 'A film needs at least two scenes'
+                              : 'Take this scene out of the film — it can be restored below'
+                          }
+                          onClick={() => onDeleteScene(key)}
+                        >
+                          Delete scene
+                        </button>
+                      )}
                     </td>
                     <td>
                       <RefPicker
                         chosen={ov.ref}
                         options={refOptions}
-                        onPick={(ref) => editScene(String(gi), { ref })}
+                        visual={visuals[gi]!}
+                        onPick={(ref) => editScene(key, { ref })}
                       />
                     </td>
                     <td>
                       <AutoTextarea
                         value={ov.shot ?? baseShot ?? ''}
-                        onChange={(v) => editScene(String(gi), { shot: v })}
+                        onChange={(v) => editScene(key, { shot: v })}
                       />
                     </td>
                     <td>
                       <AutoTextarea
                         value={ov.dialogue ?? sc.beat.dialogue ?? ''}
-                        onChange={(v) => editScene(String(gi), { dialogue: v })}
+                        onChange={(v) => editScene(key, { dialogue: v })}
                       />
                       {mode.speaks && (
                         <>
-                          <div className="hint">~{wordBudget(sc.duration)} words max</div>
+                          <div className="hint">~{wordBudget(speakingSeconds(scenePlan, sc))} words max</div>
                           {/* The respelling is what the video model performs — the
                               line above is only here so a human can read it. */}
                           <div className="sb-say">
@@ -421,14 +561,14 @@ export function Storyboard({
                               className={ov.phonetic?.trim() ? '' : 'unset'}
                               value={ov.phonetic ?? ''}
                               placeholder="आज ही अपनी test drive book KEE-ji-ye"
-                              onChange={(v) => editScene(String(gi), { phonetic: v })}
+                              onChange={(v) => editScene(key, { phonetic: v })}
                             />
                           </div>
                         </>
                       )}
                     </td>
                     <td>
-                      <CaptionEditor beat={sc.beat} ov={ov} onChange={(patch) => editScene(String(gi), patch)} />
+                      <CaptionEditor beat={sc.beat} ov={ov} onChange={(patch) => editScene(key, patch)} />
                     </td>
                   </tr>,
                 );
@@ -437,6 +577,20 @@ export function Storyboard({
             </tbody>
           </table>
         </div>
+        {deletedScenes.length > 0 && onRestoreScene && (
+          <div className="sb-deleted">
+            <span className="hint">Deleted scenes:</span>
+            {deletedScenes.map((d) => (
+              <span className="sb-deleted-chip" key={d.key}>
+                {d.title}
+                {d.cat ? <span className="hint"> · {d.cat}</span> : null}
+                <button type="button" className="btn ghost small" onClick={() => onRestoreScene(d.key)}>
+                  Restore
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

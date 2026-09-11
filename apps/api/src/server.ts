@@ -40,6 +40,7 @@ import {
   safeRefName,
   type JobRecord,
   type JobClip,
+  listAllJobDocs,
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
 import { composeFinal, lastFrame, posterFrame, selfTest, trimClip, type BrandOverlay } from './post.js';
@@ -58,6 +59,7 @@ import {
 } from './users.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
 import { writeScript, addPhonetics, ScriptError, type ScriptScene, type ScriptLanguage } from './script.js';
+import { generateMusicBed } from './lyria.js';
 import {
   buildContext,
   buildBeats,
@@ -71,6 +73,9 @@ import {
   type ProviderKind,
   type Role,
   type VehicleKind,
+  speakingSeconds,
+  sceneEditFor,
+  DEFAULT_USD_TO_INR,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
 import { importPlace, PlacesError } from './places.js';
@@ -402,14 +407,15 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
       message: 'This narration mode has no speech, so there is no script to write.',
     });
   }
-  const plan = planScenes(buildBeats(ctx), ctx.totalDuration, ctx.maxChunk, { speaks: true });
+  const plan = planScenes(buildBeats(ctx), ctx.totalDuration, ctx.maxChunk, { speaks: true, pace: ctx.pace });
   const scenes: ScriptScene[] = plan.scenes
     .map((sc, index) => ({
       index,
       title: sc.beat.title,
       direction: sc.beat.dialogue ?? '',
       seconds: sc.duration,
-      words: Math.max(3, Math.round(sc.duration * 2.2)),
+      // Measured without the silences at a part's edges, so no line spills across a cut.
+      words: Math.max(3, Math.round(speakingSeconds(plan, sc) * 2.2 * ctx.pace)),
       card: sc.beat.card,
     }))
     .filter((sc) => sc.direction);
@@ -447,7 +453,8 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
   // The writer must not say aloud what a caption already shows — and the caption
   // to avoid is the one the designer edited, not the template's.
   for (const sc of scenes) {
-    sc.card = sceneCard(plan.scenes[sc.index]!.beat, project?.sceneEdits?.[String(sc.index)])?.text;
+    const scene = plan.scenes[sc.index]!;
+    sc.card = sceneCard(scene.beat, sceneEditFor(project?.sceneEdits ?? {}, plan, scene))?.text;
   }
   let carSubject: Record<string, unknown> | undefined;
   if (project?.carId) {
@@ -490,13 +497,16 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
           ? ctx.brief.dealer.fakeBrandModel || ctx.brief.dealer.brandModel
           : ctx.brief.dealer.brandModel,
         city: brief.dealer.city,
-        cta: brief.cta,
+        // Already "test ride" for a two-wheeler, and never blank.
+        cta: ctx.cta,
         facts,
         direction: (brief.extraDirection ?? []).join(' '),
+        vehicleKind: brief.vehicleKind,
       },
       apiKey,
     );
-    return out;
+    // Each line is filed under its scene's key, which survives scenes being deleted.
+    return { ...out, lines: out.lines.map((l) => ({ ...l, key: plan.scenes[l.index]?.beat.key })) };
   } catch (e) {
     const err = e as ScriptError;
     return reply.code(err.status ?? 502).send({ code: err.code ?? 'script-failed', message: err.message });
@@ -964,6 +974,7 @@ function buildOverlay(
   sceneOverrides: Record<string, SceneOverride> | undefined,
   dealerLogo?: Buffer,
   brandLogo?: Buffer,
+  musicBed?: Buffer,
 ): BrandOverlay {
   const copy = overlayCopy(brief);
   const plan = buildPrompt(brief, { sceneOverrides })?.scenePlan;
@@ -976,8 +987,42 @@ function buildOverlay(
       brief.endCardOn && copy.endCardLines.length ? { lines: copy.endCardLines, seconds: 3 } : undefined,
     // A 1080p deliverable from a model that rendered 720p is upscaled here.
     targetShortSide: shortSideFor(wantedResolution(brief)),
-    transition: 0.5,
+    musicBed,
+    // Light under a presenter or voiceover; fuller when the film has no speech.
+    musicLoudness: buildContext(brief).mode.speaks ? -27 : -20,
   };
+}
+
+/**
+ * The film's music: one Lyria track under the whole cut, made while the first
+ * segment renders so it adds no waiting. It never fails a run — without a bed the
+ * film simply goes out with no music — and it is saved with the job so a retake
+ * or restitch lays the same track back under the new cut.
+ */
+async function makeMusicBed(
+  brief: Brief,
+  jobId: string,
+  filmSeconds: number,
+): Promise<{ bytes: Buffer; storagePath?: string } | null> {
+  const apiKey = await scriptKey().catch(() => undefined);
+  if (!apiKey) return null;
+  const ctx = buildContext(brief);
+  try {
+    const bed = await generateMusicBed(
+      {
+        description: ctx.music || CATEGORY_BY_ID[brief.categories[0]!]?.music || '',
+        seconds: filmSeconds,
+        speaks: ctx.mode.speaks,
+      },
+      apiKey,
+    );
+    const ext = bed.mimeType.includes('wav') ? 'wav' : 'mp3';
+    const put = await putRef(`music-${jobId}.${ext}`, bed.mimeType, bed.bytes).catch(() => null);
+    return { bytes: bed.bytes, storagePath: put?.storagePath };
+  } catch (e) {
+    app.log.warn({ jobId, err: (e as Error).message }, 'music bed failed — the film goes out without one');
+    return null;
+  }
 }
 
 /**
@@ -1120,6 +1165,8 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   };
   await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
 
+  // The music is made while the segments render, and waited for only at the stitch.
+  const musicBed = makeMusicBed(brief, jobId, cost.totalSeconds + (brief.endCardOn ? 3 : 0));
   const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
 
   // No `extend` — each segment is an independent create, seeded with the
@@ -1154,10 +1201,14 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       prevBytes = bytes;
     }
 
-    // Post-production: crossfade the segments, append a real end card, and
-    // overlay the footer bar + logos. Everything that must be legible is drawn
-    // here rather than generated.
-    const finalBytes = await composeFinal(segmentBytes, buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo));
+    // Post-production: join the segments, lay one continuous music track under
+    // them, append a real end card, and overlay the footer bar + logos.
+    // Everything that must be legible is drawn here rather than generated.
+    const bed = await musicBed;
+    const finalBytes = await composeFinal(
+      segmentBytes,
+      buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes),
+    );
     const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 
     // Thumbnail for the project's generation history.
@@ -1168,7 +1219,17 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       posterPath = put?.storagePath;
     }
 
-    await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath, finishedAt: Date.now() });
+    // The whole record again, not just what changed: if the first save was lost,
+    // this write alone still files the video under its project.
+    await updateJob(jobId, {
+      ...record,
+      status: 'done',
+      clips,
+      finalStoragePath,
+      posterPath,
+      musicStoragePath: bed?.storagePath,
+      finishedAt: Date.now(),
+    });
     if (req.caller) {
       await recordActivity(req.caller, {
         type: 'generate',
@@ -1219,6 +1280,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       { usdPerSecond: resolved.usdPerSecond },
     );
     await updateJob(jobId, {
+      ...record,
       status: 'failed',
       error: e.message,
       clips,
@@ -1392,6 +1454,16 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
     };
     await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
 
+    // The same music goes back under the new cut. A run made before the bed existed
+    // carries its music inside the clips, so it only gets one when every segment is
+    // being made again.
+    const musicBed: Promise<{ bytes: Buffer; storagePath?: string } | null> = source.musicStoragePath
+      ? readObject(source.musicStoragePath)
+          .then((o) => (o ? { bytes: o.bytes, storagePath: source.musicStoragePath } : null))
+          .catch(() => null)
+      : redo.length === parts.length
+        ? makeMusicBed(brief, jobId, totalSeconds + (brief.endCardOn ? 3 : 0))
+        : Promise.resolve(null);
     const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
 
     try {
@@ -1445,7 +1517,11 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
 
       // Overlay copy is rebuilt from the current brief, so a footer or end-card
       // correction lands here even on the free restitch path.
-      const finalBytes = await composeFinal(segmentBytes, buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo));
+      const bed = await musicBed;
+      const finalBytes = await composeFinal(
+        segmentBytes,
+        buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes),
+      );
       const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 
       let posterPath: string | undefined;
@@ -1454,7 +1530,15 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         posterPath = (await putRef(`poster-${jobId}.jpg`, 'image/jpeg', poster).catch(() => null))?.storagePath;
       }
 
-      await updateJob(jobId, { status: 'done', clips, finalStoragePath, posterPath, finishedAt: Date.now() });
+      await updateJob(jobId, {
+        ...record,
+        status: 'done',
+        clips,
+        finalStoragePath,
+        posterPath,
+        musicStoragePath: bed?.storagePath,
+        finishedAt: Date.now(),
+      });
       if (req.caller) {
         await recordActivity(req.caller, {
           type: 'retake',
@@ -1491,7 +1575,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       app.log.error({ jobId, model: resolved?.modelId, code: e.code, message: e.message }, 'generation failed');
       const failedIdx = clips.findIndex((c) => c.status === 'pending');
       if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
-      await updateJob(jobId, { status: 'failed', error: e.message, clips }).catch(() => {});
+      await updateJob(jobId, { ...record, status: 'failed', error: e.message, clips }).catch(() => {});
       return reply.code(e instanceof OmniFlashError || e instanceof SeedanceError || e instanceof VeoError ? e.status : 502).send({
         code: e.code ?? 'refine-failed',
         message: e.message,
@@ -1513,6 +1597,68 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
 const STALE_RUN_MS = 25 * 60 * 1000;
 const interrupted = (j: JobRecord): boolean =>
   j.status === 'running' && Date.now() - (j.updatedAt ?? j.createdAt) > STALE_RUN_MS;
+
+/**
+ * Put back the generations whose first save was lost.
+ *
+ * From 10 Sept until the undefined-field fix, a run that was not upscaled failed its
+ * first save. The merge-writes that followed left a record holding the clips and the
+ * finished video but no project, no creation time and no cost, so it never appeared
+ * in its project's history. Every finished run logged a "generate" activity within a
+ * second of finishing, carrying its project and cost — that is the match. Only
+ * records with no project are touched, and a run without exactly one clear match is
+ * left alone.
+ */
+async function repairOrphanedJobs(): Promise<void> {
+  const orphans = (await listAllJobDocs()).filter(
+    (j) => !j.projectId && !j.createdAt && j.finishedAt && j.finalStoragePath,
+  );
+  if (!orphans.length) return;
+  const activity = (await listActivity(2000)).filter((a) => a.type === 'generate' && a.projectId);
+  const near = (j: JobRecord) => activity.filter((a) => Math.abs(a.at - j.finishedAt!) <= 90_000);
+  for (const j of orphans) {
+    const found = near(j);
+    // One activity belongs to one run, and one run to one activity.
+    if (found.length !== 1 || orphans.some((o) => o !== j && near(o).includes(found[0]!))) {
+      app.log.warn({ jobId: j.jobId, candidates: found.length }, 'orphaned generation left alone — no single match');
+      continue;
+    }
+    const a = found[0]!;
+    const project = await getOne<Record<string, any>>('projects', a.projectId!).catch(() => null);
+    const clips = j.clips ?? [];
+    const [secsLabel, aspect, modelName] = (a.detail ?? '').split(' · ');
+    const totalSeconds =
+      Number.parseFloat(secsLabel ?? '') || Math.round(clips.reduce((t, c) => t + (c.seconds ?? 0), 0) * 10) / 10;
+    const useCases: string[] = project?.useCases ?? [];
+    // Rendering time is on the clips; the stitch and the uploads add about half a minute.
+    const createdAt = j.finishedAt! - clips.reduce((t, c) => t + (c.renderMs ?? 0), 0) - 30_000;
+    await updateJob(j.jobId, {
+      jobId: j.jobId,
+      projectId: a.projectId,
+      projectName: a.projectName,
+      userId: a.uid,
+      userEmail: a.email,
+      userName: a.name,
+      label: `${totalSeconds}s · ${useCases.length} use case${useCases.length === 1 ? '' : 's'}`,
+      modelName: modelName?.trim() || undefined,
+      createdAt,
+      startedAt: createdAt,
+      categories: useCases,
+      dealerName: '',
+      aspect: aspect?.trim() || project?.spec?.aspect || '',
+      resolution: project?.spec?.resolution ?? '720p',
+      totalSeconds,
+      costInr: a.costInr ?? 0,
+      costUsd: a.costInr ? Math.round((a.costInr / DEFAULT_USD_TO_INR) * 10_000) / 10_000 : undefined,
+    });
+    app.log.info(
+      { jobId: j.jobId, projectId: a.projectId, projectName: a.projectName },
+      'orphaned generation put back in its project history',
+    );
+  }
+}
+
+repairOrphanedJobs().catch((e) => app.log.warn({ err: (e as Error).message }, 'generation repair failed'));
 
 app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req) => {
   const jobs = await listJobsForProject(req.params.id);

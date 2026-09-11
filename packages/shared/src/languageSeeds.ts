@@ -184,6 +184,7 @@ offer card entirely when overloaded.`;
 const HINDI_GLOSSARY: LanguageProfile['glossary'] = [
   // --- CTA and offer language ---
   { term: 'Test Drive', say: 'test drive', mode: 'english', group: 'CTA & offers' },
+  { term: 'Test Ride', say: 'test ride', mode: 'english', group: 'CTA & offers' },
   { term: 'Book kijiye / Book now', say: 'buk KEE-ji-ye', group: 'CTA & offers' },
   { term: 'Booking', say: 'booking', mode: 'english', group: 'CTA & offers' },
   { term: 'Offer', say: 'offer', mode: 'english', group: 'CTA & offers' },

@@ -137,7 +137,7 @@ export function ProjectsSection() {
                 ))}
               </div>
               <div className="proj-foot">
-                {p.spec.durationSec}s · {p.spec.aspect} · updated{' '}
+                {p.spec.durationAuto ? 'Auto length' : `${p.spec.durationSec}s`} · {p.spec.aspect} · updated{' '}
                 {new Date(p.updatedAt).toLocaleDateString()}
                 {!!p.generationCount && (
                   <>

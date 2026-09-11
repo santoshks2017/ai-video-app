@@ -87,6 +87,8 @@ export interface ScriptRequest {
   facts: Record<string, string>;
   /** Extra steer from global instructions and the project's own prompt. */
   direction?: string;
+  /** A two-wheeler film says "test ride"; a car film says "test drive". */
+  vehicleKind?: 'car' | 'bike';
 }
 
 export interface ScriptLine {
@@ -339,6 +341,9 @@ function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string
     '- **Talk to one person.**',
     '- **Earn the CTA.** The last line asks for the action and lands because of what came before.',
     `- ${verbs}`,
+    ...(req.vehicleKind === 'bike'
+      ? ['- This is a two-wheeler showroom: always "test ride", never "test drive" — a bike or scooter is ridden, not driven.']
+      : []),
     `- Everyday spoken ${lang}, the way it is actually spoken — not translated English.`,
     '',
     '**BANNED — these are what naive copy is made of. Not one of them, in any line:**',
@@ -348,7 +353,7 @@ function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string
     '**SCRIPT — this one is absolute.** Every English word and every proper noun stays in LATIN letters, spelled the ordinary English way, inside the Devanagari sentence. Never transliterate them into Devanagari.',
     '  Right: "New Delhi में Tata Punch Pure CNG, seven lakh sixty eight thousand से शुरू।"',
     '  Wrong: "न्यू दिल्ली में टाटा पंच प्योर सीएनजी।"',
-    '  This covers brand and model names, place names, the dealership name, and the English words Indians say in English: test drive, EMI, on-road price, booking, offer, showroom, variant, service, down payment, airbags, manual, automatic, safety, family, mileage.',
+    '  This covers brand and model names, place names, the dealership name, and the English words Indians say in English: test drive, test ride, EMI, on-road price, booking, offer, showroom, variant, service, down payment, airbags, manual, automatic, safety, family, mileage.',
     '',
     '- Never invent a price, EMI, discount, mileage, interest rate or waiting period. Only the facts above exist.',
     '- Write every number, price and unit as plain ENGLISH words in Latin letters — "fifteen lakh four thousand", "six airbags", "seventy kmpl". Never digits, never the ₹ symbol, never the word "rupees", and never a Devanagari number. The price is the line that has to land, and a respelled price does not survive the video model.',
@@ -399,6 +404,9 @@ function editInstruction(req: ScriptRequest, angle: ScriptAngle | null, draft: {
     '7. **Is it inside its word budget?** Cut words, never meaning. If it will not fit, write a different, shorter sentence.',
     '8. **Do the numbers read as plain English words in Latin letters,** and does every English word and proper noun stay in Latin letters inside the Devanagari sentence?',
     '9. **The last line:** does it ask for the action, and has the script earned it?',
+    ...(req.vehicleKind === 'bike'
+      ? ['10. **Two-wheeler words:** "test ride", never "test drive"; ride, never drive.']
+      : []),
     '',
     'Rewrite a line only where it fails. A line that passes comes back exactly as it is — resist the urge to fiddle with copy that already works. Never invent a fact that is not in the brief.',
     '',

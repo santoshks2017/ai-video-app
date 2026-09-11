@@ -1334,3 +1334,74 @@ textarea.guide {
 .list-row-inputs .list-row-sub { font-size: 12.5px; }
 .list-row .btn { margin-top: 4px; }
 .list-add { justify-self: start; margin-left: 30px; }
+
+/* Length and pace: the app sizes the film; the designer can take it over. */
+.length-pick { display: flex; gap: 6px; }
+.length-pick select { flex: 1; min-width: 0; }
+.length-pick input { width: 72px; }
+.sb-length {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 22px;
+  margin: 10px 0;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.sb-length-group { display: grid; gap: 5px; }
+.sb-length-group > label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+}
+.sb-length-group input { width: 76px; padding: 5px 7px; }
+.sb-seg {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.sb-seg button {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.sb-seg button + button { border-left: 1px solid var(--line-strong); }
+.sb-seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.sb-length-result { margin-left: auto; display: grid; gap: 2px; text-align: right; font-size: 12.5px; }
+
+/* A shot with no photo of the part it frames: said, never force-fitted. */
+.sb-generic-note {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--warn-wash);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.sb-ref-thumb.generic { border-color: var(--warn); background: var(--warn-wash); }
+.sb-ref-thumb.generic .sb-ref-auto { color: var(--warn); }
+.sb-ref-generic { font-size: 11px; line-height: 1.4; color: var(--warn); }
+
+/* Deleting a scene, and putting it back. */
+.sb-del { margin-top: 8px; padding: 3px 8px; }
+.sb-deleted { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 10px; font-size: 12.5px; }
+.sb-deleted-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 3px 2px 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink-muted);
+}
+.sb-deleted-chip .btn { padding: 2px 8px; }

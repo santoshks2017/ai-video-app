@@ -226,6 +226,7 @@ export const CATEGORIES: CategoryDef[] = [
         .filter((r) => r.text)
         .forEach((r, i) => {
           s.push({
+            id: `feature-${i + 1}`,
             title: `Feature ${i + 1}`,
             shot: featureShots[i % featureShots.length]!(r.text),
             dialogue: r.text + ' translated into: ' + (r.sub || 'the emotional payoff, one sentence'),
@@ -320,40 +321,55 @@ export const CATEGORIES: CategoryDef[] = [
     hue: 130,
     music: 'light, inviting acoustic-modern bed',
     purpose: 'Remove the commitment barrier — make it feel like an experience, not a sales visit.',
-    mandatory: [{ id: 'location', label: 'Where the test drive happens' }],
+    mandatory: [{ id: 'location', label: 'Where the test drive or ride happens' }],
     avoid: ['Making it sound transactional or high-pressure'],
     fields: [
       { id: 'location', label: 'Location', type: 'text', ph: 'e.g. the showroom, or an event location' },
       { id: 'dateWindow', label: 'Date / time window', type: 'text', ph: 'e.g. this weekend, 10am–6pm' },
     ],
-    beats: (v, ctx): Beat[] => [
-      {
-        title: 'The invitation',
-        shot: "Driver's door opening from outside, seat and wheel visible — an invitation into the car.",
-        dialogue: 'Open with the feeling that makes someone want to get behind the wheel — not a pitch.',
-      },
-      {
-        title: 'The drive',
-        shot: 'Rolling low-angle tracking shot of the car on an open road, then interior POV over the wheel.',
-        dialogue: 'Describe what the drive feels like — the road, the response, the seat.',
-      },
-      {
-        title: 'No pressure',
-        shot: 'Medium shot of the presenter beside the car at the showroom entrance.',
-        shotAlt: 'Slow reveal of the car parked at the showroom entrance, doors closed.',
-        dialogue: 'Make clear there is no pressure to buy — just come and experience it.',
-      },
-      {
-        title: 'Logistics + CTA',
-        shot: 'Wide showroom entrance shot with the car in frame.',
-        dialogue:
-          'State where and when: ' +
-          (f(v, 'location') || 'the showroom') +
-          (f(v, 'dateWindow') ? ', ' + f(v, 'dateWindow') : '') +
-          '.',
-        card: ctx.cta,
-      },
-    ],
+    beats: (v, ctx): Beat[] => {
+      const bike = ctx.vehicle === 'bike';
+      const vehicle = bike ? 'bike' : 'car';
+      return [
+        {
+          title: 'The invitation',
+          shot: bike
+            ? 'Hand settling on the handlebar and the key turning, seat and console in frame — an invitation to ride.'
+            : "Driver's door opening from outside, seat and wheel visible — an invitation into the car.",
+          dialogue: bike
+            ? 'Open with the feeling that makes someone want to get on and ride — not a pitch.'
+            : 'Open with the feeling that makes someone want to get behind the wheel — not a pitch.',
+        },
+        {
+          id: 'experience',
+          title: bike ? 'The ride' : 'The drive',
+          shot: bike
+            ? 'Rolling low-angle tracking shot of the bike on an open road, then a rider POV over the handlebar.'
+            : 'Rolling low-angle tracking shot of the car on an open road, then interior POV over the wheel.',
+          dialogue: bike
+            ? 'Describe what the ride feels like — the road, the pull, the balance.'
+            : 'Describe what the drive feels like — the road, the response, the seat.',
+        },
+        {
+          title: 'No pressure',
+          shot: `Medium shot of the presenter beside the ${vehicle} at the showroom entrance.`,
+          shotAlt: bike
+            ? 'Slow reveal of the bike parked at the showroom entrance.'
+            : 'Slow reveal of the car parked at the showroom entrance, doors closed.',
+          dialogue: `Make clear there is no pressure to buy — just come in for a ${ctx.trial}.`,
+        },
+        {
+          title: 'Logistics + CTA',
+          shot: `Wide showroom entrance shot with the ${vehicle} in frame.`,
+          dialogue:
+            'State where and when: ' +
+            (f(v, 'location') || 'the showroom') +
+            (f(v, 'dateWindow') ? ', ' + f(v, 'dateWindow') : '') +
+            '.',
+          card: ctx.cta,
+        },
+      ];
+    },
   },
 
   {
@@ -608,6 +624,7 @@ export const CATEGORIES: CategoryDef[] = [
         .forEach((r, i) => {
           const [shot, shotAlt] = offerShots[i % offerShots.length]!;
           s.push({
+            id: `offer-${i + 1}`,
             title: `Offer ${i + 1}`,
             shot,
             shotAlt,

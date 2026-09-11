@@ -15,5 +15,7 @@ export * from './defaults.js';
 export * from './samples.js';
 export * from './library.js';
 export * from './compose.js';
+export * from './duration.js';
+export * from './visuals.js';
 export * from './languageSeeds.js';
 export * from './changelog.js';

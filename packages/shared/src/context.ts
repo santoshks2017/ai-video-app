@@ -6,6 +6,21 @@
 import type { AspectRatio, Brief, NarrationMode } from './types.js';
 import { narrationMode } from './narration.js';
 
+/**
+ * "Test drive" for cars, "test ride" for bikes and scooters. The CTA, the end card,
+ * the storyboard and the script all say whichever fits the showroom; the case of
+ * the original is kept ("Test Drive" -> "Test Ride").
+ */
+export function adaptTrial(text: string, vehicle: 'car' | 'bike' | undefined): string {
+  if (vehicle !== 'bike') return text;
+  return text.replace(/\b(test)([\s-]+)(drive)(s?)\b/gi, (_m, t: string, sep: string, d: string, plural: string) =>
+    `${t}${sep}${d[0] === 'D' ? 'R' : 'r'}${d.slice(1) === 'RIVE' ? 'IDE' : 'ide'}${plural}`,
+  );
+}
+
+/** The storyboard's pace, held to what a presenter can still say clearly. */
+export const clampPace = (pace: number | undefined): number => Math.min(1.25, Math.max(0.85, Number(pace) || 1));
+
 export interface RenderContext {
   brief: Brief;
   mode: NarrationMode;
@@ -25,11 +40,17 @@ export interface RenderContext {
   dealerShort: string;
   /** Dealership name actually shown on screen (falls back to the real name). */
   onScreenDealer: string;
+  vehicle: 'car' | 'bike';
+  /** "test drive" or "test ride". */
+  trial: string;
+  /** Delivery speed; 1 is a natural read. */
+  pace: number;
 }
 
 export function buildContext(brief: Brief): RenderContext {
   const d = brief.dealer;
   const useFake = d.fictionalize;
+  const vehicle: 'car' | 'bike' = brief.vehicleKind === 'bike' ? 'bike' : 'car';
 
   const displayBrandModel = useFake
     ? d.fakeBrandModel || '[Placeholder Brand + Model]'
@@ -50,7 +71,7 @@ export function buildContext(brief: Brief): RenderContext {
     maxChunk: Math.max(3, Math.round(brief.maxChunkSec) || 10),
     aspect: brief.aspect,
     music: brief.music.trim(),
-    cta: brief.cta.trim() || 'Book your test drive today',
+    cta: adaptTrial(brief.cta.trim() || 'Book your test drive today', vehicle),
     visStyle:
       brief.visualStyle.trim() ||
       'Bright premium modern showroom, glossy floors, realistic reflections, energetic dealership-ad feel',
@@ -62,6 +83,9 @@ export function buildContext(brief: Brief): RenderContext {
     displayDealer,
     onScreenDealer,
     dealerShort: useFake ? d.fakeDealer || '[Dealership]' : d.dealerName || '[Dealership]',
+    vehicle,
+    trial: vehicle === 'bike' ? 'test ride' : 'test drive',
+    pace: clampPace(brief.pace),
   };
 }
 
@@ -74,5 +98,7 @@ export function beatContext(ctx: RenderContext) {
     cta: ctx.cta,
     totalDuration: ctx.totalDuration,
     aspect: ctx.aspect,
+    vehicle: ctx.vehicle,
+    trial: ctx.trial,
   };
 }

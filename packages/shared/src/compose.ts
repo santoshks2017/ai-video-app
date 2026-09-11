@@ -6,6 +6,8 @@
  * already understand — so the whole generation pipeline stays unchanged.
  */
 
+import { adaptTrial, clampPace } from './context.js';
+import { pacedDuration, suggestDuration } from './duration.js';
 import type { Brief, DealerPhoto, CategoryId } from './types.js';
 import type {
   VehicleKind,
@@ -25,6 +27,8 @@ export function emptySpec(): ProjectVideoSpec {
   const b = emptyBrief();
   return {
     durationSec: b.durationSec,
+    durationAuto: true,
+    pace: 1,
     maxChunkSec: b.maxChunkSec,
     aspect: b.aspect,
     resolution: b.resolution,
@@ -198,6 +202,10 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   b.endCardOn = s.endCardOn;
   b.endCard = s.endCard;
   b.fieldValues = project.fieldValues;
+  b.omitScenes = Object.entries(project.sceneEdits ?? {})
+    .filter(([, e]) => e?.deleted)
+    .map(([key]) => key);
+  b.pace = clampPace(s.pace);
 
   if (client) {
     b.dealer = {
@@ -248,6 +256,8 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
       .sort((a, z) => a.localeCompare(z));
     if (models.length) b.lineup = { brand, kind: sells, models: [...new Set(models)] };
   }
+  // Cars are driven and bikes are ridden — decided once, from what the film shows.
+  b.vehicleKind = car?.kind ?? client?.vehicleKind ?? b.lineup?.kind ?? 'car';
 
   // Reference images, most-specific first: car → client logo/photos → project extras.
   const attachments: DealerPhoto[] = [];
@@ -262,8 +272,15 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
         label: `Colour reference — ${paint}: paint the car exactly this colour`,
       });
     }
+    // Each shot keeps the part of the car it shows, so a scene about the cabin is
+    // matched to a cabin photo — or flagged when there is none.
+    const heroVariant = car!.variants.find((v) => v.name === project.carVariant);
+    const angleOf = (img: StoredImage): CarAngle | undefined =>
+      ANGLE_ORDER.find((a) =>
+        [...(heroVariant?.images?.[a] ?? []), ...(car!.images?.[a] ?? [])].some((x) => x.storagePath === img.storagePath),
+      );
     for (const img of hero.shots) {
-      const photo = toDealerPhoto(img, 'car-model');
+      const photo = { ...toDealerPhoto(img, 'car-model'), angle: angleOf(img) };
       // Said in the label because the label is what the prompt cites beside each
       // file: the model must take shape, not paint, from these.
       attachments.push(paint && hero.swatch ? { ...photo, label: `${photo.label} — shape reference; its paint may differ` } : photo);
@@ -297,6 +314,11 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   if (project.prompt?.trim()) extra.push(project.prompt.trim());
   b.extraDirection = extra;
 
+  // The length follows the story — sized from the use cases and what was filled
+  // in — unless the designer set it by hand. Either way the pace plays it: the same
+  // script in a shorter or a longer film.
+  b.durationSec = pacedDuration((s.durationAuto && suggestDuration(b)) || s.durationSec, b.pace);
+
   return b;
 }
 
@@ -325,9 +347,9 @@ export function overlayCopy(brief: Brief): { footerText: string; endCardLines: s
   const endCardLines = brief.endCard.trim()
     ? brief.endCard
         .split(/\r?\n|\s*\|\s*/)
-        .map((x) => x.trim())
+        .map((x) => adaptTrial(x.trim(), brief.vehicleKind))
         .filter(Boolean)
-    : [shown, brief.cta, d.address, d.phone].map((x) => (x ?? '').trim()).filter(Boolean);
+    : [shown, adaptTrial(brief.cta, brief.vehicleKind), d.address, d.phone].map((x) => (x ?? '').trim()).filter(Boolean);
 
   return { footerText, endCardLines };
 }

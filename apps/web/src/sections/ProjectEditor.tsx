@@ -3,6 +3,10 @@ import {
   CATEGORIES,
   NARRATION,
   buildPrompt,
+  buildBeats,
+  buildContext,
+  suggestDuration,
+  clampPace,
   runChecks,
   estimateCost,
   isPromptOnly,
@@ -84,6 +88,35 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     () => (brief ? buildPrompt(brief, { sceneOverrides: project?.sceneEdits ?? {} }) : null),
     [brief, project?.sceneEdits],
   );
+
+  // What the story needs at a natural read — the length "Auto" stands for.
+  const suggestedLength = useMemo(() => (brief ? suggestDuration(brief) : 0), [brief]);
+
+  // Scenes the designer deleted, named so they can be put back.
+  const deletedScenes = useMemo(() => {
+    const omitted = new Set(brief?.omitScenes ?? []);
+    if (!brief || !omitted.size) return [];
+    return buildBeats(buildContext({ ...brief, omitScenes: [] }))
+      .filter((b) => b.key && omitted.has(b.key))
+      .map((b) => ({ key: b.key!, title: b.title, cat: b.cat ?? '' }));
+  }, [brief]);
+
+  /**
+   * Storyboard edits filed under scene keys. Edits made before scenes had keys are
+   * filed by scene position, which moves the moment a scene is deleted. They are
+   * read by position as they are, and re-filed under keys only when something is
+   * next written — so opening a project never changes what is saved.
+   */
+  const keyedEdits = (edits: Project['sceneEdits']): Project['sceneEdits'] => {
+    const keys = Object.keys(edits);
+    if (!keys.length || !keys.every((k) => /^\d+$/.test(k)) || !built?.scenePlan) return edits;
+    const next: Project['sceneEdits'] = {};
+    for (const [k, edit] of Object.entries(edits)) {
+      const key = built.scenePlan.scenes[Number(k)]?.beat.key;
+      if (key) next[key] = edit;
+    }
+    return next;
+  };
   const promptOnly = project ? isPromptOnly(project.useCases) : false;
   const presenterPicked = (project?.useCases ?? []).filter(
     (id) => CATEGORIES.find((c) => c.id === id)?.mode === 'presenter',
@@ -133,9 +166,10 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     const r = await genApi.script(brief, language?.id, project.id);
     if (isApiError(r)) return `${r.code}: ${r.message}`;
     if (!r.lines.length) return 'No spoken scenes to write for.';
-    const next = { ...project.sceneEdits };
-    for (const { index, line, say } of r.lines) {
-      next[String(index)] = { ...next[String(index)], dialogue: line, phonetic: say };
+    const next = { ...keyedEdits(project.sceneEdits) };
+    for (const { index, key, line, say } of r.lines) {
+      const k = key ?? built?.scenePlan.scenes[index]?.beat.key ?? String(index);
+      next[k] = { ...next[k], dialogue: line, phonetic: say };
     }
     // The angle is saved with the copy: it is what the lines are arguing, and
     // judging a line without it is judging half the work.
@@ -146,18 +180,45 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   /** Re-apply the current pronunciation guide without rewriting the copy. */
   const redoPhonetics = async (): Promise<string> => {
     if (!project) return 'Open a project first.';
-    const lines = Object.entries(project.sceneEdits)
-      .map(([k, v]) => ({ index: Number(k), line: (v.dialogue ?? '').trim() }))
-      .filter((l) => Number.isFinite(l.index) && l.line);
+    // Sent by position in this list, and filed back under each scene's key.
+    const edits = keyedEdits(project.sceneEdits);
+    const entries = Object.entries(edits).filter(([, v]) => !v.deleted && (v.dialogue ?? '').trim());
+    const lines = entries.map(([, v], index) => ({ index, line: (v.dialogue ?? '').trim() }));
     if (!lines.length) return 'No written lines yet — write the script first.';
     const r = await genApi.phonetics(lines, language?.id);
     if (isApiError(r)) return `${r.code}: ${r.message}`;
-    const next = { ...project.sceneEdits };
+    const next = { ...edits };
     for (const { index, say } of r.lines) {
-      next[String(index)] = { ...next[String(index)], phonetic: say };
+      const key = entries[index]?.[0];
+      if (key) next[key] = { ...next[key], phonetic: say };
     }
     set({ sceneEdits: next });
     return `Re-applied the ${r.language} guide to ${r.lines.length} line${r.lines.length > 1 ? 's' : ''}. The copy is unchanged.`;
+  };
+
+  /** Take a scene out of the film. A length set by hand gives up that scene's seconds. */
+  const deleteScene = (key: string) => {
+    if (!project) return;
+    const sc = built?.scenePlan.scenes.find((s) => s.beat.key === key);
+    const spec =
+      !project.spec.durationAuto && sc
+        ? {
+            ...project.spec,
+            durationSec: Math.max(6, Math.round(project.spec.durationSec - sc.duration * clampPace(project.spec.pace))),
+          }
+        : project.spec;
+    const edits = keyedEdits(project.sceneEdits);
+    set({ spec, sceneEdits: { ...edits, [key]: { ...edits[key], deleted: true } } });
+  };
+
+  const restoreScene = (key: string) => {
+    if (!project) return;
+    const next = { ...project.sceneEdits };
+    const rest = { ...next[key] };
+    delete rest.deleted;
+    if (Object.values(rest).some((v) => v !== undefined)) next[key] = rest;
+    else delete next[key];
+    set({ sceneEdits: next });
   };
 
   const cost = useMemo(
@@ -193,7 +254,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     );
   }
 
-  const fit = formatFit(project.spec.durationSec, project.spec.aspect);
+  const fit = formatFit(brief?.durationSec ?? project.spec.durationSec, project.spec.aspect);
   const parts = built?.parts ?? [];
   const sells = client?.vehicleKind ?? 'car';
   const pickableVehicles = cars.filter(
@@ -431,14 +492,31 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
           <Panel title="3. Video" step="The essentials — everything else has a sensible default">
             <div className="row3">
-              <Field label="Duration (seconds)">
-                <input
-                  type="number"
-                  min={6}
-                  max={120}
-                  value={project.spec.durationSec}
-                  onChange={(e) => setSpec({ durationSec: Number(e.target.value) })}
-                />
+              <Field label="Length">
+                <div className="length-pick">
+                  <select
+                    value={project.spec.durationAuto ? 'auto' : 'custom'}
+                    onChange={(e) =>
+                      setSpec(
+                        e.target.value === 'auto'
+                          ? { durationAuto: true }
+                          : { durationAuto: false, durationSec: suggestedLength || project.spec.durationSec },
+                      )
+                    }
+                  >
+                    <option value="auto">Auto{suggestedLength ? ` — ${suggestedLength}s` : ''}</option>
+                    <option value="custom">Set by hand</option>
+                  </select>
+                  {!project.spec.durationAuto && (
+                    <input
+                      type="number"
+                      min={6}
+                      max={120}
+                      value={project.spec.durationSec}
+                      onChange={(e) => setSpec({ durationSec: Number(e.target.value) })}
+                    />
+                  )}
+                </div>
               </Field>
               <Field label="Aspect ratio">
                 <select
@@ -737,15 +815,28 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 scenePlan={built.scenePlan}
                 sceneEdits={project.sceneEdits}
                 narration={project.spec.narration}
-                onEditScene={(key, patch) =>
-                  set({ sceneEdits: { ...project.sceneEdits, [key]: { ...project.sceneEdits[key], ...patch } } })
-                }
+                onEditScene={(key, patch) => {
+                  const edits = keyedEdits(project.sceneEdits);
+                  set({ sceneEdits: { ...edits, [key]: { ...edits[key], ...patch } } });
+                }}
                 onClearEdits={() => set({ sceneEdits: {} })}
                 attachments={brief?.attachments ?? []}
                 angle={project.scriptAngle}
                 onWriteScript={writeScript}
                 onRedoPhonetics={language?.needsPhonetics === false ? undefined : redoPhonetics}
                 languageName={language?.name}
+                vehicle={brief?.vehicleKind ?? 'car'}
+                length={{
+                  auto: project.spec.durationAuto === true,
+                  seconds: project.spec.durationSec,
+                  suggested: suggestedLength,
+                  pace: clampPace(project.spec.pace),
+                  endCard: project.spec.endCardOn ? 3 : 0,
+                }}
+                onLength={(patch) => setSpec(patch)}
+                deletedScenes={deletedScenes}
+                onDeleteScene={deleteScene}
+                onRestoreScene={restoreScene}
               />
             </Collapse>
           )}

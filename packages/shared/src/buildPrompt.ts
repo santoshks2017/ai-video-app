@@ -10,8 +10,9 @@ import type { Brief, PromptPart } from './types.js';
 import { WORDS_PER_SECOND } from './constants.js';
 import { buildContext, type RenderContext } from './context.js';
 import { buildBeats, collectStrings } from './buildBeats.js';
-import { planScenes, fmtTime } from './planScenes.js';
-import type { Beat, ScenePlan } from './types.js';
+import { planScenes, fmtTime, speakingSeconds } from './planScenes.js';
+import type { Beat, Scene, ScenePlan } from './types.js';
+import { sceneVisual, sceneVisualLine } from './visuals.js';
 import { CATEGORY_BY_ID } from './categories.js';
 import { rulebookText } from './rulebook.js';
 
@@ -24,28 +25,12 @@ import { rulebookText } from './rulebook.js';
 const CLEAN_FRAME =
   'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. Signage that genuinely exists in the location (a showroom fascia, a number plate) is part of the scene and is fine; invented graphics are not.';
 
-/**
- * Name the reference image a single shot is built on.
- *
- * The REFERENCE IMAGES block lists every supplied file, which leaves the model
- * to choose — and it reaches for the wrong one, framing a showroom wide when the
- * scene called for a macro of the lamp. A scene that names its own reference
- * gets what the designer picked.
- */
-function refLine(ref: string | undefined, attachments: { filename: string; label: string }[]): string | null {
-  const name = ref?.trim();
-  if (!name) return null;
-  const found = attachments.find((a) => a.filename === name);
-  if (!found) return null;
-  return `Build this shot on the supplied reference image ${found.filename} (${found.label}) — match its vehicle, angle and setting.`;
-}
-
 function spokenLock(brief: Brief): string {
   const lang = brief.language?.name ?? 'Hindi';
   const respelled = brief.language?.needsPhonetics !== false;
   const lines = [
     '## SPOKEN LINES — SAY THESE EXACTLY',
-    `Anything in {curly braces} above is the presenter's exact wording, in ${lang}. Speak it word for word. Do not translate it, re-word it, shorten it, extend it or "correct" it, and never read the scene descriptions aloud. Lip movement must match these words, at a natural unhurried pace.`,
+    `Anything in {curly braces} above is the presenter's exact wording, in ${lang}. Speak it word for word. Do not translate it, re-word it, shorten it, extend it or "correct" it, and never read the scene descriptions aloud. Lip movement must match these words, at ${paceDelivery(brief.pace ?? 1)}.`,
   ];
   if (respelled) {
     lines.push(
@@ -65,8 +50,17 @@ function spokenLock(brief: Brief): string {
   return lines.join('\n');
 }
 
-export function wordBudget(seconds: number): number {
-  return Math.max(3, Math.round(seconds * WORDS_PER_SECOND));
+/** Words that fit in a stretch of speech. A quicker pace fits more words into the same seconds. */
+export function wordBudget(seconds: number, pace = 1): number {
+  return Math.max(3, Math.round(seconds * WORDS_PER_SECOND * pace));
+}
+
+/** How the delivery is described to the model at the storyboard's pace. */
+export function paceDelivery(pace: number): string {
+  if (pace >= 1.15) return 'a quick, punchy pace — about 20% faster than a relaxed read, short pauses only, every word still clear';
+  if (pace >= 1.05) return 'a brisk, energetic pace — about 10% faster than a relaxed read, short pauses, every word still clear';
+  if (pace <= 0.95) return 'a relaxed, unhurried pace with generous pauses';
+  return 'a natural unhurried pace with real pauses';
 }
 
 function textLangLine(textLang: Brief['textLang']): string {
@@ -108,13 +102,28 @@ export interface SceneOverride {
   card?: string;
   /** The smaller line under the caption. Undefined keeps the template's. */
   cardSub?: string;
+  /** The designer took this scene out of the film. */
+  deleted?: boolean;
+}
+
+/**
+ * The storyboard edit for a scene. Edits are filed under the scene's beat key.
+ * Projects edited before scenes had keys filed them by position; those are read by
+ * position until the editor has re-filed them.
+ */
+export function sceneEditFor<T>(overrides: Record<string, T>, plan: Pick<ScenePlan, 'scenes'>, sc: Scene): T | undefined {
+  const byKey = sc.beat.key ? overrides[sc.beat.key] : undefined;
+  if (byKey !== undefined) return byKey;
+  const keys = Object.keys(overrides);
+  if (!keys.length || keys.some((k) => !/^\d+$/.test(k))) return undefined;
+  return overrides[String(plan.scenes.indexOf(sc))];
 }
 
 export interface BuildPromptOptions {
   /**
-   * Manual edits from the storyboard step (PRD P0.5), keyed by the scene's
-   * global index (its position in `scenePlan.scenes`). Lets the user fix one
-   * scene's script or shot and regenerate just the master prompt.
+   * Manual edits from the storyboard step (PRD P0.5), keyed by each scene's beat
+   * key (see sceneEditFor). Lets the user fix one scene's script or shot and
+   * regenerate just the master prompt.
    */
   sceneOverrides?: Record<string, SceneOverride>;
 }
@@ -126,7 +135,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
   if (!beats.length) return null;
   const overrides = opts.sceneOverrides ?? {};
 
-  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks });
+  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks, pace: ctx.pace });
   const totalParts = plan.parts;
   const mode = ctx.mode;
   const actor = brief.actor;
@@ -144,7 +153,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     const partEnd = scenes[scenes.length - 1]!.end;
     const partDuration = Math.round((partEnd - partStart) * 10) / 10;
     const partWordBudget = mode.speaks
-      ? scenes.reduce((sum, s) => sum + wordBudget(s.duration), 0)
+      ? scenes.reduce((sum, s) => sum + wordBudget(speakingSeconds(plan, s), ctx.pace), 0)
       : 0;
     const L: string[] = [];
 
@@ -163,7 +172,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       );
       if (totalParts > 1)
         L.push(
-          `This is the OPENING segment of a longer ${ctx.totalDuration}-second video generated in ${totalParts} parts, because one generation cannot hold the whole script without rushing the delivery. End on a natural cut, mid-motion — never an abrupt stop — so it can be extended.`,
+          `This is the OPENING segment of a longer ${ctx.totalDuration}-second video generated in ${totalParts} parts, because one generation cannot hold the whole script without rushing the delivery. End on a natural cut, mid-motion — never an abrupt stop — so it can be extended. When this segment's last line is finished, stop speaking and hold a natural silent beat — a smile, a glance at the car — until the clip ends. Never start a line that is not written in this segment; the next line belongs to the next part.`,
         );
       L.push(`Video type: ${catLabels.join(' + ')}.`);
     } else {
@@ -173,7 +182,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       L.push(
         isLast
           ? 'This is the FINAL part — close cleanly on the last scene below.'
-          : 'End on a natural cut, mid-motion, so it can be extended again in the next part.',
+          : 'End on a natural cut, mid-motion, so it can be extended again in the next part. When this segment\'s last line is finished, stop speaking and hold a natural silent beat — a smile, a glance at the car — until the clip ends. Never start a line that is not written in this segment; the next line belongs to the next part.',
       );
     }
 
@@ -284,16 +293,17 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         'No spoken audio of any kind. Where a scene below describes something being said or told, convey it through the footage and the on-screen text instead — never through a talking mouth.',
       );
     }
+    // The music bed is one continuous track laid under the finished film in post.
+    // Music a model makes lives inside each separately generated part and restarts
+    // at every join, so the model is asked for none.
     L.push(
-      `Music: ${ctx.music || 'a neutral modern commercial track'}${
-        mode.speaks ? ', mixed low so it sits under the voice.' : ', carrying the full energy of the clip.'
-      }`,
+      'No background music. One continuous music track is added under the finished video afterwards — keep only the voice and natural room sound.',
     );
 
     // A written line is the single biggest lever on spoken quality, so the lock
     // stands on its own rather than riding along with the on-screen text block.
     const hasScript = scenes.some((sc) =>
-      (overrides[String(plan.scenes.indexOf(sc))]?.phonetic ?? overrides[String(plan.scenes.indexOf(sc))]?.dialogue ?? '').trim(),
+      (sceneEditFor(overrides, plan, sc)?.phonetic ?? sceneEditFor(overrides, plan, sc)?.dialogue ?? '').trim(),
     );
     if (mode.speaks && hasScript) {
       L.push('');
@@ -324,8 +334,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     L.push('');
     L.push('---');
     scenes.forEach((sc, i) => {
-      const globalIndex = plan.scenes.indexOf(sc);
-      const ov = overrides[String(globalIndex)] ?? {};
+      const ov = sceneEditFor(overrides, plan, sc) ?? {};
       const localStart = Math.round((sc.start - partStart) * 10) / 10;
       const localEnd = Math.round((sc.end - partStart) * 10) / 10;
       L.push(
@@ -336,8 +345,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       const shotText = ov.shot?.trim() || baseShot;
       if (shotText) L.push(`Shot: ${shotText}`);
-      const sceneRef = refLine(ov.ref, attachments);
-      if (sceneRef) L.push(sceneRef);
+      // The photo this shot is built on: the designer's pick, a photo of the part the
+      // shot frames, or a plain instruction to render that part generically rather
+      // than bend a photo of something else into it.
+      const visualLine = sceneVisualLine(sceneVisual(shotText ?? '', ov.ref, attachments, ctx.vehicle), ctx.vehicle);
+      if (visualLine) L.push(visualLine);
       const scripted = ov.phonetic?.trim() || ov.dialogue?.trim();
       const dialogue = scripted || sc.beat.dialogue;
       if (mode.speaks && scripted) {
@@ -347,7 +359,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         L.push(`Says, word for word: {${scripted}}`);
       } else if (mode.speaks && dialogue) {
         L.push(
-          `Speaks in ${brief.language?.name ?? 'Hindi/Hinglish'}, at most ~${wordBudget(sc.duration)} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it naturally: ${dialogue}`,
+          `Speaks in ${brief.language?.name ?? 'Hindi/Hinglish'}, at most ~${wordBudget(speakingSeconds(plan, sc), ctx.pace)} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it naturally: ${dialogue}`,
         );
       } else if (dialogue) {
         L.push(`Story beat, told visually with no speech: ${dialogue}`);
@@ -376,7 +388,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       important.push('Same person in every shot — no change of face, hair, outfit or build.');
     if (mode.lipSync)
       important.push(
-        'Hindi lip-sync must match the spoken line precisely; do not speed up the delivery to fit the time.',
+        ctx.pace >= 1.05
+          ? 'Hindi lip-sync must match the spoken line precisely, at the brisk pace asked for.'
+          : 'Hindi lip-sync must match the spoken line precisely; do not speed up the delivery to fit the time.',
       );
     if (!mode.speaks) important.push('No lip movement, no talking head, no implied speech anywhere.');
     important.push('No warped text, no garbled letters, no distorted vehicle geometry.');
@@ -404,7 +418,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         L.push(
           `${brief.language?.name ?? 'Hindi/Hinglish'}, ${
             actor.gender === 'male' ? 'masculine' : 'feminine'
-          } verb forms, natural unhurried pace with real pauses. The words and their pronunciation are fixed above — do not restyle, re-order or re-pronounce them.`,
+          } verb forms, ${paceDelivery(ctx.pace)}. The words and their pronunciation are fixed above — do not restyle, re-order or re-pronounce them.`,
         );
       } else {
         L.push('## PRONUNCIATION & DELIVERY RULES (apply to every spoken word in this clip)');
@@ -427,6 +441,13 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
           : '') +
         'same car (identical model, colour, wheels, badges), same showroom and background, same framing, lens, lighting and colour grade. Then continue the motion naturally — no cut back to an intro, no titles, no restart.',
     );
+    if (mode.speaks) {
+      // Parts are joined cut to cut, so a word said on both sides of a join is heard
+      // twice, and one started in the first instant lands on the cut.
+      C.push(
+        'Let the first half-second pass before the first spoken word, and do not repeat anything said at the end of the previous part — begin with this segment\'s own first line.',
+      );
+    }
     if (mode.onCameraPerson) {
       C.push(
         `The on-camera presenter is the same person as in the reference frame${
@@ -447,14 +468,14 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     C.push(`Visual style: ${ctx.visStyle}. Keep the exact same grade and camera language as the reference frame.`);
     if (ctx.mode.speaks) {
       C.push(
-        `Spoken language: Hindi/Hinglish, natural unhurried pace, about ${
-          scenes.reduce((s, x) => s + wordBudget(x.duration), 0)
+        `Spoken language: Hindi/Hinglish, ${paceDelivery(ctx.pace)}, about ${
+          scenes.reduce((s, x) => s + wordBudget(speakingSeconds(plan, x), ctx.pace), 0)
         } words total across this segment.`,
       );
     } else {
       C.push('No spoken audio; carry the message through footage and on-screen text.');
     }
-    C.push(`Music: ${ctx.music || 'a neutral modern commercial track'}.`);
+    C.push('No background music — one continuous track is added under the finished video afterwards. Voice and natural room sound only.');
     C.push(CLEAN_FRAME);
     const contDirection = (brief.extraDirection ?? []).filter((x) => x.trim());
     if (contDirection.length) {
@@ -465,12 +486,15 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     C.push('');
     C.push('Scenes in this segment:');
     scenes.forEach((sc, i) => {
-      const ov = overrides[String(plan.scenes.indexOf(sc))] ?? {};
+      const ov = sceneEditFor(overrides, plan, sc) ?? {};
       C.push(`Scene ${i + 1} (~${sc.duration}s) — ${sc.beat.title}`);
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       if (ov.shot?.trim() || baseShot) C.push(`  Shot: ${ov.shot?.trim() || baseShot}`);
-      const contRef = refLine(ov.ref, attachments);
-      if (contRef) C.push(`  ${contRef}`);
+      const contVisual = sceneVisualLine(
+        sceneVisual(ov.shot?.trim() || baseShot || '', ov.ref, attachments, ctx.vehicle),
+        ctx.vehicle,
+      );
+      if (contVisual) C.push(`  ${contVisual}`);
       const scriptedC = ov.phonetic?.trim() || ov.dialogue?.trim();
       const d = scriptedC || sc.beat.dialogue;
       if (d) {
@@ -479,7 +503,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
             ? `  Told visually, no speech: ${d}`
             : scriptedC
               ? `  Says, word for word: {${scriptedC}}`
-              : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(sc.duration)} words, composed from this intent: ${d}`,
+              : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(speakingSeconds(plan, sc), ctx.pace)} words, composed from this intent: ${d}`,
         );
       }
       if (sceneCard(sc.beat, ov)) {
@@ -490,7 +514,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     if (
       ctx.mode.speaks &&
       scenes.some((sc) => {
-        const o = overrides[String(plan.scenes.indexOf(sc))];
+        const o = sceneEditFor(overrides, plan, sc);
         return (o?.phonetic ?? o?.dialogue ?? '').trim();
       })
     ) {
@@ -500,6 +524,10 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     C.push(CLEAN_FRAME);
     if (mode.speaks) C.push('Same pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
     if (isLast) C.push('This is the final segment — end cleanly on the last scene.');
+    else
+      C.push(
+        "End mid-motion so the next part can continue. When this segment's last line is finished, stop speaking and hold a natural silent beat until the clip ends — never start a line that is not written in this segment; the next line belongs to the next part.",
+      );
 
     partsOut.push({
       partNum: p + 1,
@@ -566,7 +594,7 @@ export function overlayCards(plan: ScenePlan, overrides: Record<string, SceneOve
     const partSeconds = Math.round((scenes[scenes.length - 1]!.end - partStart) * 10) / 10;
 
     for (const sc of scenes) {
-      const card = sceneCard(sc.beat, overrides[String(plan.scenes.indexOf(sc))]);
+      const card = sceneCard(sc.beat, sceneEditFor(overrides, plan, sc));
       if (!card) continue;
       // A caption that covers its whole shot is wallpaper. Hold it off the cut
       // at either end so the picture is seen before the words arrive.

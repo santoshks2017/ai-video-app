@@ -11,12 +11,20 @@ export function buildBeats(ctx: RenderContext): Beat[] {
   const beats: Beat[] = [];
   const bctx = beatContext(ctx);
 
+  const omitted = new Set(ctx.brief.omitScenes ?? []);
+
   for (const id of ctx.brief.categories) {
     const cat = CATEGORY_BY_ID[id];
     if (!cat) continue;
     const values = categoryValues(id, ctx.brief.fieldValues[id]);
+    // A beat is known by its use case and its id, or else its place among the beats
+    // that have none — so adding a feature row does not shift the key of the scene
+    // after the list, and an edit never jumps to a neighbouring scene.
+    let place = 0;
     for (const b of cat.beats(values, bctx) ?? []) {
-      beats.push({ ...b, cat: cat.label });
+      const key = `${id}:${b.id ?? place++}`;
+      if (omitted.has(key)) continue;
+      beats.push({ ...b, key, cat: cat.label });
     }
   }
 

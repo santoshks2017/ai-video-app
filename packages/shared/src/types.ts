@@ -79,10 +79,21 @@ export interface BeatContext {
   cta: string;
   totalDuration: number;
   aspect: AspectRatio;
+  vehicle: 'car' | 'bike';
+  /** "test drive" or "test ride". */
+  trial: string;
 }
 
 /** A single storyboard beat, before it is timed into a scene. */
 export interface Beat {
+  /** Stable identity within its use case, when the title can change (drive or ride, Feature 3). */
+  id?: string;
+  /**
+   * The scene's identity in its film: the use case, then the beat's id or its place
+   * among that use case's beats. Storyboard edits and deletions are filed under it,
+   * so they stay on the scene they were made on while scenes around it come and go.
+   */
+  key?: string;
   title: string;
   /** Primary shot / camera direction (used when a person is on camera). */
   shot: string;
@@ -147,6 +158,8 @@ export interface DealerPhoto {
   /** Cloud Storage path of the uploaded bytes; read at generate time to ground the model. */
   storagePath?: string;
   kind: 'dealer' | 'car-model' | 'logo' | 'brand-logo';
+  /** For a car photo, the part of the car it shows — what a scene about that part is matched to. */
+  angle?: 'front' | 'side' | 'rear' | 'interior';
 }
 
 export interface Dealer {
@@ -208,6 +221,12 @@ export interface Brief {
    * paints the car whatever colour its reference photos happen to be.
    */
   carColour?: string;
+  /** What the showroom sells. Two-wheelers are ridden: "test ride", never "test drive". */
+  vehicleKind?: 'car' | 'bike';
+  /** Storyboard scenes the designer deleted, by beat key. */
+  omitScenes?: string[];
+  /** Delivery speed. 1 is a natural read; 1.1 says the same script 10% faster, in a film 10% shorter. */
+  pace?: number;
   durationSec: number;
   /** Per-generation-call cap in seconds (Omni Flash: 3–10s). */
   maxChunkSec: number;

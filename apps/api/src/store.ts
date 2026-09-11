@@ -16,8 +16,32 @@ export function ensureFirebase(): void {
   if (ready) return;
   if (!getApps().length) {
     initializeApp({ credential: applicationDefault(), projectId: PROJECT, storageBucket: BUCKET });
+    // An optional field left unset must never sink a whole write.
+    try {
+      getFirestore().settings({ ignoreUndefinedProperties: true });
+    } catch {
+      /* already configured */
+    }
   }
   ready = true;
+}
+
+/**
+ * Firestore refuses `undefined` anywhere in a document. Every run since
+ * renderResolution was added without a value (no upscale) failed its first save,
+ * and a later merge-write left a record with no project, so the video vanished
+ * from its project's history. Unset optional fields are dropped instead.
+ */
+function defined<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(defined) as T;
+  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, defined(v)]),
+    ) as T;
+  }
+  return value;
 }
 const ensure = ensureFirebase;
 
@@ -53,6 +77,8 @@ export interface JobRecord {
   modelId?: string;
   /** Frame grabbed from the finished video, for the history thumbnail. */
   posterPath?: string;
+  /** The film's one continuous music track, kept so a retake lays the same bed back. */
+  musicStoragePath?: string;
   status: 'running' | 'done' | 'failed';
   createdAt: number;
   updatedAt: number;
@@ -94,7 +120,7 @@ export async function listRecentJobs(limit = 200): Promise<JobRecord[]> {
 
 export async function saveJob(rec: JobRecord): Promise<void> {
   ensure();
-  await getFirestore().collection('generations').doc(rec.jobId).set(rec);
+  await getFirestore().collection('generations').doc(rec.jobId).set(defined(rec));
 }
 
 export async function updateJob(jobId: string, patch: Partial<JobRecord>): Promise<void> {
@@ -102,7 +128,7 @@ export async function updateJob(jobId: string, patch: Partial<JobRecord>): Promi
   await getFirestore()
     .collection('generations')
     .doc(jobId)
-    .set({ ...patch, updatedAt: Date.now() }, { merge: true });
+    .set(defined({ ...patch, updatedAt: Date.now() }), { merge: true });
 }
 
 export async function getJob(jobId: string): Promise<JobRecord | null> {
@@ -177,6 +203,13 @@ export async function readObject(
   const [meta] = await file.getMetadata();
   const [bytes] = await file.download();
   return { bytes, contentType: String(meta.contentType ?? 'application/octet-stream') };
+}
+
+/** Every generation record, by document id — for the repair of runs whose first save was lost. */
+export async function listAllJobDocs(): Promise<JobRecord[]> {
+  ensure();
+  const snap = await getFirestore().collection('generations').get();
+  return snap.docs.map((d) => ({ ...(d.data() as JobRecord), jobId: (d.data() as JobRecord).jobId ?? d.id }));
 }
 
 /** Every generation for a project, newest first. */

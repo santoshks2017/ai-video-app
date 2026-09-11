@@ -13,8 +13,9 @@ import type { Brief, Check } from './types.js';
 import { LONG_STRING_CHARS, cardCap } from './constants.js';
 import { buildContext } from './context.js';
 import { buildBeats, collectStrings } from './buildBeats.js';
-import { planScenes } from './planScenes.js';
+import { planScenes, speakingSeconds } from './planScenes.js';
 import { CATEGORY_BY_ID, isPromptOnly, categoryValues, listRows } from './categories.js';
+import { sceneEditFor, wordBudget } from './buildPrompt.js';
 
 export interface PreflightResult {
   checks: Check[];
@@ -25,7 +26,7 @@ export interface PreflightResult {
 }
 
 export interface RunChecksOptions {
-  /** Storyboard edits, keyed by global scene index — where written lines live. */
+  /** Storyboard edits, keyed by scene key (see sceneEditFor) — where written lines live. */
   sceneOverrides?: Record<string, { dialogue?: string; phonetic?: string; shot?: string }>;
   /** The model this brief will actually run on, for capability checks. */
   model?: { name?: string; speechLanguages?: string[]; maxClipSec?: number } | null;
@@ -44,7 +45,7 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
   const promptOnly = isPromptOnly(brief.categories);
   const ctx = buildContext(brief);
   const beats = buildBeats(ctx);
-  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks });
+  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks, pace: ctx.pace });
   const mode = ctx.mode;
 
   // Mandatory category fields — blocking.
@@ -208,19 +209,41 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
   if (mode.speaks && plan.scenes.length) {
     const overrides = opts.sceneOverrides ?? {};
     // What counts is the pronunciation spelling — that is what the model performs.
-    const unscripted = plan.scenes.filter((sc, i) => {
-      const o = overrides[String(i)];
+    const unscripted = plan.scenes.filter((sc) => {
+      const o = sceneEditFor(overrides, plan, sc);
       return !(o?.phonetic ?? o?.dialogue ?? '').trim() && sc.beat.dialogue;
     }).length;
     // English needs no respelling, so only ask for one where the language says so.
     const needsPhonetics = brief.language?.needsPhonetics !== false;
     const unspelled = needsPhonetics
-      ? plan.scenes.filter((sc, i) => {
-          const o = overrides[String(i)];
+      ? plan.scenes.filter((sc) => {
+          const o = sceneEditFor(overrides, plan, sc);
           return (o?.dialogue ?? '').trim() && !(o?.phonetic ?? '').trim() && sc.beat.dialogue;
         }).length
       : 0;
     const langName = brief.language?.name ?? 'Hindi';
+    // A line too long for the time left before its part's cut is where repeats come
+    // from: the model runs out of clip, carries the rest into the next part, and
+    // that part says it again.
+    const spills = plan.scenes.filter((sc, i) => {
+      const next = plan.scenes[i + 1];
+      if (!next || next.part === sc.part) return false;
+      const o = sceneEditFor(overrides, plan, sc);
+      const words = (o?.phonetic?.trim() || o?.dialogue?.trim() || '')
+        .split(/\s+/)
+        .filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+      return words > Math.ceil(wordBudget(speakingSeconds(plan, sc), ctx.pace) * 1.25);
+    });
+    if (spills.length) {
+      const names = spills.map((sc) => `scene ${plan.scenes.indexOf(sc) + 1}`).join(', ');
+      checks.push({
+        level: 'warn',
+        code: 'line-spills-part',
+        text: `The line in ${names} is too long for the time left before its part ends — the model may carry the end of it into the next part and say it twice. Shorten ${
+          spills.length > 1 ? 'those lines' : 'it'
+        }, or press Rewrite script.`,
+      });
+    }
     if (unscripted) {
       const spoken = plan.scenes.filter((sc) => sc.beat.dialogue).length;
       checks.push({

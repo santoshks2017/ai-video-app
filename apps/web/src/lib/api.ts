@@ -50,6 +50,8 @@ export interface GenerationHistoryItem {
 
 export interface ScriptLineView {
   index: number;
+  /** The scene's key — lines are filed under it. */
+  key?: string;
   line: string;
   say: string;
 }

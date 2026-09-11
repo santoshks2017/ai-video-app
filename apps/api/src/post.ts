@@ -65,8 +65,14 @@ export interface BrandOverlay {
    * drawn, so the type and logos are set at full size rather than enlarged.
    */
   targetShortSide?: number;
-  /** Dissolve between segments, seconds. */
-  transition?: number;
+  /**
+   * One continuous music track for the whole film, laid under the voice. Music a
+   * video model makes lives inside each separately generated part and restarts at
+   * every join, so the bed is generated once and mixed in here instead.
+   */
+  musicBed?: Buffer;
+  /** Loudness the bed is levelled to, in LUFS: low under speech, fuller when nobody speaks. */
+  musicLoudness?: number;
   accent?: string;
   ink?: string;
 }
@@ -615,7 +621,6 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
 
   const accent = overlay.accent ?? DEFAULT_ACCENT;
   const ink = overlay.ink ?? DEFAULT_INK;
-  const xfd = overlay.transition ?? 0.5;
 
   const nothingToDo =
     segments.length === 1 &&
@@ -624,7 +629,8 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     !overlay.dealerLogo &&
     !overlay.endCard &&
     !overlay.cards?.length &&
-    !overlay.targetShortSide;
+    !overlay.targetShortSide &&
+    !overlay.musicBed;
   if (nothingToDo) return segments[0]!;
 
   const dir = await mkdtemp(join(tmpdir(), 'ava-post-'));
@@ -636,7 +642,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       files.push(f);
     }
     const metas = await Promise.all(files.map(probe));
-    // Every clip is scaled to one frame size before the chain. xfade refuses to
+    // Every clip is scaled to one frame size before the chain. concat refuses to
     // join two sizes, and a 1080p deliverable from a model that renders 720p is
     // upscaled here — before the footer, captions and logos are drawn at W×H.
     const srcW = metas[0]!.width;
@@ -646,21 +652,21 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     const even = (n: number): number => Math.round(n / 2) * 2;
     const W = even(srcW * k);
     const H = even(srcH * k);
-    // xfade refuses to join two links whose timebases differ, so everything
+    // concat refuses to join two links whose timebases differ, so everything
     // that enters the chain — clips, end card, captions — is pinned to the
     // frame rate of the first clip. Segments arrive from the model at whatever
     // rate it renders, and a 25fps clip meeting a 24fps end card failed the
     // whole compose.
     const fps = Math.max(1, Math.round(metas[0]!.fps));
 
-    // --- the clips, joined without holding them all in memory ---
-    // A crossfade chain (xfade over whole clips) makes ffmpeg decode every clip at
-    // once while each fade waits for its offset, so later clips pile up as raw
-    // 1080p frames: a five-clip 1080p join peaked at 1.1 GB, most of what got the
-    // instance killed. Instead each clip is cut into a body and two half-second
-    // edges, each dissolve is made from just those edges, and bodies and dissolves
-    // are concatenated in order. Same timeline, measured at about 60% of the
-    // memory, with sound and picture ending on the same frame.
+    // --- the parts, joined whole ---
+    // Every part plays in full, cut to cut. The crossfade that used to join them
+    // blended the last half-second of one part into the first half-second of the
+    // next: measured on a real 45s run, the audio fell to -57 dB at one join, the
+    // first word of a part was faded in and the last word of the part before faded
+    // out. Continuation parts open on the previous part's last frame, so the cut is
+    // already seamless; a 15ms audio fade is all it takes to keep it from clicking.
+    // Joining whole clips is also the lightest way through ffmpeg (measured 390 MB).
     const parts: string[] = [];
     const clipInputs: string[] = [];
     const clipFiles = [...files];
@@ -680,39 +686,48 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       metas.push({ duration: overlay.endCard.seconds, width: W, height: H, fps });
     }
     const clipCount = metas.length;
-    // A dissolve can be no longer than a third of the shortest clip, or a clip
-    // would have no body left between its two edges.
-    const X = Math.min(xfd, ...metas.map((m) => m.duration / 3));
+    const MICRO_FADE = 0.015;
 
     let clipIdx = 0;
-    const slice = (file: string, ss: number, seconds: number): number => {
-      clipInputs.push('-threads', FF_THREADS);
-      if (ss > 0) clipInputs.push('-ss', ss.toFixed(3));
-      clipInputs.push('-t', Math.max(0.04, seconds).toFixed(3), '-i', file);
-      return clipIdx++;
-    };
-    const normalise = (i: number, label: string): void => {
-      parts.push(`[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,fps=${fps},format=yuv420p,settb=AVTB[${label}v]`);
-      parts.push(`[${i}:a]aresample=44100:async=1,asettb=AVTB[${label}a]`);
-    };
-    const sequence: string[] = [];
-    for (let i = 0; i < clipCount; i++) {
-      const d = metas[i]!.duration;
-      const start = i === 0 ? 0 : X;
-      const end = i === clipCount - 1 ? d : d - X;
-      normalise(slice(clipFiles[i]!, start, end - start), `b${i}`);
-      sequence.push(`[b${i}v][b${i}a]`);
-      if (i < clipCount - 1) {
-        normalise(slice(clipFiles[i]!, d - X, X), `t${i}`);
-        normalise(slice(clipFiles[i + 1]!, 0, X), `h${i}`);
-        parts.push(`[t${i}v][h${i}v]xfade=transition=fade:duration=${X}:offset=0[x${i}v]`);
-        parts.push(`[t${i}a][h${i}a]acrossfade=d=${X}[x${i}a]`);
-        sequence.push(`[x${i}v][x${i}a]`);
-      }
-    }
-    parts.push(`${sequence.join('')}concat=n=${sequence.length}:v=1:a=1[vcat][acat]`);
+    clipFiles.forEach((file, i) => {
+      clipInputs.push('-threads', FF_THREADS, '-i', file);
+      const d = metas[i]!.duration.toFixed(3);
+      const isEndCard = Boolean(endCardFile) && i === clipCount - 1;
+      // Picture and sound are each padded and trimmed to the clip's own length, so
+      // a part whose audio stops a few milliseconds short leaves no gap and none can
+      // drift out of sync over five joins. The end card eases in from black.
+      parts.push(
+        `[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,fps=${fps},format=yuv420p,tpad=stop_mode=clone:stop_duration=0.25,trim=end=${d},setpts=N/FRAME_RATE/TB,settb=AVTB${
+          isEndCard ? ',fade=t=in:st=0:d=0.35' : ''
+        }[c${i}v]`,
+      );
+      parts.push(
+        `[${i}:a]aresample=44100:async=1,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=${d},asetpts=N/SR/TB,afade=t=in:st=0:d=${MICRO_FADE},afade=t=out:st=${Math.max(0, Number(d) - MICRO_FADE).toFixed(3)}:d=${MICRO_FADE}[c${i}a]`,
+      );
+      clipIdx++;
+    });
+    parts.push(`${clipFiles.map((_, i) => `[c${i}v][c${i}a]`).join('')}concat=n=${clipCount}:v=1:a=1[vcat][voice]`);
 
-    // Overlay assets are extra inputs after every clip slice, so their filter
+    const filmSeconds = metas.reduce((a, m) => a + m.duration, 0);
+    let audioOut = 'voice';
+    if (overlay.musicBed) {
+      const bed = join(dir, 'music-bed');
+      await writeFile(bed, overlay.musicBed);
+      // Looped in case the track came back shorter than the film, trimmed to the
+      // film, eased in, and faded out over the end card.
+      clipInputs.push('-stream_loop', '-1', '-i', bed);
+      const m = clipIdx++;
+      // Levelled to a fixed loudness first: a generated track can come back mastered
+      // anywhere, and the bed has to sit at the same depth under every voice.
+      const lufs = Math.max(-40, Math.min(-14, overlay.musicLoudness ?? -27));
+      parts.push(
+        `[${m}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=${filmSeconds.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${lufs}:TP=-3:LRA=11,aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, filmSeconds - 1.5).toFixed(3)}:d=1.5[bed]`,
+      );
+      parts.push(`[voice][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed]`);
+      audioOut = 'mixed';
+    }
+
+    // Overlay assets are extra inputs after the clips and the music, so their filter
     // indices continue from there.
     const inputs: string[] = [];
     let nextIdx = clipIdx;
@@ -761,7 +776,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     let at = 0;
     for (let i = 0; i < clipCount; i++) {
       clipStart.push(at);
-      at += metas[i]!.duration - X;
+      at += metas[i]!.duration;
     }
     // Captions belong to the film, never to the end card that follows it.
     const bodyClips = endCardFile ? clipCount - 1 : clipCount;
@@ -818,7 +833,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       '-filter_complex_threads', FF_THREADS,
       '-filter_complex', parts.join(';'),
       '-map', '[vout]',
-      '-map', '[acat]',
+      '-map', `[${audioOut}]`,
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', FF_THREADS,
       '-c:a', 'aac', '-movflags', '+faststart',
       out,

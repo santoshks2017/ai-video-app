@@ -20,6 +20,8 @@ import { MIN_SPOKEN_SCENE } from './constants.js';
 export interface PlanOptions {
   /** Spoken scenes need room to breathe; silent ones can cut faster. */
   speaks?: boolean;
+  /** A quicker read fits a line into a shorter scene, so the floors shrink with it. */
+  pace?: number;
 }
 
 /**
@@ -30,8 +32,8 @@ const MIN_SCENE_SPOKEN = 4.5;
 const MIN_SCENE_SILENT = 3.0;
 const MIN_SCENES = 3;
 
-export function targetSceneCount(totalDuration: number, speaks: boolean, available: number): number {
-  const floor = speaks ? MIN_SCENE_SPOKEN : MIN_SCENE_SILENT;
+export function targetSceneCount(totalDuration: number, speaks: boolean, available: number, pace = 1): number {
+  const floor = (speaks ? MIN_SCENE_SPOKEN : MIN_SCENE_SILENT) / pace;
   return Math.max(MIN_SCENES, Math.min(available, Math.floor(totalDuration / floor)));
 }
 
@@ -98,7 +100,7 @@ export function planScenes(
   const speaks = opts.speaks !== false;
 
   // --- 1. FIT: trim only when scenes would fall below the floor ---
-  const target = targetSceneCount(totalDuration, speaks, beats.length);
+  const target = targetSceneCount(totalDuration, speaks, beats.length, opts.pace ?? 1);
   const fitted = fitBeats(beats, target);
   const droppedBeats = beats.length - fitted.length;
 
@@ -185,6 +187,29 @@ export function planScenes(
 
   const usedParts = new Set(scenes.map((x) => x.part)).size;
   return { parts: usedParts, partDuration: round1(partDuration), scenes, droppedBeats };
+}
+
+/**
+ * Parts are generated separately and joined cut to cut. A line that runs to a
+ * part's last instant spills into whatever time the model has left and is said
+ * again at the start of the next part — the "six airbags airbags" repeat. So the
+ * last scene before a cut leaves a silent beat, and the first scene after a cut
+ * waits a moment before it speaks.
+ */
+export const PART_TAIL_SILENCE = 0.8;
+export const PART_HEAD_SILENCE = 0.4;
+
+/** Seconds of a scene there is room to speak in, once the silences at a part's edges are taken out. */
+export function speakingSeconds(plan: Pick<ScenePlan, 'scenes'>, sc: Scene): number {
+  const i = plan.scenes.indexOf(sc);
+  let t = sc.duration;
+  if (i >= 0) {
+    const next = plan.scenes[i + 1];
+    const prev = plan.scenes[i - 1];
+    if (next && next.part !== sc.part) t -= PART_TAIL_SILENCE;
+    if (prev && prev.part !== sc.part) t -= PART_HEAD_SILENCE;
+  }
+  return Math.max(1.5, Math.round(t * 10) / 10);
 }
 
 export function fmtTime(t: number): string {

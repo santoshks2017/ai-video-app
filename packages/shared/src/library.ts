@@ -223,7 +223,16 @@ export interface ProjectVideoSpec {
   modelId?: string;
   /** Which LanguageProfile the video is spoken and written in. Blank = the default. */
   languageId?: string;
+  /** The film's length at 1x pace, when it is set by hand. */
   durationSec: number;
+  /**
+   * The app sizes the film to its use cases and what was filled in, and the
+   * storyboard can take that over. Projects made before this keep their own
+   * number until someone switches them to auto.
+   */
+  durationAuto?: boolean;
+  /** Delivery speed: 1 is a natural read; 1.1 is the same words 10% faster, in a shorter film. */
+  pace?: number;
   maxChunkSec: number;
   aspect: AspectRatio;
   resolution: Resolution;
@@ -261,10 +270,22 @@ export interface Project {
   spec: ProjectVideoSpec;
   /** Per-category dynamic field values. */
   fieldValues: Partial<Record<CategoryId, Record<string, string>>>;
-  /** Storyboard edits keyed by global scene index. */
+  /**
+   * Storyboard edits, keyed by each scene's beat key ("feature:feature-2"). Projects
+   * edited before scenes had keys used the scene's position; the editor re-files
+   * those. `deleted` takes the scene out of the film.
+   */
   sceneEdits: Record<
     string,
-    { dialogue?: string; phonetic?: string; shot?: string; ref?: string; card?: string; cardSub?: string }
+    {
+      dialogue?: string;
+      phonetic?: string;
+      shot?: string;
+      ref?: string;
+      card?: string;
+      cardSub?: string;
+      deleted?: boolean;
+    }
   >;
   /**
    * The creative platform the last script was written to. Kept so the designer

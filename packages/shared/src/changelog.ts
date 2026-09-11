@@ -18,10 +18,21 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '2.6';
+export const APP_VERSION = '2.7';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '2.7',
+    date: '2026-09-11',
+    title: 'Long 1080p videos finish instead of dropping the connection',
+    changes: [
+      'A long 1080p video (45 seconds, five clips, ten captions) could fail with "network: Failed to fetch". The server was running out of memory while stitching the clips together and was shut down mid-run. The crossfades between clips made the video encoder hold every later clip in memory while each fade waited its turn; clips are now joined from short slices at each crossfade, which cut that stitch from about 1.6 GB to under 1 GB, and the server has four times the memory on top.',
+      'If an Omni video is ready but Google\u2019s file store is briefly unavailable, the download is retried instead of the whole run failing.',
+      'A run cut off partway through now shows in History as interrupted, instead of staying "running" forever.',
+      'A dropped connection says so in plain words instead of "network: Failed to fetch".',
+    ],
+  },
   {
     version: '2.6',
     date: '2026-09-11',

@@ -28,6 +28,83 @@ export function stripSuffix(value: string | undefined, suffix: string): string {
 
 const f = (o: Record<string, string>, k: string): string => String(o[k] ?? '').trim();
 
+/**
+ * The rows of a repeatable field, in order, skipping empty ones. A row counts if
+ * either of its inputs has text, so a benefit typed before its feature is kept.
+ */
+export function listRows(
+  v: Record<string, string>,
+  id: string,
+  opts: { subId?: string; max?: number } = {},
+): { n: number; text: string; sub: string }[] {
+  const rows: { n: number; text: string; sub: string }[] = [];
+  for (let n = 1; n <= (opts.max ?? 20); n++) {
+    const text = f(v, `${id}${n}`);
+    const sub = opts.subId ? f(v, `${opts.subId}${n}`) : '';
+    if (text || sub) rows.push({ n, text, sub });
+  }
+  return rows;
+}
+
+/** The highest numbered row that holds anything. */
+export function listLength(v: Record<string, string>, id: string, subId?: string, max = 20): number {
+  let last = 0;
+  for (let n = 1; n <= max; n++) if (f(v, `${id}${n}`) || (subId && f(v, `${subId}${n}`))) last = n;
+  return last;
+}
+
+/**
+ * Offers used to be typed into fixed boxes — cash discount, warranty, down payment,
+ * interest rate. Real dealer offers rarely fit those, so they are free text now. A
+ * project saved the old way reads as free-text offers, in the order its boxes were
+ * shown, until someone edits it.
+ */
+function legacyOffers(v: Record<string, string>): string[] {
+  const out: string[] = [];
+  if (f(v, 'cashDiscount')) out.push(f(v, 'cashDiscount'));
+  if (f(v, 'warrantyYears')) {
+    out.push(`${f(v, 'warrantyYears').replace(/\s*years?$/i, '')}-year warranty, ${f(v, 'warrantyKm') || 'unlimited'} km`);
+  }
+  if (f(v, 'downPayment')) out.push(`${stripSuffix(f(v, 'downPayment'), 'Down Payment')} down payment`);
+  if (f(v, 'interestRate')) out.push(`${stripSuffix(f(v, 'interestRate'), 'Interest Rate')} interest rate`);
+  return out;
+}
+
+/**
+ * A category's values in the shape its current fields expect. The one place an
+ * old saved shape is translated, so the editor, the beats, pre-flight and the
+ * script writer all see the same thing.
+ */
+export function categoryValues(id: string, raw: Record<string, string> = {}): Record<string, string> {
+  if (id !== 'offer' || listLength(raw, 'offer') > 0) return raw;
+  const legacy = legacyOffers(raw);
+  if (!legacy.length) return raw;
+  const out = { ...raw };
+  legacy.forEach((text, i) => {
+    out[`offer${i + 1}`] = text;
+  });
+  return out;
+}
+
+/** A readable name for a stored field key, numbered list rows included ("Offer 3"). */
+export function fieldLabel(cat: CategoryDef | undefined, key: string): string {
+  const direct = cat?.fields.find((x) => x.id === key);
+  if (direct) return direct.label;
+  const numbered = (prefix: string): string | null => {
+    const rest = key.startsWith(prefix) ? key.slice(prefix.length) : '';
+    return /^\d+$/.test(rest) ? rest : null;
+  };
+  for (const field of cat?.fields ?? []) {
+    if (field.type !== 'list' || !field.list) continue;
+    const noun = field.list.noun.charAt(0).toUpperCase() + field.list.noun.slice(1);
+    const n = numbered(field.id);
+    if (n) return `${noun} ${n}`;
+    const sn = field.list.sub ? numbered(field.list.sub.id) : null;
+    if (sn) return `Why ${field.list.noun} ${sn} matters`;
+  }
+  return key;
+}
+
 export const CATEGORIES: CategoryDef[] = [
   {
     id: 'walkaround',
@@ -89,25 +166,25 @@ export const CATEGORIES: CategoryDef[] = [
     hue: 215,
     music: 'modern cinematic bed with a clean beat, confident and premium',
     purpose: 'Educate and desire. Turn specs into feelings, not a spec dump.',
-    mandatory: [
-      { id: 'feature1', label: 'At least one feature' },
-      { id: 'benefit1', label: '…and what it means for the buyer' },
-    ],
+    mandatory: [{ id: 'feature1', label: 'At least one feature', list: 'feature' }],
     avoid: [
       'Raw spec lists without translation into a benefit',
       '“Industry-first” claims with no explanation',
       'Naming a competitor unless the comparison beat is switched on',
     ],
     fields: [
-      { id: 'feature1', label: 'Feature 1', type: 'text', ph: 'e.g. 6 airbags' },
       {
-        id: 'benefit1',
-        label: '→ Benefit / feeling',
-        type: 'text',
-        ph: 'e.g. your family is protected — peace of mind, not worry',
+        id: 'feature',
+        label: 'Features',
+        type: 'list',
+        ph: 'e.g. 6 airbags',
+        list: {
+          noun: 'feature',
+          sub: { id: 'benefit', label: 'Why it matters (optional)', ph: 'e.g. your family is protected — peace of mind' },
+          min: 2,
+          max: 8,
+        },
       },
-      { id: 'feature2', label: 'Feature 2 (optional)', type: 'text', ph: 'e.g. 27.97 km/l hybrid mileage' },
-      { id: 'benefit2', label: '→ Benefit / feeling', type: 'text', ph: 'e.g. months between fuel stops' },
       {
         id: 'identity',
         label: 'Who this car is right for',
@@ -137,24 +214,24 @@ export const CATEGORIES: CategoryDef[] = [
         shot: "Slow macro pan across the car's signature detail — headlamp DRL, grille or badge — shallow depth of field.",
         dialogue: 'Open with the feeling or situation, not the spec.',
       });
-      if (f(v, 'feature1')) {
-        s.push({
-          title: 'Feature 1',
-          shot: 'Macro detail shot of ' + f(v, 'feature1') + ' with a slow rack focus.',
-          dialogue:
-            f(v, 'feature1') + ' translated into: ' + (f(v, 'benefit1') || 'the emotional payoff, one sentence'),
-          card: f(v, 'feature1'),
+      // One scene per feature, however many the dealer lists; the shots rotate so
+      // a long list does not become the same macro shot four times over.
+      const featureShots = [
+        (x: string) => 'Macro detail shot of ' + x + ' with a slow rack focus.',
+        (x: string) => 'Interior close-up or detail shot of ' + x + ', slow slider move.',
+        (x: string) => 'Slow orbiting shot that reveals ' + x + ', shallow depth of field.',
+        (x: string) => 'Clean three-quarter shot framing ' + x + ', gentle push-in.',
+      ];
+      listRows(v, 'feature', { subId: 'benefit' })
+        .filter((r) => r.text)
+        .forEach((r, i) => {
+          s.push({
+            title: `Feature ${i + 1}`,
+            shot: featureShots[i % featureShots.length]!(r.text),
+            dialogue: r.text + ' translated into: ' + (r.sub || 'the emotional payoff, one sentence'),
+            card: r.text,
+          });
         });
-      }
-      if (f(v, 'feature2')) {
-        s.push({
-          title: 'Feature 2',
-          shot: 'Interior close-up or detail shot of ' + f(v, 'feature2') + ', slow slider move.',
-          dialogue:
-            f(v, 'feature2') + ' translated into: ' + (f(v, 'benefit2') || 'the emotional payoff, one sentence'),
-          card: f(v, 'feature2'),
-        });
-      }
       if (f(v, 'competitorCompare')) {
         s.push({
           title: 'Competitive pivot',
@@ -482,18 +559,22 @@ export const CATEGORIES: CategoryDef[] = [
     hue: 165,
     music: 'upbeat modern commercial track, energetic but sitting under the voice',
     purpose: 'Drive leads. Create urgency without cheapening the brand. Clarity over cleverness.',
-    mandatory: [{ id: 'cashDiscount', label: 'Cash discount amount' }],
+    mandatory: [{ id: 'offer1', label: 'At least one offer', list: 'offer' }],
     avoid: [
       'Percentage-off framing — use "up to ₹X" instead',
       'Vague "great offer" language',
       'More than three number cards in one video — the viewer remembers none of them',
     ],
     fields: [
-      { id: 'cashDiscount', label: 'Cash discount — amount only', type: 'text', ph: 'e.g. ₹2,25,000' },
-      { id: 'downPayment', label: 'Down payment — amount only', type: 'text', ph: 'e.g. ₹0' },
-      { id: 'interestRate', label: 'Interest rate — rate only', type: 'text', ph: 'e.g. 7.49%' },
-      { id: 'warrantyYears', label: 'Warranty (years)', type: 'text', ph: 'e.g. 7' },
-      { id: 'warrantyKm', label: 'Warranty (km)', type: 'text', ph: 'e.g. Unlimited' },
+      {
+        // Free text, not categories: a dealer's offer is "Benefits up to ₹1.5 lakh"
+        // or "free 5-year service pack", and rarely fits a cash / EMI / warranty box.
+        id: 'offer',
+        label: 'Offers & benefits',
+        type: 'list',
+        ph: 'e.g. Benefits up to ₹1.5 lakh on select variants',
+        list: { noun: 'offer', min: 2, max: 8 },
+      },
       {
         id: 'expirySignal',
         label: 'Urgency / expiry signal',
@@ -510,56 +591,31 @@ export const CATEGORIES: CategoryDef[] = [
         dialogue: 'Open with a value headline or question hook for the model — energetic, not shouty.',
         card: ctx.dealerShort + ' Offers',
       });
-      if (f(v, 'cashDiscount')) {
-        s.push({
-          title: 'Cash benefit',
-          shot: 'Backward tracking shot as the presenter walks beside the car.',
-          shotAlt:
-            'Backward tracking shot moving along the flank of the car on the showroom floor, no people in frame.',
-          dialogue:
-            'State the cash benefit. Follow the number and currency rules — say the amount in words, never say "rupees".',
-          card: stripSuffix(f(v, 'cashDiscount'), 'Cash Discount'),
-          cardSub: 'Cash Discount',
+      // One scene per offer, as the dealer wrote it. The offer's own words are the
+      // caption; the spoken line comes from the script, so the text never sits in
+      // the video prompt for the model to draw or say twice.
+      const offerShots: [string, string][] = [
+        [
+          'Backward tracking shot as the presenter walks beside the car.',
+          'Backward tracking shot moving along the flank of the car on the showroom floor, no people in frame.',
+        ],
+        ['Presenter stops beside the bonnet and gestures toward the car.', 'Slow push-in on the bonnet and badge.'],
+        ['Medium shot beside the car, presenter addressing camera.', 'Interior detail shot — dashboard and steering wheel, slow slider move.'],
+        ['Medium shot at the driver door, presenter opening it toward camera.', 'Front three-quarter beauty shot, slow arc.'],
+      ];
+      listRows(v, 'offer')
+        .filter((r) => r.text)
+        .forEach((r, i) => {
+          const [shot, shotAlt] = offerShots[i % offerShots.length]!;
+          s.push({
+            title: `Offer ${i + 1}`,
+            shot,
+            shotAlt,
+            dialogue:
+              'State this offer in one clear sentence — what the buyer gets. Say amounts in plain English words and never say "rupees".',
+            card: r.text,
+          });
         });
-      }
-      if (f(v, 'warrantyYears')) {
-        s.push({
-          title: 'Warranty',
-          shot: 'Presenter stops beside the bonnet, gestures toward the car; shield icon card animates in.',
-          shotAlt: 'Slow push-in on the bonnet and badge; shield icon card animates in over the shot.',
-          dialogue:
-            'State the warranty as ' +
-            f(v, 'warrantyYears') +
-            ' years, ' +
-            (f(v, 'warrantyKm') || 'unlimited') +
-            ' kilometres.',
-          card: String(f(v, 'warrantyYears')).replace(/\s*years?$/i, '') + '-Year Warranty',
-          cardSub: (f(v, 'warrantyKm') || 'Unlimited') + ' Kilometres',
-          note: 'Use a shield icon on this card.',
-        });
-      }
-      if (f(v, 'downPayment')) {
-        s.push({
-          title: 'Down payment',
-          shot: 'Medium shot, presenter counting the benefit on her fingers.',
-          shotAlt: 'Interior detail shot — dashboard and steering wheel, slow slider move.',
-          dialogue: 'State the down payment framing.',
-          card: stripSuffix(f(v, 'downPayment'), 'Down Payment'),
-          cardSub: 'Down Payment',
-        });
-      }
-      if (f(v, 'interestRate')) {
-        s.push({
-          title: 'Interest rate',
-          shot: 'Medium shot beside the car, finance card replaces the previous card.',
-          shotAlt: 'Front three-quarter beauty shot; finance card replaces the previous card.',
-          dialogue:
-            'State the interest rate. A decimal is read digit by digit in English style — 7.49% is "seven point four nine percent".',
-          card: stripSuffix(f(v, 'interestRate'), 'Interest Rate'),
-          cardSub: 'Interest Rate',
-          note: 'Small print under the card: Terms & Conditions Apply',
-        });
-      }
       s.push({
         title: 'Urgency + CTA',
         shot: 'Wide frontal shot with the car behind the presenter, slow push-in.',

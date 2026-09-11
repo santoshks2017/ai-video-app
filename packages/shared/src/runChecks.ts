@@ -14,7 +14,7 @@ import { LONG_STRING_CHARS, cardCap } from './constants.js';
 import { buildContext } from './context.js';
 import { buildBeats, collectStrings } from './buildBeats.js';
 import { planScenes } from './planScenes.js';
-import { CATEGORY_BY_ID, isPromptOnly } from './categories.js';
+import { CATEGORY_BY_ID, isPromptOnly, categoryValues, listRows } from './categories.js';
 
 export interface PreflightResult {
   checks: Check[];
@@ -52,9 +52,10 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
   for (const id of brief.categories) {
     const cat = CATEGORY_BY_ID[id];
     if (!cat) continue;
-    const v = brief.fieldValues[id] ?? {};
+    const v = categoryValues(id, brief.fieldValues[id]);
     for (const m of cat.mandatory ?? []) {
-      if (!String(v[m.id] ?? '').trim()) missing.push(`${cat.label} — ${m.label}`);
+      const filled = m.list ? listRows(v, m.list).some((r) => r.text) : String(v[m.id] ?? '').trim();
+      if (!filled) missing.push(`${cat.label} — ${m.label}`);
     }
   }
   if (missing.length) {

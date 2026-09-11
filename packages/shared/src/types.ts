@@ -44,16 +44,32 @@ export type Resolution = '480p' | '720p' | '1080p';
 export interface CategoryField {
   id: string;
   label: string;
-  type: 'text' | 'textarea' | 'select' | 'checkbox';
+  type: 'text' | 'textarea' | 'select' | 'checkbox' | 'list';
   ph?: string;
   options?: string[];
   /** id of a sibling checkbox field that must be truthy for this field to show. */
   showIf?: string;
+  /**
+   * A repeatable row, for type 'list'. Rows are stored as numbered keys — `${id}1`,
+   * `${id}2`… — so the fixed numbered fields that came before (feature1, feature2)
+   * read straight into it with nothing to migrate.
+   */
+  list?: {
+    /** What one row is called: "feature", "offer". */
+    noun: string;
+    /** An optional second input per row, stored as `${sub.id}N`. */
+    sub?: { id: string; label: string; ph?: string };
+    /** Rows shown before anything is typed. */
+    min: number;
+    max: number;
+  };
 }
 
 export interface MandatoryField {
   id: string;
   label: string;
+  /** For a repeatable field: satisfied by any row of this list id having text. */
+  list?: string;
 }
 
 export interface BeatContext {

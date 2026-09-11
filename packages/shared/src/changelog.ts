@@ -25,8 +25,11 @@ export const CHANGELOG: Release[] = [
   {
     version: '2.6',
     date: '2026-09-11',
-    title: 'The car comes out in the colour you picked',
+    title: 'The colour you picked, and offers in your own words',
     changes: [
+      'Offers are free text now. Type them the way the dealer says them — "Benefits up to ₹1.5 lakh", "Free 5-year service pack" — instead of squeezing them into cash discount, down payment, interest rate and warranty boxes. Two to start, add more (up to eight), and each one becomes its own on-screen caption.',
+      'Product features work the same way: two to start, add more, each with an optional line on why it matters. Only the first feature is required.',
+      'Projects saved with the old offer boxes open with those offers already filled in as free text.',
       'Picking a colour and a variant together silently dropped the colour: it was looked up on the variant, which never has its own colour list. The colour image now reaches the model whether or not a variant is chosen.',
       'The prompt now names the paint outright — "Paint colour: Stealth Black" — and tells the model to take only shape from the other car photos, which are usually all one launch colour.',
       'With a colour chosen, the car reference set is the colour image plus one photo per angle, instead of every photo in the library outvoting the one colour image.',

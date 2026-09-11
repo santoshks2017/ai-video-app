@@ -9,6 +9,8 @@ import {
   overlayCopy,
   buildPrompt,
   overlayCards,
+  categoryValues,
+  fieldLabel,
   colourName,
   renderResolution,
   priceFor,
@@ -417,9 +419,13 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
   const facts: Record<string, string> = {};
   for (const id of brief.categories) {
     const cat = CATEGORY_BY_ID[id];
-    for (const [key, value] of Object.entries(brief.fieldValues[id] ?? {})) {
-      const label = cat?.fields.find((f) => f.id === key)?.label ?? key;
-      if (String(value ?? '').trim()) facts[label] = String(value);
+    // Read through the current field shapes: offers typed into the old fixed boxes
+    // arrive as "Offer 1", "Offer 2"; a key no current field owns is left out, so
+    // the writer is never handed the same offer twice under two names.
+    for (const [key, value] of Object.entries(categoryValues(id, brief.fieldValues[id] ?? {}))) {
+      const label = fieldLabel(cat, key);
+      if (label === key || !String(value ?? '').trim()) continue;
+      facts[label] = String(value);
     }
   }
 

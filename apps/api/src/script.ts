@@ -45,6 +45,10 @@ export interface ScriptSubject {
   purpose?: string;
   /** Failure modes this kind of video is prone to. */
   avoid?: string[];
+  /** The use cases picked are one film, not several played back to back. */
+  combined?: boolean;
+  /** The festival or occasion that sets the look and warmth of the whole film. */
+  theme?: string;
   /** Everything known about the car — this is where specifics come from. */
   car?: {
     name?: string;
@@ -252,6 +256,7 @@ function subjectBlock(req: ScriptRequest): string[] {
       ? `The client asked for exactly this, in their own words:\n  "${req.subject.assignment.trim()}"\nThis sentence is the brief. Everything below serves it, and where the scene directions and this sentence disagree, this sentence wins.`
       : `A ${req.subject.useCase} film.`,
     `Format: ${req.subject.useCase}${req.subject.purpose ? ` — ${req.subject.purpose}` : ''}`,
+    ...(req.subject.theme ? [`Theme: ${req.subject.theme}`] : []),
     '',
     ...(carFacts.length
       ? ['## THE CAR — this is what you are selling. Every number here is verified; use them.', ...carFacts.map((f) => `  ${f}`), '']
@@ -292,6 +297,9 @@ function angleInstruction(req: ScriptRequest): string {
     '## WHAT TO DECIDE',
     'Not the lines — the thinking behind them.',
     '',
+    ...(req.subject.combined
+      ? ['The use cases above are ONE film. The idea is the single thought that holds all of them together — never one idea per use case.', '']
+      : []),
     '1. **The viewer.** One sentence: who is watching this, and what are they actually weighing up? Not a demographic. A person mid-decision — comparing two cars, waiting for a discount, replacing a hatchback that has stopped fitting the family.',
     '2. **The idea.** One sentence: the single thought this film leaves behind. It has to be something only THIS car at THIS dealership could say. If it would fit a rival brand, it is not an idea, it is a slogan.',
     '3. **The throughline.** One sentence on how the lines build — what the opening makes them want to know, and how each scene pays that off until the last line asks for the action.',
@@ -330,6 +338,9 @@ function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string
     '## HOW TO WRITE IT',
     '',
     'Write the whole thing as ONE piece of copy with an arc, not a set of captions. Read it end to end in your head before you answer: it has to sound like one person talking without stopping, not six sentences taking turns.',
+    ...(req.subject.combined
+      ? ['', 'The scenes come from more than one use case, but this is ONE ad, not several back to back: one opening, one close, and every line leading into the next. What makes the car wanted comes first; what makes now the moment to buy follows from it. Never a second greeting, a second hook or a second call to action.']
+      : []),
     '',
     'The rules that separate a professional script from a naive one:',
     '- **Sell the car, not the room.** The scene directions describe where the CAMERA is and what the presenter DOES. They are not the subject of the line. "Open outside the showroom, gesturing at the facade" means she is standing outside — it does NOT mean she talks about the facade.',
@@ -337,7 +348,9 @@ function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string
     '- **Every line finishes its thought.** A short complete sentence always beats a longer fragment. Never end a line mid-clause to fit the word budget; write a shorter sentence instead.',
     '- **Each line follows from the last.** Line two continues line one, it does not restart. The film should be impossible to shuffle.',
     '- **Name the car in the first line.**',
-    '- **No greeting-card openings.** Open on something the viewer wants to know, not on hello.',
+    req.subject.theme
+      ? '- **The festive greeting and the car arrive together.** Open on the occasion and the car in the same line — never a greeting on its own, never hello.'
+      : '- **No greeting-card openings.** Open on something the viewer wants to know, not on hello.',
     '- **Talk to one person.**',
     '- **Earn the CTA.** The last line asks for the action and lands because of what came before.',
     `- ${verbs}`,
@@ -400,6 +413,9 @@ function editInstruction(req: ScriptRequest, angle: ScriptAngle | null, draft: {
     '3. **Is it a stock phrase?** "city हो या highway", "families की पसंद", "तो देर किस बात की". Rewrite from scratch.',
     '4. **Would this line work for a different dealership, a different car or a different city?** Then it is not doing any work. Make it specific.',
     '5. **Does it follow from the line before it?** If the script could be shuffled without anyone noticing, connect them.',
+    ...(req.subject.combined
+      ? ['5b. **Is it one film?** A second greeting, a second hook or a second call to action is a fault — cut it and connect what is left.']
+      : []),
     '6. **Is it about the car, or about the room and the camera?** Nobody buys a car because a building has a glass front.',
     '7. **Is it inside its word budget?** Cut words, never meaning. If it will not fit, write a different, shorter sentence.',
     '8. **Do the numbers read as plain English words in Latin letters,** and does every English word and proper noun stay in Latin letters inside the Devanagari sentence?',

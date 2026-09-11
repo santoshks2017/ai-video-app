@@ -14,6 +14,7 @@
  *  - shotAlt  : shot used when no person is on camera (voiceover / silent)
  *  - dialogue : what is said; in silent mode rendered as a visual story beat
  *  - card     : EXACT on-screen string, collected into the spelling-lock block
+ *  - role     : its place in one ad's arc (open / setup / point / proof / close)
  */
 
 import type { Beat, BeatContext, CategoryDef, CategoryId } from './types.js';
@@ -129,6 +130,7 @@ export const CATEGORIES: CategoryDef[] = [
     beats: (v, ctx): Beat[] => [
       {
         title: 'Exterior establishing',
+        role: 'open',
         shot: 'Wide exterior of the showroom facade and signage, presenter walking into frame.',
         shotAlt: 'Wide exterior of the showroom facade and signage, slow dolly in toward the entrance.',
         dialogue: 'Open outside the showroom, gesturing toward the facade, addressing camera.',
@@ -136,6 +138,7 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'Walk in',
+        role: 'setup',
         shot: 'Continuous gimbal tracking shot following the presenter through the glass doors onto the showroom floor.',
         shotAlt:
           'Continuous gimbal tracking shot moving through the glass doors onto the showroom floor, camera-led, no people in frame.',
@@ -143,6 +146,7 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'The zones',
+        role: 'point',
         shot:
           'Continuing gimbal walk past: ' +
           (f(v, 'zonesToHighlight') || 'the main showroom zones') +
@@ -151,6 +155,7 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'Closing CTA',
+        role: 'close',
         shot: 'Presenter stops beside the hero car, hand on the bonnet, camera settles.',
         shotAlt: 'Camera settles on the hero car, front three-quarter, showroom lighting.',
         dialogue: 'Invite the viewer to visit and see it in person.',
@@ -211,6 +216,7 @@ export const CATEGORIES: CategoryDef[] = [
       const s: Beat[] = [];
       s.push({
         title: 'Desire hook',
+        role: 'open',
         shot: "Slow macro pan across the car's signature detail — headlamp DRL, grille or badge — shallow depth of field.",
         dialogue: 'Open with the feeling or situation, not the spec.',
       });
@@ -229,6 +235,7 @@ export const CATEGORIES: CategoryDef[] = [
           s.push({
             id: `feature-${i + 1}`,
             title: `Feature ${i + 1}`,
+            role: 'point',
             shot: featureShots[i % featureShots.length]!(r.text),
             dialogue: r.text + ' translated into: ' + (r.sub || 'the emotional payoff, one sentence'),
             card: r.text,
@@ -237,6 +244,7 @@ export const CATEGORIES: CategoryDef[] = [
       if (f(v, 'competitorCompare')) {
         s.push({
           title: 'Competitive pivot',
+          role: 'proof',
           shot: 'Medium shot beside the car, presenter addressing camera directly.',
           shotAlt: 'Static medium shot of the car, comparison figures animating on screen.',
           dialogue:
@@ -249,6 +257,7 @@ export const CATEGORIES: CategoryDef[] = [
       }
       s.push({
         title: "Who it's for",
+        role: 'proof',
         shot: 'Wide shot of the car on the showroom floor, presenter beside it or a clean beauty angle.',
         shotAlt: 'Clean wide beauty angle of the car on the showroom floor.',
         dialogue:
@@ -289,11 +298,13 @@ export const CATEGORIES: CategoryDef[] = [
     beats: (v): Beat[] => [
       {
         title: 'Future-forward hook',
+        role: 'open',
         shot: 'Low-angle beauty shot of the EV, ambient light strip and closed grille in frame, silent glide-by.',
         dialogue: 'Open with a confident statement about driving electric — not apologetic, not overselling.',
       },
       {
         title: 'Address the concern',
+        role: 'point',
         shot: 'Macro shot of the charging port with the cable going in, then the range readout on the display.',
         dialogue:
           'Speak to ' +
@@ -304,11 +315,13 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'What it feels like',
+        role: 'point',
         shot: 'Interior driver POV, hands on wheel, quiet pull-away; cabin ambience.',
         dialogue: 'What driving electric actually feels like — quiet, instant torque, effortless.',
       },
       {
         title: 'Credibility',
+        role: 'proof',
         shot: 'Wide shot of the EV on the showroom floor under clean lighting.',
         dialogue: 'One line of credibility — safety testing, battery warranty or scale.',
       },
@@ -334,6 +347,7 @@ export const CATEGORIES: CategoryDef[] = [
       return [
         {
           title: 'The invitation',
+          role: 'open',
           shot: bike
             ? 'Hand settling on the handlebar and the key turning, seat and console in frame — an invitation to ride.'
             : "Driver's door opening from outside, seat and wheel visible — an invitation into the car.",
@@ -344,6 +358,7 @@ export const CATEGORIES: CategoryDef[] = [
         {
           id: 'experience',
           title: bike ? 'The ride' : 'The drive',
+          role: 'point',
           shot: bike
             ? 'Rolling low-angle tracking shot of the bike on an open road, then a rider POV over the handlebar.'
             : 'Rolling low-angle tracking shot of the car on an open road, then interior POV over the wheel.',
@@ -353,6 +368,7 @@ export const CATEGORIES: CategoryDef[] = [
         },
         {
           title: 'No pressure',
+          role: 'proof',
           shot: `Medium shot of the presenter beside the ${vehicle} at the showroom entrance.`,
           shotAlt: bike
             ? 'Slow reveal of the bike parked at the showroom entrance.'
@@ -361,6 +377,7 @@ export const CATEGORIES: CategoryDef[] = [
         },
         {
           title: 'Logistics + CTA',
+          role: 'close',
           shot: `Wide showroom entrance shot with the ${vehicle} in frame.`,
           dialogue:
             'State where and when: ' +
@@ -401,6 +418,7 @@ export const CATEGORIES: CategoryDef[] = [
       const s: Beat[] = [];
       s.push({
         title: 'Curiosity hook',
+        role: 'open',
         shot: isLaunchDay
           ? 'Full reveal — lights up on the car, wide hero angle.'
           : 'Silhouette or partial reveal under a cover, hard side light, detail glints only.',
@@ -410,17 +428,20 @@ export const CATEGORIES: CategoryDef[] = [
       });
       s.push({
         title: 'The hint',
+        role: 'point',
         shot: 'Single macro detail — one signature line, lamp or badge, nothing else readable.',
         dialogue: 'Give away exactly one detail: ' + (f(v, 'teaserHint') || 'one design, tech or name hint'),
       });
       s.push({
         title: 'Date',
+        role: 'point',
         shot: 'Clean graphic beat over a dark frame or the covered car.',
         dialogue: 'State the date or countdown clearly.',
         card: f(v, 'launchDate') || 'Coming Soon',
       });
       s.push({
         title: 'CTA',
+        role: 'close',
         shot: isLaunchDay
           ? 'Wide hero shot of the car with the presenter or showroom behind.'
           : 'Slow pull-back from the covered car.',
@@ -459,6 +480,7 @@ export const CATEGORIES: CategoryDef[] = [
     beats: (v, ctx): Beat[] => [
       {
         title: 'Welcome + congratulations',
+        role: 'open',
         shot: 'Wide exterior establishing shot of the showroom with the new car and the family, slow push-in.',
         shotAlt:
           'Wide exterior establishing shot of the showroom with the new car outside, ribbon or garland on the bonnet, slow push-in, no people in frame.',
@@ -470,6 +492,7 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'The handover moment',
+        role: 'point',
         shot: 'Medium two-shot at the car, then a close-up cutaway of the keys passing hand to hand.',
         shotAlt: 'Close-up of the keys resting on the bonnet, then a slow tilt up the car — hands only, no faces.',
         dialogue:
@@ -479,12 +502,14 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'Why this was the right choice',
+        role: 'proof',
         shot: 'Slow orbit around the car with the family in frame.',
         shotAlt: 'Slow orbit around the car, showroom lights sweeping across the paint.',
         dialogue: 'One line validating the choice of this model — a feeling, not a spec.',
       },
       {
         title: 'Gratitude + the road ahead',
+        role: 'close',
         shot: 'Wide shot, family beside the car, presenter or dealer team gesturing toward the road.',
         shotAlt: 'Wide shot of the car pulling out of the showroom driveway onto the road.',
         dialogue: 'Thank the customer and gesture toward the journeys ahead with this car.',
@@ -496,6 +521,8 @@ export const CATEGORIES: CategoryDef[] = [
   {
     id: 'festival',
     label: 'Festival / Occasion',
+    // Picked with other use cases, the festival is the setting — see buildBeats.
+    layer: 'theme',
     mode: 'automated',
     hue: 60,
     music: 'warm festive underscore with light percussion, celebratory but not loud',
@@ -529,6 +556,7 @@ export const CATEGORIES: CategoryDef[] = [
     beats: (v, ctx): Beat[] => [
       {
         title: 'Occasion greeting',
+        role: 'open',
         shot:
           'Wide exterior of the showroom dressed for the occasion' +
           (f(v, 'festiveDressing') ? ' — ' + f(v, 'festiveDressing') : '') +
@@ -547,6 +575,7 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'Emotional connection',
+        role: 'setup',
         shot: 'Medium shot, warm practical lighting, festive decor visible behind.',
         shotAlt: 'Detail shots of the festive decor — diya flames, marigold, warm bokeh — cut against the car.',
         dialogue:
@@ -554,11 +583,13 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'Dealer tie-in',
+        role: 'setup',
         shot: 'Slow push-in past the festive decor to the car on the showroom floor.',
         dialogue: 'One soft line linking the dealer to the occasion. Skip it if it feels forced.',
       },
       {
         title: 'Warm closing wish',
+        role: 'close',
         shot: 'Presenter beside the car, warm smile, festive bokeh behind.',
         shotAlt: 'Hero shot of the car with festive bokeh behind, slow push-in.',
         dialogue: 'Close with a warm occasion wish, then a light invitation to visit the showroom.',
@@ -603,6 +634,7 @@ export const CATEGORIES: CategoryDef[] = [
       const s: Beat[] = [];
       s.push({
         title: 'Attention hook',
+        role: 'open',
         shot: 'Wide exterior establishing shot, presenter addressing camera, showroom facade behind.',
         shotAlt: 'Wide exterior establishing shot of the showroom facade and signage, slow push-in.',
         dialogue: 'Open with a value headline or question hook for the model — energetic, not shouty.',
@@ -627,6 +659,7 @@ export const CATEGORIES: CategoryDef[] = [
           s.push({
             id: `offer-${i + 1}`,
             title: `Offer ${i + 1}`,
+            role: 'point',
             shot,
             shotAlt,
             dialogue:
@@ -636,6 +669,7 @@ export const CATEGORIES: CategoryDef[] = [
         });
       s.push({
         title: 'Urgency + CTA',
+        role: 'close',
         shot: 'Wide frontal shot with the car behind the presenter, slow push-in.',
         shotAlt: 'Wide frontal hero shot of the car, slow push-in.',
         dialogue:
@@ -680,6 +714,7 @@ export const CATEGORIES: CategoryDef[] = [
     beats: (v, ctx): Beat[] => [
       {
         title: 'Customer reaction',
+        role: 'open',
         shot: 'Handheld medium shot, customer beside their car, natural light, slight imperfection in the framing.',
         shotAlt: 'Handheld shot of the car in everyday surroundings, natural light.',
         dialogue:
@@ -687,6 +722,7 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'Context',
+        role: 'setup',
         shot: 'Cutaway to the car with the customer in soft focus behind.',
         shotAlt: 'Cutaway to the car in its everyday setting, shallow depth of field.',
         dialogue:
@@ -695,12 +731,14 @@ export const CATEGORIES: CategoryDef[] = [
       },
       {
         title: 'The moment',
+        role: 'point',
         shot: 'Close-up on the customer speaking, then a matching detail shot of what they mention.',
         shotAlt: 'Detail shot of the feature being referenced, slow rack focus.',
         dialogue: 'Detail: ' + (f(v, 'specificMoment') || 'the moment or feature that won them over'),
       },
       {
         title: 'Dealer thanks',
+        role: 'close',
         shot: 'Wide shot of the customer and the dealership team beside the car.',
         shotAlt: 'Wide shot of the car outside the showroom, dealership signage in frame.',
         dialogue: 'The dealer thanks the customer and invites viewers to have their own experience.',

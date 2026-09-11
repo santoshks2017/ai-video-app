@@ -77,6 +77,9 @@ import {
   sceneEditFor,
   DEFAULT_USD_TO_INR,
   clampPace,
+  storyGuidance,
+  storyTheme,
+  themeDirection,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
 import { importPlace, PlacesError } from './places.js';
@@ -485,7 +488,8 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
       };
     }
   }
-  const primary = CATEGORY_BY_ID[brief.categories[0]!];
+  const story = storyGuidance(brief);
+  const theme = storyTheme(brief);
 
   try {
     const out = await writeScript(
@@ -495,9 +499,13 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
         subject: {
           // The designer's own sentence outranks everything the templates assume.
           assignment: project?.prompt,
-          useCase: brief.categories.map((c) => CATEGORY_BY_ID[c]?.label ?? c).join(' + '),
-          purpose: primary?.purpose,
-          avoid: primary?.avoid,
+          // One ad, however many use cases: the writer is briefed on the combined story,
+          // not on whichever use case was picked first.
+          useCase: story.useCase,
+          purpose: story.purpose,
+          avoid: story.avoid,
+          combined: brief.categories.length > 1,
+          theme: theme ? themeDirection(theme) : undefined,
           car: carSubject as never,
           presenter: [brief.actor?.style, brief.actor?.age].filter(Boolean).join(', ') || undefined,
         },
@@ -1030,7 +1038,7 @@ async function makeMusicBed(
   try {
     const bed = await generateMusicBed(
       {
-        description: ctx.music || CATEGORY_BY_ID[brief.categories[0]!]?.music || '',
+        description: ctx.music || storyTheme(brief)?.music || CATEGORY_BY_ID[brief.categories[0]!]?.music || '',
         // Longer than the film and trimmed to it, so the track never has to repeat.
         seconds: filmSeconds + 10,
         speaks: ctx.mode.speaks,

@@ -23,6 +23,8 @@ import {
   priceFor,
   colourName,
   categoryValues,
+  storyGuidance,
+  storyTheme,
 } from '@ava/shared';
 import { useApp, api, projectTabId } from '../state/appStore.js';
 import { Field, Panel, ImageUpload, Thumb, Confirm, Banner, Collapse } from '../components/ui.js';
@@ -269,6 +271,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const variants = selectedCar?.variants ?? [];
   const colours = selectedCar?.colours ?? [];
 
+  // A festival is the setting, not a topic, so it does not count towards crowding the ad.
+  const topicCount = project.useCases.filter((id) => CATEGORIES.find((c) => c.id === id)?.layer !== 'theme').length;
+
   const toggleUseCase = (id: CategoryId) =>
     set({
       useCases: project.useCases.includes(id)
@@ -476,10 +481,16 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             title="2. Use case"
             step={promptOnly ? 'Prompt-only — no video generation' : 'Composable — pick 1 or more'}
           >
-            {project.useCases.length >= 3 && (
+            {project.useCases.length > 1 && brief && (
+              <div className="section-desc">
+                Written as one ad — {storyGuidance(brief).useCase}: one opening, one close, and the points in between
+                told as a single story{storyTheme(brief) ? ', with the festival as the look of every shot' : ''}.
+              </div>
+            )}
+            {topicCount >= 3 && (
               <Banner kind="warn">
-                {project.useCases.length} use cases in one video. Their beats interleave, so the story gets
-                disjointed — two is usually the most that still reads as one ad.
+                {topicCount} topics in one ad. They share one opening and one close, but every extra topic takes
+                seconds from the others — two usually lands best.
               </Banner>
             )}
             {promptOnly && (

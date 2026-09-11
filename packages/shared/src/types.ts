@@ -107,6 +107,11 @@ export interface Beat {
   /** Stacked centred lines (end card). */
   cardLines?: string[];
   note?: string;
+  /**
+   * The beat's place in one ad's arc. Several use cases share one opening and one close,
+   * and their points run as one story in between — see buildBeats.
+   */
+  role?: 'open' | 'setup' | 'point' | 'proof' | 'close';
   /** Set by category assembly — the category label this beat came from. */
   cat?: string;
   isEndCard?: boolean;
@@ -123,6 +128,12 @@ export interface CategoryDef {
   avoid: string[];
   fields: CategoryField[];
   beats: (fieldValues: Record<string, string>, ctx: BeatContext) => Beat[];
+  /**
+   * A theme is the setting and the tone, not a topic. Picked with other use cases it adds
+   * no scenes of its own: its look is in every shot, its greeting opens the film and its
+   * wish closes it.
+   */
+  layer?: 'theme';
 }
 
 export interface NarrationMode {

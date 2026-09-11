@@ -34,6 +34,7 @@ import {
   applyFeedback,
   estimateSegmentsCost,
   LANGUAGE_SEEDS,
+  storyGuidance,
   adaptTrial,
   overlayCopy,
   suggestDuration,
@@ -637,5 +638,44 @@ test('every part locks the presenter look, one voice, smooth presence and a real
   assert.match(res.parts[1]!.continuationText ?? '', /same female voice as the earlier parts, feminine verb forms/);
   const all = res.parts.map((p) => `${p.text}\n${p.continuationText ?? ''}`).join('\n');
   assert.ok(!/used as-is|exactly as provided/.test(all), 'no wording that invites pasting a reference photo into the scene');
+});
+
+test('several use cases make one ad: one opening, one close, the festival as the setting', () => {
+  const b = base({
+    categories: ['feature', 'festival', 'offer'],
+    narration: 'presenter',
+    durationSec: 60,
+    maxChunkSec: 10,
+    fieldValues: {
+      feature: { feature1: 'Sunroof', feature2: '26.03 cm touchscreen' },
+      festival: { occasionName: 'Diwali', festiveDressing: 'marigold garlands and diyas' },
+      offer: { offer1: 'Benefits up to ₹1.5 lakh', offer2: 'Free 5-year service' },
+    },
+  });
+  const res = buildPrompt(b)!;
+  const beats = res.scenePlan.scenes.map((s) => s.beat);
+  const titles = beats.map((x) => x.title);
+  assert.equal(titles[0], 'Opening', titles.join(' | '));
+  assert.equal(titles[titles.length - 1], 'Close', titles.join(' | '));
+  assert.equal(beats.filter((x) => x.role === 'open').length, 1, 'one opening');
+  assert.equal(beats.filter((x) => x.role === 'close').length, 1, 'one close');
+  assert.ok(
+    !titles.some((t) => /Occasion greeting|Warm closing wish|Attention hook|Desire hook|Emotional connection|Dealer tie-in/.test(t)),
+    titles.join(' | '),
+  );
+  // What makes the car wanted comes first, then what makes now the moment to buy.
+  const lastFeature = titles.reduce((a, t, i) => (t.startsWith('Feature') ? i : a), -1);
+  const firstOffer = titles.findIndex((t) => t.startsWith('Offer'));
+  assert.ok(lastFeature > 0 && firstOffer > lastFeature, titles.join(' | '));
+  assert.equal(beats[0]!.card, 'Happy Diwali');
+  // The festival is the look of every shot, not scenes of its own.
+  for (const x of beats) assert.match(x.shot, /dressed for (Diwali|the occasion)/, x.title);
+  const all = res.parts.map((p) => `${p.text}\n${p.continuationText ?? ''}`).join('\n');
+  assert.match(all, /THEME — THE SETTING OF THE WHOLE FILM/);
+  const story = storyGuidance(b);
+  assert.match(story.useCase, /Product Feature \+ Offer \/ Deal, set during Diwali/);
+  assert.ok(story.avoid.some((a) => /one after another/.test(a)));
+  // A single use case still plays its own arc.
+  assert.equal(buildPrompt(base({ categories: ['offer'], fieldValues: { offer: { offer1: 'x' } } }))!.scenePlan.scenes[0]!.beat.title, 'Attention hook');
 });
 

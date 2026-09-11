@@ -9,7 +9,7 @@
 import type { Brief, PromptPart } from './types.js';
 import { WORDS_PER_SECOND } from './constants.js';
 import { buildContext, type RenderContext } from './context.js';
-import { buildBeats, collectStrings } from './buildBeats.js';
+import { buildBeats, collectStrings, storyGuidance, storyTheme, themeDirection } from './buildBeats.js';
 import { planScenes, fmtTime, speakingSeconds } from './planScenes.js';
 import type { Beat, Scene, ScenePlan } from './types.js';
 import { sceneVisual, sceneVisualLine } from './visuals.js';
@@ -371,6 +371,13 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         : `Maintain the exact same visual style, camera language, grading and graphic treatment as the previous clip: ${ctx.visStyle}.`,
     );
 
+    const theme = storyTheme(brief);
+    if (theme) {
+      L.push('');
+      L.push('## THEME — THE SETTING OF THE WHOLE FILM');
+      L.push(themeDirection(theme));
+    }
+
     const direction = (brief.extraDirection ?? []).filter((x) => x.trim());
     if (direction.length) {
       L.push('');
@@ -459,9 +466,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         'Reference images are faithful guides to how the car, the showroom and the logos look — copy their details exactly, but never show a reference photo itself as a picture, poster or screen in the video.',
       );
     if (isFirst) {
-      for (const id of brief.categories) {
-        for (const a of CATEGORY_BY_ID[id]?.avoid ?? []) important.push(`Avoid: ${a}`);
-      }
+      for (const a of storyGuidance(brief).avoid) important.push(`Avoid: ${a}`);
     }
     important.forEach((i) => L.push(`* ${i}`));
 
@@ -535,6 +540,8 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push(`Paint colour: ${brief.carColour} — the same ${brief.carColour} paint as the reference frame, on every body panel.`);
     }
     C.push(`Visual style: ${ctx.visStyle}. Keep the exact same grade and camera language as the reference frame.`);
+    const contTheme = storyTheme(brief);
+    if (contTheme) C.push(themeDirection(contTheme));
     if (ctx.mode.speaks) {
       C.push(
         `Spoken language: ${brief.language?.name ?? 'Hindi/Hinglish'}, in the same ${actor.gender === 'male' ? 'male' : 'female'} voice as the earlier parts, ${

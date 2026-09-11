@@ -285,7 +285,8 @@ export function Storyboard({
   const generic = scenePlan.scenes
     .map((sc, i) => ({ sc, i, visual: visuals[i]! }))
     .filter((x) => x.visual.kind === 'generic');
-  const filmSeconds = Math.round(scenePlan.scenes.at(-1)?.end ?? 0);
+  // The pace speeds the finished film up after generation.
+  const filmSeconds = Math.round((scenePlan.scenes.at(-1)?.end ?? 0) / (length?.pace ?? 1));
 
   const editCount = Object.keys(sceneEdits).length;
   const spokenScenes = mode.speaks ? scenePlan.scenes.filter((sc) => sc.beat.dialogue).length : 0;
@@ -430,9 +431,9 @@ export function Storyboard({
               </b>
               <span className="hint">
                 {length.pace > 1.001
-                  ? 'Same script, said faster — a shorter film.'
+                  ? 'Same script, played faster after generation — a shorter film.'
                   : length.pace < 0.999
-                    ? 'Same script, more room to breathe — a longer film.'
+                    ? 'Same script, played slower after generation — a longer film.'
                     : length.auto
                       ? 'Sized to the scenes below at a natural read.'
                       : 'Set by hand. Deleting a scene takes its seconds off.'}

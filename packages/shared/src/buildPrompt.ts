@@ -44,6 +44,10 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
         brief.actor.style ? ` (${brief.actor.style})` : ''
       }; the same jewellery, accessories and make-up; the same build. Nothing about ${their} appearance changes between shots or between parts.`,
       `- The presenter never appears or disappears abruptly. Within a shot ${they} stays in frame, or enters and leaves by walking naturally in from or out past the edge of the frame with visible steps — no popping in, fading in or out, teleporting, or jumping to a new spot. A move to a shot without ${their === 'his' ? 'him' : 'her'} is a clean camera cut, never ${their === 'his' ? 'him' : 'her'} vanishing.`,
+      '- Exactly ONE person in the whole video: the presenter. Never a second copy or look-alike of the presenter, and no other people in the frame or in the background. Nobody melts, morphs, splits, dissolves or fades into or out of the scene.',
+      vehicle === 'bike'
+        ? '- Real-world physics and scale: the presenter stands beside the bike or sits on its seat — never inside or through it, never floating.'
+        : '- Real-world physics and scale: the presenter is outside the car — beside it or at an open door — or seated in one of its seats. Never standing inside the cabin, never inside or through the bodywork, never floating. Interior details are filmed from a seat or through an open door.',
     );
   }
   if (mode.speaks) {
@@ -54,7 +58,7 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
   }
   const noun = vehicle === 'bike' ? 'bike' : 'car';
   lines.push(
-    `- The ${noun} is a real, physical, three-dimensional vehicle in the location — standing on the floor or moving on the road, lit by the scene, with real reflections and a real shadow. Never show it as a photo, poster, print, billboard, screen image, cutout or any flat picture. The reference photos show what the ${noun} looks like; they are never objects to put in the scene.`,
+    `- The ${noun} is a real, physical, three-dimensional vehicle in the location — standing on the floor or moving on the road, lit by the scene, with real reflections and a real shadow. Never show it as a photo, poster, print, billboard, screen image, cutout or any flat picture. The reference photos show what the ${noun} looks like; they are never objects to put in the scene. Every shot is filmed in the real location — the showroom or the road — never a studio product shot, a plain white or grey backdrop, or a catalogue-style picture of the ${noun}.`,
   );
   return lines;
 }
@@ -65,6 +69,7 @@ function spokenLock(brief: Brief): string {
   const lines = [
     '## SPOKEN LINES — SAY THESE EXACTLY',
     `Anything in {curly braces} above is the presenter's exact wording, in ${lang}. Speak it word for word. Do not translate it, re-word it, shorten it, extend it or "correct" it, and never read the scene descriptions aloud. Lip movement must match these words, at ${paceDelivery(brief.pace ?? 1)}.`,
+    'Say every number and price once, in full — never restart it or repeat any part of it.',
   ];
   if (respelled) {
     lines.push(
@@ -89,12 +94,17 @@ export function wordBudget(seconds: number, pace = 1): number {
   return Math.max(3, Math.round(seconds * WORDS_PER_SECOND * pace));
 }
 
-/** How the delivery is described to the model at the storyboard's pace. */
+/**
+ * How the delivery is described to the model. The storyboard's pace is applied to
+ * the finished film in post: asking a model to talk faster only crams the same words
+ * into less clip, and a line that runs out of clip spills across the cut and is said
+ * twice. So the model always gets room for a natural read; a faster pace only asks
+ * for more energy.
+ */
 export function paceDelivery(pace: number): string {
-  if (pace >= 1.15) return 'a quick, punchy pace — about 20% faster than a relaxed read, short pauses only, every word still clear';
-  if (pace >= 1.05) return 'a brisk, energetic pace — about 10% faster than a relaxed read, short pauses, every word still clear';
-  if (pace <= 0.95) return 'a relaxed, unhurried pace with generous pauses';
-  return 'a natural unhurried pace with real pauses';
+  return pace > 1.05
+    ? 'an energetic, upbeat delivery at a natural speaking speed'
+    : 'a natural unhurried pace with real pauses';
 }
 
 function textLangLine(textLang: Brief['textLang']): string {
@@ -169,7 +179,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
   if (!beats.length) return null;
   const overrides = opts.sceneOverrides ?? {};
 
-  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks, pace: ctx.pace });
+  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks });
   const totalParts = plan.parts;
   const mode = ctx.mode;
   const actor = brief.actor;
@@ -187,7 +197,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     const partEnd = scenes[scenes.length - 1]!.end;
     const partDuration = Math.round((partEnd - partStart) * 10) / 10;
     const partWordBudget = mode.speaks
-      ? scenes.reduce((sum, s) => sum + wordBudget(speakingSeconds(plan, s), ctx.pace), 0)
+      ? scenes.reduce((sum, s) => sum + wordBudget(speakingSeconds(plan, s)), 0)
       : 0;
     const L: string[] = [];
 
@@ -396,7 +406,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         L.push(`Says, word for word: {${scripted}}`);
       } else if (mode.speaks && dialogue) {
         L.push(
-          `Speaks in ${brief.language?.name ?? 'Hindi/Hinglish'}, at most ~${wordBudget(speakingSeconds(plan, sc), ctx.pace)} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it naturally: ${dialogue}`,
+          `Speaks in ${brief.language?.name ?? 'Hindi/Hinglish'}, at most ~${wordBudget(speakingSeconds(plan, sc))} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it naturally: ${dialogue}`,
         );
       } else if (dialogue) {
         L.push(`Story beat, told visually with no speech: ${dialogue}`);
@@ -422,11 +432,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       important.push('No real automotive manufacturer logo, wordmark or badge anywhere in the video.');
     important.push('Same car in every shot — no change of colour, badge, wheels or body shape.');
     important.push(
-      `The ${ctx.vehicle === 'bike' ? 'bike' : 'car'} is a real vehicle physically in the scene in every shot — never a photo, poster, screen image or cutout of one.`,
+      `The ${ctx.vehicle === 'bike' ? 'bike' : 'car'} is a real vehicle physically in the scene in every shot — never a photo, poster, screen image, cutout or white-backdrop studio shot of one.`,
     );
     if (mode.onCameraPerson)
       important.push(
-        'Same person in every shot and every part — no change of face, hairstyle (open hair never becomes tied, nor tied hair open), outfit, accessories or build — and never appearing or vanishing mid-shot.',
+        'Same single person in every shot and every part — no change of face, hairstyle (open hair never becomes tied, nor tied hair open), outfit, accessories or build; never a duplicate of the presenter or other people in the background; never appearing, vanishing or melting mid-shot.',
       );
     if (mode.speaks)
       important.push(
@@ -436,9 +446,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       );
     if (mode.lipSync)
       important.push(
-        ctx.pace >= 1.05
-          ? 'Hindi lip-sync must match the spoken line precisely, at the brisk pace asked for.'
-          : 'Hindi lip-sync must match the spoken line precisely; do not speed up the delivery to fit the time.',
+        'Hindi lip-sync must match the spoken line precisely; do not speed up the delivery to fit the time.',
       );
     if (!mode.speaks) important.push('No lip movement, no talking head, no implied speech anywhere.');
     important.push('No warped text, no garbled letters, no distorted vehicle geometry.');
@@ -494,6 +502,14 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     C.push('');
     continuityLock(brief, mode, ctx.vehicle).forEach((line) => C.push(line));
     C.push('');
+    if (mode.onCameraPerson) {
+      // A continuation that re-imagines its presenter leaves two of them on screen, the
+      // one from the seed frame fading away behind the new one.
+      C.push(
+        'The presenter in the reference frame is the only presenter. Carry that same person on from exactly where they stand in the first frame — never create another presenter elsewhere while the first one fades, melts or disappears.',
+        '',
+      );
+    }
     if (mode.speaks) {
       // Parts are joined cut to cut, so a word said on both sides of a join is heard
       // twice, and one started in the first instant lands on the cut.
@@ -524,7 +540,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         `Spoken language: ${brief.language?.name ?? 'Hindi/Hinglish'}, in the same ${actor.gender === 'male' ? 'male' : 'female'} voice as the earlier parts, ${
           actor.gender === 'male' ? 'masculine' : 'feminine'
         } verb forms, ${paceDelivery(ctx.pace)}, about ${
-          scenes.reduce((s, x) => s + wordBudget(speakingSeconds(plan, x), ctx.pace), 0)
+          scenes.reduce((s, x) => s + wordBudget(speakingSeconds(plan, x)), 0)
         } words total across this segment.`,
       );
     } else {
@@ -558,7 +574,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
             ? `  Told visually, no speech: ${d}`
             : scriptedC
               ? `  Says, word for word: {${scriptedC}}`
-              : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(speakingSeconds(plan, sc), ctx.pace)} words, composed from this intent: ${d}`,
+              : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(speakingSeconds(plan, sc))} words, composed from this intent: ${d}`,
         );
       }
       if (sceneCard(sc.beat, ov)) {
@@ -580,8 +596,8 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     if (mode.speaks) C.push('Same pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
     C.push(
       `Before finishing, check the continuity lock above: ${
-        mode.onCameraPerson ? "the presenter's hair, outfit and look are unchanged and the presenter never pops in or out; " : ''
-      }${mode.speaks ? 'the voice is the same one as before; ' : ''}the ${ctx.vehicle === 'bike' ? 'bike' : 'car'} is a real vehicle, never a picture of one.`,
+        mode.onCameraPerson ? "one presenter only, with unchanged hair, outfit and look, never popping in or out and never standing inside the car; " : ''
+      }${mode.speaks ? 'the voice is the same one as before; ' : ''}the ${ctx.vehicle === 'bike' ? 'bike' : 'car'} is a real vehicle in the real location, never a picture or studio shot of one.`,
     );
     if (isLast) C.push('This is the final segment — end cleanly on the last scene.');
     else

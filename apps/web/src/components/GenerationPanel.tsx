@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fmtTime, formatInr, type Brief, type PromptPart, type ScenePlan } from '@ava/shared';
+import { fmtTime, formatInr, type Brief, type PromptPart, type ScenePlan, clampPace } from '@ava/shared';
 import { useApp } from '../state/appStore.js';
 import {
   api,
@@ -153,7 +153,9 @@ export function GenerationPanel({
     // Nothing generated this session — fall back to the newest saved run.
     history.find((h) => h.finalUrl)?.finalUrl ??
     null;
-  const totalDuration = scenePlan?.scenes.at(-1)?.end ?? 0;
+  // The storyboard's pace speeds the finished film up, so its timeline runs shorter than the plan.
+  const speed = clampPace(brief.pace);
+  const totalDuration = Math.round(((scenePlan?.scenes.at(-1)?.end ?? 0) / speed) * 10) / 10;
 
   const seekTo = (t: number) => {
     if (videoRef.current) videoRef.current.currentTime = Math.max(0, t);
@@ -297,11 +299,11 @@ export function GenerationPanel({
                       key={i}
                       className={`tl-seg part-${(sc.part % 4) + 1}`}
                       style={{ flexGrow: sc.duration / totalDuration }}
-                      title={`${sc.beat.title} · ${fmtTime(sc.start)}–${fmtTime(sc.end)}`}
-                      onClick={() => seekTo(sc.start)}
+                      title={`${sc.beat.title} · ${fmtTime(sc.start / speed)}–${fmtTime(sc.end / speed)}`}
+                      onClick={() => seekTo(sc.start / speed)}
                     >
                       <span className="tl-t">{sc.beat.title}</span>
-                      <span className="tl-time">{fmtTime(sc.start)}</span>
+                      <span className="tl-time">{fmtTime(sc.start / speed)}</span>
                     </button>
                   ))}
                 </div>

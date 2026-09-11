@@ -75,6 +75,8 @@ export interface BrandOverlay {
   musicLoudness?: number;
   /** How far the bed dips under every spoken line, in dB (negative). 0 leaves it level. */
   musicDuckDb?: number;
+  /** Plays the finished parts faster or slower — the storyboard's pace. 1 leaves them as generated. */
+  speed?: number;
   accent?: string;
   ink?: string;
 }
@@ -738,7 +740,8 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     !overlay.endCard &&
     !overlay.cards?.length &&
     !overlay.targetShortSide &&
-    !overlay.musicBed;
+    !overlay.musicBed &&
+    (overlay.speed ?? 1) === 1;
   if (nothingToDo) return segments[0]!;
 
   const dir = await mkdtemp(join(tmpdir(), 'ava-post-'));
@@ -766,6 +769,14 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     // rate it renders, and a 25fps clip meeting a 24fps end card failed the
     // whole compose.
     const fps = Math.max(1, Math.round(metas[0]!.fps));
+
+    // The storyboard's pace, applied to the finished parts: picture and voice are sped up
+    // together, so lip-sync holds and the voice keeps its own pitch. Asking the model to
+    // talk faster only crammed the same words into less clip, and a line that ran out of
+    // clip spilled across the cut and was said twice.
+    const speed = Math.min(1.5, Math.max(0.85, overlay.speed ?? 1));
+    const rawDurations = metas.map((m) => m.duration);
+    if (speed !== 1) for (const m of metas) m.duration /= speed;
 
     // --- the parts, joined whole ---
     // Every part plays in full, cut to cut. The crossfade that used to join them
@@ -805,12 +816,12 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       // a part whose audio stops a few milliseconds short leaves no gap and none can
       // drift out of sync over five joins. The end card eases in from black.
       parts.push(
-        `[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,fps=${fps},format=yuv420p,tpad=stop_mode=clone:stop_duration=0.25,trim=end=${d},setpts=N/FRAME_RATE/TB,settb=AVTB${
+        `[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,${isEndCard || speed === 1 ? '' : `setpts=(PTS-STARTPTS)/${speed},`}fps=${fps},format=yuv420p,tpad=stop_mode=clone:stop_duration=0.25,trim=end=${d},setpts=N/FRAME_RATE/TB,settb=AVTB${
           isEndCard ? ',fade=t=in:st=0:d=0.35' : ''
         }[c${i}v]`,
       );
       parts.push(
-        `[${i}:a]aresample=44100:async=1,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=${d},asetpts=N/SR/TB,afade=t=in:st=0:d=${MICRO_FADE},afade=t=out:st=${Math.max(0, Number(d) - MICRO_FADE).toFixed(3)}:d=${MICRO_FADE}[c${i}a]`,
+        `[${i}:a]aresample=44100:async=1,aformat=sample_fmts=fltp:channel_layouts=stereo,${isEndCard || speed === 1 ? '' : `atempo=${speed},`}apad,atrim=end=${d},asetpts=N/SR/TB,afade=t=in:st=0:d=${MICRO_FADE},afade=t=out:st=${Math.max(0, Number(d) - MICRO_FADE).toFixed(3)}:d=${MICRO_FADE}[c${i}a]`,
       );
       clipIdx++;
     });
@@ -848,7 +859,10 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       // level it plays at when nobody is speaking; then it dips under every line.
       const open = Math.max(-40, Math.min(-14, overlay.musicLoudness ?? -20));
       const duck = Math.min(0, overlay.musicDuckDb ?? 0);
-      const spans = duck < 0 ? await speechSpans(files, metas.slice(0, files.length).map((x) => x.duration)) : [];
+      const spans =
+        duck < 0
+          ? (await speechSpans(files, rawDurations)).map(([a, b]): [number, number] => [a / speed, b / speed])
+          : [];
       parts.push(
         `[bedraw]atrim=end=${filmSeconds.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${open}:TP=-2:LRA=11,${norm},` +
           `afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, filmSeconds - 1.5).toFixed(3)}:d=1.5` +

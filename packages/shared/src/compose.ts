@@ -7,7 +7,7 @@
  */
 
 import { adaptTrial, clampPace } from './context.js';
-import { pacedDuration, suggestDuration } from './duration.js';
+import { suggestDuration } from './duration.js';
 import type { Brief, DealerPhoto, CategoryId } from './types.js';
 import type {
   VehicleKind,
@@ -315,9 +315,9 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   b.extraDirection = extra;
 
   // The length follows the story — sized from the use cases and what was filled
-  // in — unless the designer set it by hand. Either way the pace plays it: the same
-  // script in a shorter or a longer film.
-  b.durationSec = pacedDuration((s.durationAuto && suggestDuration(b)) || s.durationSec, b.pace);
+  // in — unless the designer set it by hand. This is the length that is generated,
+  // at a natural read; the pace speeds the finished film up afterwards.
+  b.durationSec = (s.durationAuto && suggestDuration(b)) || s.durationSec;
 
   return b;
 }

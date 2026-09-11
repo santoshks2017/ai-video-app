@@ -530,7 +530,7 @@ test('storyboard edits stay on their scene when another scene is deleted', () =>
   assert.equal(sceneEditFor({ '0': { card: 'Old caption' } }, plan, plan.scenes[0]!)?.card, 'Old caption');
 });
 
-test('the app sizes the film, and a faster pace says the same script in a shorter one', () => {
+test('the app sizes the film, and pace speeds up the finished film rather than the model', () => {
   const b = base({
     categories: ['feature'],
     narration: 'presenter',
@@ -545,14 +545,20 @@ test('the app sizes the film, and a faster pace says the same script in a shorte
   assert.equal(pacedDuration(44, 1), 44);
 
   const project = { ...emptyProject(), useCases: b.categories, fieldValues: b.fieldValues };
-  project.spec = { ...project.spec, narration: 'presenter', durationAuto: true, pace: 1.1 };
+  project.spec = { ...project.spec, narration: 'presenter', durationAuto: true, pace: 1.3 };
   const composed = composeBrief(project);
-  assert.equal(composed.durationSec, pacedDuration(suggestDuration(composed), 1.1));
+  // Generated at a natural read; the pace speeds the finished film up afterwards.
+  assert.equal(composed.durationSec, suggestDuration(composed));
+  assert.equal(composed.pace, 1.3);
 
-  const fast = buildPrompt({ ...b, durationSec: 40, pace: 1.1 })!;
+  const fast = buildPrompt({ ...b, durationSec: 44, pace: 1.5 })!;
   const natural = buildPrompt({ ...b, durationSec: 44, pace: 1 })!;
-  assert.equal(fast.scenePlan.scenes.length, natural.scenePlan.scenes.length, 'a faster pace drops no scene');
-  assert.match(fast.parts.map((p) => p.text).join('\n'), /brisk/);
+  assert.deepEqual(
+    fast.scenePlan.scenes.map((s) => s.duration),
+    natural.scenePlan.scenes.map((s) => s.duration),
+    'the model gets the same room to speak at any pace',
+  );
+  assert.ok(!/faster than a relaxed read/.test(fast.parts.map((p) => p.text).join('\n')), 'the model is never asked to talk faster');
   assert.ok(wordBudget(5, 1.1) > wordBudget(5));
 });
 
@@ -624,6 +630,9 @@ test('every part locks the presenter look, one voice, smooth presence and a real
     assert.match(text, /no male voice/);
     assert.match(text, /never appears or disappears abruptly/);
     assert.match(text, /Never show it as a photo, poster/);
+    assert.match(text, /Exactly ONE person in the whole video/);
+    assert.match(text, /Never standing inside the cabin/);
+    assert.match(text, /never a studio product shot/);
   }
   assert.match(res.parts[1]!.continuationText ?? '', /same female voice as the earlier parts, feminine verb forms/);
   const all = res.parts.map((p) => `${p.text}\n${p.continuationText ?? ''}`).join('\n');

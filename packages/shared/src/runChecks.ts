@@ -45,7 +45,7 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
   const promptOnly = isPromptOnly(brief.categories);
   const ctx = buildContext(brief);
   const beats = buildBeats(ctx);
-  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks, pace: ctx.pace });
+  const plan = planScenes(beats, ctx.totalDuration, ctx.maxChunk, { speaks: ctx.mode.speaks });
   const mode = ctx.mode;
 
   // Mandatory category fields — blocking.
@@ -232,7 +232,7 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
       const words = (o?.phonetic?.trim() || o?.dialogue?.trim() || '')
         .split(/\s+/)
         .filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
-      return words > Math.ceil(wordBudget(speakingSeconds(plan, sc), ctx.pace) * 1.25);
+      return words > Math.ceil(wordBudget(speakingSeconds(plan, sc)) * 1.25);
     });
     if (spills.length) {
       const names = spills.map((sc) => `scene ${plan.scenes.indexOf(sc) + 1}`).join(', ');

@@ -218,7 +218,8 @@ export const CATEGORIES: CategoryDef[] = [
       // a long list does not become the same macro shot four times over.
       const featureShots = [
         (x: string) => 'Macro detail shot of ' + x + ' with a slow rack focus.',
-        (x: string) => 'Interior close-up or detail shot of ' + x + ', slow slider move.',
+        (x: string) =>
+          'Close-up of ' + x + " filmed through the open driver's door, slow slider move — anyone in shot sits in the driver's seat or stands outside at the door, never inside the cabin.",
         (x: string) => 'Slow orbiting shot that reveals ' + x + ', shallow depth of field.',
         (x: string) => 'Clean three-quarter shot framing ' + x + ', gentle push-in.',
       ];

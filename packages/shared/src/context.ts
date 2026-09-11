@@ -19,7 +19,7 @@ export function adaptTrial(text: string, vehicle: 'car' | 'bike' | undefined): s
 }
 
 /** The storyboard's pace, held to what a presenter can still say clearly. */
-export const clampPace = (pace: number | undefined): number => Math.min(1.25, Math.max(0.85, Number(pace) || 1));
+export const clampPace = (pace: number | undefined): number => Math.min(1.5, Math.max(0.85, Number(pace) || 1));
 
 export interface RenderContext {
   brief: Brief;

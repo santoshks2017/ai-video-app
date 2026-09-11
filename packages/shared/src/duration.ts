@@ -10,8 +10,8 @@ import type { Brief } from './types.js';
 import { buildContext, clampPace } from './context.js';
 import { buildBeats } from './buildBeats.js';
 
-/** The paces the storyboard offers. 1 is a natural read. */
-export const PACES = [0.9, 1, 1.1, 1.2] as const;
+/** The paces the storyboard offers. The finished film is played at this speed; 1 leaves it as generated. */
+export const PACES = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5] as const;
 
 /** Room for one clear spoken line, or a readable shot when nobody speaks. */
 const SPOKEN_SCENE_SECONDS = 4.8;

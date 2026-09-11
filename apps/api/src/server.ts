@@ -76,6 +76,7 @@ import {
   speakingSeconds,
   sceneEditFor,
   DEFAULT_USD_TO_INR,
+  clampPace,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
 import { importPlace, PlacesError } from './places.js';
@@ -418,7 +419,7 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
       message: 'This narration mode has no speech, so there is no script to write.',
     });
   }
-  const plan = planScenes(buildBeats(ctx), ctx.totalDuration, ctx.maxChunk, { speaks: true, pace: ctx.pace });
+  const plan = planScenes(buildBeats(ctx), ctx.totalDuration, ctx.maxChunk, { speaks: true });
   const scenes: ScriptScene[] = plan.scenes
     .map((sc, index) => ({
       index,
@@ -426,7 +427,7 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
       direction: sc.beat.dialogue ?? '',
       seconds: sc.duration,
       // Measured without the silences at a part's edges, so no line spills across a cut.
-      words: Math.max(3, Math.round(speakingSeconds(plan, sc) * 2.2 * ctx.pace)),
+      words: Math.max(3, Math.round(speakingSeconds(plan, sc) * 2.2)),
       card: sc.beat.card,
     }))
     .filter((sc) => sc.direction);
@@ -903,7 +904,11 @@ async function renderSegment(
   // continues the motion rather than restarting it.
   const refs: OmniRef[] = [];
   if (seeded) refs.push({ data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
-  refs.push(...req.references.slice(0, Math.max(0, model.maxReferenceImages - refs.length)));
+  // A continuation is built on the previous part's last frame, which already carries the
+  // car, the presenter and the showroom. Sending the car's catalogue photos with it as well
+  // is how a white-backdrop product shot got cut into the middle of a film — so, as Veo
+  // and Seedance already do, the seed frame carries a continuation on its own.
+  if (!seeded) refs.push(...req.references.slice(0, Math.max(0, model.maxReferenceImages - refs.length)));
 
   const omniRes = render === '480p' ? '720p' : render;
   const clip = await generateClip(
@@ -1003,6 +1008,8 @@ function buildOverlay(
     // line. A film with no speech has nothing to dip under.
     musicLoudness: -20,
     musicDuckDb: buildContext(brief).mode.speaks ? -12 : 0,
+    // The storyboard's pace plays the finished film faster; the model always speaks at a natural read.
+    speed: clampPace(brief.pace),
   };
 }
 
@@ -1180,7 +1187,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
 
   // The music is made while the segments render, and waited for only at the stitch.
-  const musicBed = makeMusicBed(brief, jobId, cost.totalSeconds + (brief.endCardOn ? 3 : 0));
+  const musicBed = makeMusicBed(brief, jobId, cost.totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0));
   const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
 
   // No `extend` — each segment is an independent create, seeded with the
@@ -1476,7 +1483,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
           .then((o) => (o ? { bytes: o.bytes, storagePath: source.musicStoragePath } : null))
           .catch(() => null)
       : redo.length === parts.length
-        ? makeMusicBed(brief, jobId, totalSeconds + (brief.endCardOn ? 3 : 0))
+        ? makeMusicBed(brief, jobId, totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0))
         : Promise.resolve(null);
     const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
 

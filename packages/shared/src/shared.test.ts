@@ -12,6 +12,9 @@ import {
   buildPrompt,
   overlayCards,
   sceneCard,
+  composeBrief,
+  emptyProject,
+  colourName,
   renderResolution,
   priceFor,
   OMNI_FLASH_DEFAULTS,
@@ -30,6 +33,7 @@ import {
   estimateSegmentsCost,
   LANGUAGE_SEEDS,
   type Brief,
+  type CarModelProfile,
 } from '@ava/shared';
 
 function base(overrides: Partial<Brief> = {}): Brief {
@@ -375,4 +379,54 @@ test('1080p renders natively where a model can and upscales where it cannot', ()
   assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '1080p'), 0.12);
   assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '720p'), 0.1);
   assert.equal(priceFor(SEEDANCE_25_DEFAULTS, '1080p'), SEEDANCE_25_DEFAULTS.usdPerSecond);
+});
+
+test('the chosen paint reaches the model even when a variant is also picked', () => {
+  const img = (label: string, filename: string) => ({
+    refId: filename, storagePath: `refs/${filename}`, url: `/api/refs/${filename}`, label, filename,
+  });
+  const car = {
+    id: 'mahindra__xuv-3xo', brand: 'Mahindra', model: 'Xuv 3xo', slug: 'mahindra/xuv-3xo',
+    images: {
+      front: [img('Mahindra Xuv 3xo front 1', 'front-1.jpg'), img('Mahindra Xuv 3xo front 2', 'front-2.jpg')],
+      side: [img('Mahindra Xuv 3xo side 1', 'side-1.jpg'), img('Mahindra Xuv 3xo side 2', 'side-2.jpg')],
+      rear: [img('Mahindra Xuv 3xo rear 1', 'rear-1.jpg')],
+      interior: [img('Mahindra Xuv 3xo interior 1', 'interior-1.jpg'), img('Mahindra Xuv 3xo interior 2', 'interior-2.jpg')],
+    },
+    colours: [
+      { name: '227_Everest White', image: img('Mahindra Xuv 3xo — 227_Everest White', 'colour-227.jpg') },
+      { name: '226_Stealth Black', image: img('Mahindra Xuv 3xo — 226_Stealth Black', 'colour-226.jpg') },
+    ],
+    // Synced variants carry no colour list of their own — the case that dropped the paint.
+    variants: [{ name: 'AX5 Turbo', images: {}, colours: [] }],
+  } as unknown as CarModelProfile;
+  const project = {
+    ...emptyProject(),
+    useCases: ['walkaround'],
+    carId: car.id,
+    carIds: [car.id],
+    carVariant: 'AX5 Turbo',
+    carColour: '226_Stealth Black',
+  };
+
+  const brief = composeBrief(project as never, { car });
+  assert.equal(brief.carColour, 'Stealth Black');
+  const carRefs = brief.attachments.filter((a) => a.kind === 'car-model');
+  // The colour image leads, then ONE photo per angle — not every yellow photo in the library.
+  assert.deepEqual(carRefs.map((a) => a.filename), ['colour-226.jpg', 'front-1.jpg', 'side-1.jpg', 'rear-1.jpg', 'interior-1.jpg']);
+  assert.match(carRefs[0]!.label, /^Colour reference — Stealth Black: paint the car exactly this colour$/);
+  assert.ok(carRefs.slice(1).every((a) => /shape reference; its paint may differ$/.test(a.label)));
+
+  const text = buildPrompt(brief)!.parts[0]!.text;
+  assert.match(text, /Paint colour: Stealth Black\. The car is Stealth Black in every shot/);
+  assert.doesNotMatch(text, /226_/);
+
+  // No colour picked: every photo goes, and nothing tells the model a paint.
+  const plain = composeBrief({ ...project, carColour: undefined } as never, { car });
+  assert.equal(plain.carColour, undefined);
+  assert.equal(plain.attachments.filter((a) => a.kind === 'car-model').length, 7);
+  assert.doesNotMatch(buildPrompt(plain)!.parts[0]!.text, /Paint colour:/);
+
+  assert.equal(colourName('226_Stealth Black'), 'Stealth Black');
+  assert.equal(colourName('Atlas White with Titanium Black'), 'Atlas White with Titanium Black');
 });

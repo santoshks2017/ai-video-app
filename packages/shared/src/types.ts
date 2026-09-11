@@ -186,6 +186,12 @@ export interface Brief {
   /** Whether the video references a specific car model (triggers the scraper, P0.2). */
   modelSpecific: boolean;
   carModel?: string;
+  /**
+   * The hero car's paint, as a person says it ("Stealth Black"). The library's
+   * angle photos are often shot in one launch colour, so without this the model
+   * paints the car whatever colour its reference photos happen to be.
+   */
+  carColour?: string;
   durationSec: number;
   /** Per-generation-call cap in seconds (Omni Flash: 3–10s). */
   maxChunkSec: number;

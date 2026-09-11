@@ -239,6 +239,13 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
           `Car model: ${brief.carModel}. Match the current-generation ${brief.carModel} exactly as shown in the supplied car-model reference set — body shape, face, lamps, wheels and proportions. Do not substitute an older generation or invent a design.`,
         );
       }
+      if (brief.modelSpecific && brief.carModel && brief.carColour) {
+        // The library's angle photos are usually one launch colour. Unless the
+        // paint is said outright, the model copies whatever colour they show.
+        L.push(
+          `Paint colour: ${brief.carColour}. The car is ${brief.carColour} in every shot — every painted body panel, in every scene. The colour reference image shows this paint. The other car photos are shape references and may show the car in a different colour: take its shape, face, lamps and wheels from them, never their paint.`,
+        );
+      }
       if (attachments.length) {
         L.push(
           'Use these supplied reference images exactly as provided — do not re-imagine, restyle or regenerate their content. Refer to each by its filename:',
@@ -432,6 +439,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         ? `Fictional branding only: ${ctx.displayBrandModel} — Dealership: ${ctx.displayDealer}. No real manufacturer logo or badge.`
         : `Brand and model: ${ctx.displayBrandModel}. Dealership: ${ctx.displayDealer}.`,
     );
+    if (brief.modelSpecific && brief.carColour) {
+      // A continuation segment is built on the previous frame, but a model
+      // re-reading its references can still drift back to the photos' paint.
+      C.push(`Paint colour: ${brief.carColour} — the same ${brief.carColour} paint as the reference frame, on every body panel.`);
+    }
     C.push(`Visual style: ${ctx.visStyle}. Keep the exact same grade and camera language as the reference frame.`);
     if (ctx.mode.speaks) {
       C.push(

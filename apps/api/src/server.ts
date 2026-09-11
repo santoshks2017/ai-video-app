@@ -9,6 +9,7 @@ import {
   overlayCopy,
   buildPrompt,
   overlayCards,
+  colourName,
   renderResolution,
   priceFor,
   shortSideFor,
@@ -453,7 +454,7 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
         priceLabel: variant?.priceLabel ?? variant?.price,
         fuel: variant?.fuel,
         transmission: variant?.transmission,
-        colour: project.carColour,
+        colour: colourName(project.carColour) || undefined,
         specs: car.specs ?? {},
         highlights: (car.highlights ?? []).slice(0, 8),
       };

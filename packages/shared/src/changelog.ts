@@ -18,10 +18,21 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '2.5';
+export const APP_VERSION = '2.6';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '2.6',
+    date: '2026-09-11',
+    title: 'The car comes out in the colour you picked',
+    changes: [
+      'Picking a colour and a variant together silently dropped the colour: it was looked up on the variant, which never has its own colour list. The colour image now reaches the model whether or not a variant is chosen.',
+      'The prompt now names the paint outright — "Paint colour: Stealth Black" — and tells the model to take only shape from the other car photos, which are usually all one launch colour.',
+      'With a colour chosen, the car reference set is the colour image plus one photo per angle, instead of every photo in the library outvoting the one colour image.',
+      'Colour names drop CarDekho\u2019s paint codes: "Stealth Black", not "226_Stealth Black".',
+    ],
+  },
   {
     version: '2.5',
     date: '2026-09-10',

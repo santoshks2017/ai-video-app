@@ -17,6 +17,7 @@ import {
   type ProjectVideoSpec,
   renderResolution,
   priceFor,
+  colourName,
 } from '@ava/shared';
 import { useApp, api, projectTabId } from '../state/appStore.js';
 import { Field, Panel, ImageUpload, Thumb, Confirm, Banner, Collapse } from '../components/ui.js';
@@ -374,7 +375,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     <option value="">Any colour</option>
                     {colours.map((c) => (
                       <option key={c.name} value={c.name}>
-                        {c.name}
+                        {colourName(c.name)}
                       </option>
                     ))}
                   </select>

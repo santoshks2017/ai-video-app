@@ -605,3 +605,28 @@ test('a shot is built on a photo of what it frames, or called out as generic —
   assert.match(res.parts[0]!.text, /No supplied photo shows the interior/);
 });
 
+test('every part locks the presenter look, one voice, smooth presence and a real car', () => {
+  const b = base({
+    categories: ['feature'],
+    narration: 'presenter',
+    durationSec: 40,
+    maxChunkSec: 10,
+    fieldValues: { feature: { feature1: 'Sunroof', feature2: 'Touchscreen', feature3: '6 airbags' } },
+  });
+  b.actor = { ...b.actor, name: 'Meera', gender: 'female', style: 'maroon polo t-shirt, hair worn open' };
+  const res = buildPrompt(b)!;
+  assert.ok(res.parts.length > 1);
+  const prompts = [res.parts[0]!.text, ...res.parts.slice(1).map((p) => p.continuationText ?? '')];
+  for (const text of prompts) {
+    assert.match(text, /CONTINUITY LOCK/);
+    assert.match(text, /hair worn open stays open; never tied up/);
+    assert.match(text, /ONE voice for the whole video: the same female voice/);
+    assert.match(text, /no male voice/);
+    assert.match(text, /never appears or disappears abruptly/);
+    assert.match(text, /Never show it as a photo, poster/);
+  }
+  assert.match(res.parts[1]!.continuationText ?? '', /same female voice as the earlier parts, feminine verb forms/);
+  const all = res.parts.map((p) => `${p.text}\n${p.continuationText ?? ''}`).join('\n');
+  assert.ok(!/used as-is|exactly as provided/.test(all), 'no wording that invites pasting a reference photo into the scene');
+});
+

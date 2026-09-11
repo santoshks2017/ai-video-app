@@ -84,9 +84,11 @@ export function sceneVisual(
 export function sceneVisualLine(visual: SceneVisual, vehicle: 'car' | 'bike' = 'car'): string | null {
   switch (visual.kind) {
     case 'picked':
-      return `Build this shot on the supplied reference image ${visual.photo.filename} (${visual.photo.label}) — match its vehicle, angle and setting.`;
+      return visual.photo.kind === 'car-model'
+        ? `Build this shot on the supplied reference image ${visual.photo.filename} (${visual.photo.label}) — match the ${vehicle}'s design, colour and angle, filmed as a real ${vehicle} standing in this scene's location, never as the photo itself.`
+        : `Build this shot on the supplied reference image ${visual.photo.filename} (${visual.photo.label}) — match what it shows and its angle, filmed as a real scene, never as the photo itself.`;
     case 'matched':
-      return `For the ${visual.topic}, take how it looks from the supplied reference image ${visual.photo.filename} (${visual.photo.label}).`;
+      return `For the ${visual.topic}, take how it looks from the supplied reference image ${visual.photo.filename} (${visual.photo.label}) — on the real ${vehicle} in the scene, never as the photo itself.`;
     case 'generic':
       return `No supplied photo shows the ${visual.topic}. Render a realistic, generic ${visual.topic} that suits this ${vehicle} — do not reshape a reference photo of another part to fake it.`;
     default:

@@ -25,6 +25,40 @@ import { rulebookText } from './rulebook.js';
 const CLEAN_FRAME =
   'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. Signage that genuinely exists in the location (a showroom fascia, a number plate) is part of the scene and is fine; invented graphics are not.';
 
+/**
+ * The rules a generation most often breaks, said first and in the same words in every part.
+ *
+ * Each part is a separate generation that knows nothing of the others, and a model
+ * re-imagines whatever it is not pinned to: the presenter's open hair came back tied in
+ * a later part, a man's voice read the second half, she popped into a shot from
+ * nowhere, and a flat photo of the car stood in for a car parked in the showroom.
+ * Identical wording at the top of every part is the strongest lever a prompt has.
+ */
+function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car' | 'bike'): string[] {
+  const male = brief.actor.gender === 'male';
+  const [they, their] = male ? ['he', 'his'] : ['she', 'her'];
+  const lines = ['## CONTINUITY LOCK — NEVER BREAK THESE, IN ANY SHOT OR ANY PART'];
+  if (mode.onCameraPerson) {
+    lines.push(
+      `- ONE presenter, identical from the first frame to the last: the same face; the same hairstyle, length and parting (hair worn open stays open; never tied up, braided, pinned or restyled — and tied hair stays tied); the same outfit, colours and fabric${
+        brief.actor.style ? ` (${brief.actor.style})` : ''
+      }; the same jewellery, accessories and make-up; the same build. Nothing about ${their} appearance changes between shots or between parts.`,
+      `- The presenter never appears or disappears abruptly. Within a shot ${they} stays in frame, or enters and leaves by walking naturally in from or out past the edge of the frame with visible steps — no popping in, fading in or out, teleporting, or jumping to a new spot. A move to a shot without ${their === 'his' ? 'him' : 'her'} is a clean camera cut, never ${their === 'his' ? 'him' : 'her'} vanishing.`,
+    );
+  }
+  if (mode.speaks) {
+    const voice = male ? 'male' : 'female';
+    lines.push(
+      `- ONE voice for the whole video: the same ${voice} voice${brief.actor.voice ? ` (${brief.actor.voice})` : ''}, with the same pitch, timbre, accent and energy in every scene and every part. No second speaker, no narrator, no ${male ? 'female' : 'male'} voice, no voice change at any point.`,
+    );
+  }
+  const noun = vehicle === 'bike' ? 'bike' : 'car';
+  lines.push(
+    `- The ${noun} is a real, physical, three-dimensional vehicle in the location — standing on the floor or moving on the road, lit by the scene, with real reflections and a real shadow. Never show it as a photo, poster, print, billboard, screen image, cutout or any flat picture. The reference photos show what the ${noun} looks like; they are never objects to put in the scene.`,
+  );
+  return lines;
+}
+
 function spokenLock(brief: Brief): string {
   const lang = brief.language?.name ?? 'Hindi';
   const respelled = brief.language?.needsPhonetics !== false;
@@ -187,6 +221,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     }
 
     L.push('');
+    continuityLock(brief, mode, ctx.vehicle).forEach((line) => L.push(line));
+
+    L.push('');
     L.push('## FORMAT');
     L.push(`Narration mode: ${mode.label}.`);
     if (mode.onCameraPerson && brief.narration === 'presenter') {
@@ -257,7 +294,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       }
       if (attachments.length) {
         L.push(
-          'Use these supplied reference images exactly as provided — do not re-imagine, restyle or regenerate their content. Refer to each by its filename:',
+          'These supplied reference images show exactly how things look — copy the car\'s design, colour and details and the showroom\'s look from them faithfully, but film them as real things in the scene. Never paste, hang, display or frame a reference photo itself inside the video. Refer to each by its filename:',
         );
         for (const a of attachments) {
           L.push(`- ${a.filename} — ${a.label}${a.kind === 'logo' ? ' (overlay / end card only)' : ''}`);
@@ -384,8 +421,19 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     if (ctx.useFake)
       important.push('No real automotive manufacturer logo, wordmark or badge anywhere in the video.');
     important.push('Same car in every shot — no change of colour, badge, wheels or body shape.');
+    important.push(
+      `The ${ctx.vehicle === 'bike' ? 'bike' : 'car'} is a real vehicle physically in the scene in every shot — never a photo, poster, screen image or cutout of one.`,
+    );
     if (mode.onCameraPerson)
-      important.push('Same person in every shot — no change of face, hair, outfit or build.');
+      important.push(
+        'Same person in every shot and every part — no change of face, hairstyle (open hair never becomes tied, nor tied hair open), outfit, accessories or build — and never appearing or vanishing mid-shot.',
+      );
+    if (mode.speaks)
+      important.push(
+        `One unchanged ${actor.gender === 'male' ? 'male' : 'female'} voice from the first word to the last — never a second voice or a ${
+          actor.gender === 'male' ? 'female' : 'male'
+        } voice.`,
+      );
     if (mode.lipSync)
       important.push(
         ctx.pace >= 1.05
@@ -399,7 +447,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       important.push('The result must look like a professionally filmed Indian dealership reel, not an AI montage.');
     if (!isFirst) important.push('Continue the previous clip exactly — same subject, same location, same grade.');
     if (attachments.length)
-      important.push('Reference images are used as-is — never regenerate or reinterpret a supplied photo or logo.');
+      important.push(
+        'Reference images are faithful guides to how the car, the showroom and the logos look — copy their details exactly, but never show a reference photo itself as a picture, poster or screen in the video.',
+      );
     if (isFirst) {
       for (const id of brief.categories) {
         for (const a of CATEGORY_BY_ID[id]?.avoid ?? []) important.push(`Avoid: ${a}`);
@@ -441,6 +491,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
           : '') +
         'same car (identical model, colour, wheels, badges), same showroom and background, same framing, lens, lighting and colour grade. Then continue the motion naturally — no cut back to an intro, no titles, no restart.',
     );
+    C.push('');
+    continuityLock(brief, mode, ctx.vehicle).forEach((line) => C.push(line));
+    C.push('');
     if (mode.speaks) {
       // Parts are joined cut to cut, so a word said on both sides of a join is heard
       // twice, and one started in the first instant lands on the cut.
@@ -468,7 +521,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     C.push(`Visual style: ${ctx.visStyle}. Keep the exact same grade and camera language as the reference frame.`);
     if (ctx.mode.speaks) {
       C.push(
-        `Spoken language: Hindi/Hinglish, ${paceDelivery(ctx.pace)}, about ${
+        `Spoken language: ${brief.language?.name ?? 'Hindi/Hinglish'}, in the same ${actor.gender === 'male' ? 'male' : 'female'} voice as the earlier parts, ${
+          actor.gender === 'male' ? 'masculine' : 'feminine'
+        } verb forms, ${paceDelivery(ctx.pace)}, about ${
           scenes.reduce((s, x) => s + wordBudget(speakingSeconds(plan, x), ctx.pace), 0)
         } words total across this segment.`,
       );
@@ -523,6 +578,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     }
     C.push(CLEAN_FRAME);
     if (mode.speaks) C.push('Same pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
+    C.push(
+      `Before finishing, check the continuity lock above: ${
+        mode.onCameraPerson ? "the presenter's hair, outfit and look are unchanged and the presenter never pops in or out; " : ''
+      }${mode.speaks ? 'the voice is the same one as before; ' : ''}the ${ctx.vehicle === 'bike' ? 'bike' : 'car'} is a real vehicle, never a picture of one.`,
+    );
     if (isLast) C.push('This is the final segment — end cleanly on the last scene.');
     else
       C.push(

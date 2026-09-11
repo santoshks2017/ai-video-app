@@ -41,6 +41,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<Project | null>(stored ?? null);
   const [savedAt, setSavedAt] = useState<number>(0);
   const dirty = useRef(false);
+  /** Set once the project is being deleted, so no pending autosave writes it back. */
+  const removed = useRef(false);
 
   useEffect(() => {
     if (stored && !project) setProject(stored);
@@ -48,8 +50,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
   // Autosave a moment after edits settle.
   useEffect(() => {
-    if (!project || !dirty.current) return;
+    if (!project || !dirty.current || removed.current) return;
     const t = setTimeout(async () => {
+      if (removed.current) return;
       const r = await api.projects.save(project);
       dirty.current = false;
       if (!isApiError(r)) {
@@ -303,7 +306,15 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         </span>
         <Confirm
           onConfirm={async () => {
-            await api.projects.remove(project.id);
+            removed.current = true;
+            dirty.current = false;
+            const r = await api.projects.remove(project.id);
+            if (isApiError(r)) {
+              // Said out loud: a delete that fails quietly looks exactly like one that worked.
+              removed.current = false;
+              window.alert(`Could not delete this project: ${r.message}`);
+              return;
+            }
             await refresh();
             closeTab(projectTabId(project.id));
           }}

@@ -36,7 +36,9 @@ export async function req<T>(path: string, init: RequestInit = {}): Promise<T | 
     const res = await fetch(`${BASE}${path}`, {
       ...init,
       headers: {
-        'content-type': 'application/json',
+        // Only a request with a body says it is JSON. The server turns away an empty
+        // body labelled JSON, which is what made every delete fail.
+        ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}),
         ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...(init.headers ?? {}),
       },

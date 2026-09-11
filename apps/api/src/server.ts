@@ -84,6 +84,17 @@ import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './crede
 const config = loadConfig();
 const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
 
+// A request can say it carries JSON and still have no body — every DELETE from the web
+// app did, and Fastify turned each one away with a 400 before it reached its route, so
+// nothing could be deleted. An empty JSON body now just means no body; anything else
+// still goes through Fastify's own parser and its prototype-poisoning checks.
+const jsonParser = app.getDefaultJsonParser('error', 'error');
+app.removeContentTypeParser('application/json');
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+  if (!String(body).trim()) return done(null, undefined);
+  jsonParser(req, String(body), done);
+});
+
 /**
  * Which pages may read the API's replies: the live site, and this project's
  * Firebase preview channels (ai-video-app-cd--<channel>.web.app). A preview link

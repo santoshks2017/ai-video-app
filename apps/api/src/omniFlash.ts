@@ -239,8 +239,16 @@ export async function downloadFile(fileId: string, apiKey: string): Promise<{ by
     }
     await new Promise((r) => setTimeout(r, 5000));
   }
-  const dl = await fetch(`${BASE}/files/${id}:download?alt=media`, { headers: headers(apiKey) });
-  if (!dl.ok) throw new OmniFlashError('omni-flash-download', `File download returned ${dl.status}`);
+  // Google's file store answers 503 now and then under load. A retry costs
+  // nothing; failing here throws away a video that was already generated.
+  let dl: Response | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    dl = await fetch(`${BASE}/files/${id}:download?alt=media`, { headers: headers(apiKey) });
+    const retryable = dl.status === 429 || dl.status >= 500;
+    if (dl.ok || !retryable || attempt === 3) break;
+    await new Promise((r) => setTimeout(r, 5000 * 2 ** attempt));
+  }
+  if (!dl || !dl.ok) throw new OmniFlashError('omni-flash-download', `File download returned ${dl?.status ?? 'nothing'}`);
   const buf = Buffer.from(await dl.arrayBuffer());
   return { bytes: buf, mimeType: dl.headers.get('content-type') ?? 'video/mp4' };
 }

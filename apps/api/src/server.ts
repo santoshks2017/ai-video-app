@@ -1503,6 +1503,17 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
 );
 
 /** Every generation ever made for a project — nothing is overwritten. */
+/**
+ * A run still marked "running" long after its last progress was cut off — most
+ * often the server was killed mid-run (out of memory), which ends the request
+ * without a word, so nothing ever marks the job failed. Progress is written
+ * after every segment, and no single segment takes this long (Seedance polls
+ * for 20 minutes at most), so past this it is reported as interrupted.
+ */
+const STALE_RUN_MS = 25 * 60 * 1000;
+const interrupted = (j: JobRecord): boolean =>
+  j.status === 'running' && Date.now() - (j.updatedAt ?? j.createdAt) > STALE_RUN_MS;
+
 app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req) => {
   const jobs = await listJobsForProject(req.params.id);
   return {
@@ -1510,7 +1521,7 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req)
       jobId: j.jobId,
       label: j.label,
       modelName: j.modelName,
-      status: j.status,
+      status: interrupted(j) ? ('failed' as const) : j.status,
       createdAt: j.createdAt,
       totalSeconds: j.totalSeconds,
       costInr: j.costInr,
@@ -1521,14 +1532,14 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req)
       segments: j.clips?.length ?? 0,
       dealerName: j.dealerName,
       categories: j.categories,
-      error: j.error,
+      error: interrupted(j) ? 'Interrupted — the server stopped before this video finished. Nothing more will arrive; generate again.' : j.error,
       parentJobId: j.parentJobId,
       refinedParts: j.refinedParts,
       feedback: j.feedback,
       // Older runs predate startedAt/finishedAt; their record timestamps are
       // the same span, measured from job creation to the last write.
       durationMs:
-        j.status === 'running'
+        j.status === 'running' && !interrupted(j)
           ? undefined
           : Math.max(0, (j.finishedAt ?? j.updatedAt) - (j.startedAt ?? j.createdAt)) || undefined,
       renderResolution: j.renderResolution,

@@ -71,6 +71,15 @@ export interface BrandOverlay {
   ink?: string;
 }
 
+/**
+ * Threads ffmpeg may use per decoder, for the filter graph, and for the encoder.
+ * Left alone it sizes each to every core it can see, and a Cloud Run instance can
+ * see more cores than it is allowed to use. Capping keeps CPU use predictable on a
+ * two-vCPU instance. (It did not change peak memory — measured; the crossfade
+ * chain did, see composeFinal.)
+ */
+const FF_THREADS = String(Math.max(1, Number(process.env.FFMPEG_THREADS) || 2));
+
 const DEFAULT_ACCENT = '#e2600a';
 const DEFAULT_INK = '#0f1e33';
 /**
@@ -644,10 +653,17 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     // whole compose.
     const fps = Math.max(1, Math.round(metas[0]!.fps));
 
-    const inputs: string[] = [];
-    for (const f of files) inputs.push('-i', f);
-
-    // End card as a still clip with silence, so it joins the chain like a segment.
+    // --- the clips, joined without holding them all in memory ---
+    // A crossfade chain (xfade over whole clips) makes ffmpeg decode every clip at
+    // once while each fade waits for its offset, so later clips pile up as raw
+    // 1080p frames: a five-clip 1080p join peaked at 1.1 GB, most of what got the
+    // instance killed. Instead each clip is cut into a body and two half-second
+    // edges, each dissolve is made from just those edges, and bodies and dissolves
+    // are concatenated in order. Same timeline, measured at about 60% of the
+    // memory, with sound and picture ending on the same frame.
+    const parts: string[] = [];
+    const clipInputs: string[] = [];
+    const clipFiles = [...files];
     let endCardFile: string | undefined;
     if (overlay.endCard && overlay.endCard.lines.some((l) => l.trim())) {
       const png = join(dir, 'endcard.png');
@@ -657,25 +673,64 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
         '-v', 'error', '-y',
         '-loop', '1', '-t', String(overlay.endCard.seconds), '-i', png,
         '-f', 'lavfi', '-t', String(overlay.endCard.seconds), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', String(fps),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', String(fps), '-threads', FF_THREADS,
         '-c:a', 'aac', '-shortest', endCardFile,
       ]);
-      inputs.push('-i', endCardFile);
+      clipFiles.push(endCardFile);
       metas.push({ duration: overlay.endCard.seconds, width: W, height: H, fps });
     }
-
-    // Overlay assets are extra inputs appended after the clips, so their filter
-    // indices continue from clipCount.
     const clipCount = metas.length;
-    let nextIdx = clipCount;
-    // A one-frame image input holds its last frame forever, which is all the
-    // logos and the footer need. A caption has to fade, and fade animates over
-    // timestamps — so those are looped into a real stream of the full length.
-    const addOverlayInput = async (name: string, bytes: Buffer, loopSeconds?: number): Promise<number> => {
+    // A dissolve can be no longer than a third of the shortest clip, or a clip
+    // would have no body left between its two edges.
+    const X = Math.min(xfd, ...metas.map((m) => m.duration / 3));
+
+    let clipIdx = 0;
+    const slice = (file: string, ss: number, seconds: number): number => {
+      clipInputs.push('-threads', FF_THREADS);
+      if (ss > 0) clipInputs.push('-ss', ss.toFixed(3));
+      clipInputs.push('-t', Math.max(0.04, seconds).toFixed(3), '-i', file);
+      return clipIdx++;
+    };
+    const normalise = (i: number, label: string): void => {
+      parts.push(`[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,fps=${fps},format=yuv420p,settb=AVTB[${label}v]`);
+      parts.push(`[${i}:a]aresample=44100:async=1,asettb=AVTB[${label}a]`);
+    };
+    const sequence: string[] = [];
+    for (let i = 0; i < clipCount; i++) {
+      const d = metas[i]!.duration;
+      const start = i === 0 ? 0 : X;
+      const end = i === clipCount - 1 ? d : d - X;
+      normalise(slice(clipFiles[i]!, start, end - start), `b${i}`);
+      sequence.push(`[b${i}v][b${i}a]`);
+      if (i < clipCount - 1) {
+        normalise(slice(clipFiles[i]!, d - X, X), `t${i}`);
+        normalise(slice(clipFiles[i + 1]!, 0, X), `h${i}`);
+        parts.push(`[t${i}v][h${i}v]xfade=transition=fade:duration=${X}:offset=0[x${i}v]`);
+        parts.push(`[t${i}a][h${i}a]acrossfade=d=${X}[x${i}a]`);
+        sequence.push(`[x${i}v][x${i}a]`);
+      }
+    }
+    parts.push(`${sequence.join('')}concat=n=${sequence.length}:v=1:a=1[vcat][acat]`);
+
+    // Overlay assets are extra inputs after every clip slice, so their filter
+    // indices continue from there.
+    const inputs: string[] = [];
+    let nextIdx = clipIdx;
+    // A one-frame image input holds its last frame forever, which is all the logos
+    // and the footer need. A caption has to fade, and fade animates over
+    // timestamps — so it is looped into a real stream, but only across its own
+    // window, shifted to where it appears, not the length of the whole film.
+    const addOverlayInput = async (
+      name: string,
+      bytes: Buffer,
+      window?: { from: number; seconds: number },
+    ): Promise<number> => {
       const f = join(dir, name);
       await writeFile(f, bytes);
-      if (loopSeconds) inputs.push('-loop', '1', '-framerate', String(fps), '-t', loopSeconds.toFixed(3));
-      inputs.push('-i', f);
+      if (window) {
+        inputs.push('-loop', '1', '-framerate', String(fps), '-t', window.seconds.toFixed(3), '-itsoffset', window.from.toFixed(3));
+      }
+      inputs.push('-threads', FF_THREADS, '-i', f);
       return nextIdx++;
     };
 
@@ -691,32 +746,11 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       ? await addOverlayInput('dealer.png', await normalizedLogo(overlay.dealerLogo, W, H, 'right'))
       : -1;
 
-    // --- crossfade the clips together ---
-    const parts: string[] = [];
-    for (let i = 0; i < clipCount; i++) {
-      parts.push(`[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,fps=${fps},format=yuv420p,settb=AVTB[n${i}v]`);
-      parts.push(`[${i}:a]aresample=44100:async=1,asettb=AVTB[n${i}a]`);
-    }
-    let vLast = 'n0v';
-    let aLast = 'n0a';
-    let offset = metas[0]!.duration - xfd;
-    for (let i = 1; i < clipCount; i++) {
-      const vOut = `vx${i}`;
-      const aOut = `ax${i}`;
-      parts.push(
-        `[${vLast}][n${i}v]xfade=transition=fade:duration=${xfd}:offset=${offset.toFixed(3)}[${vOut}]`,
-      );
-      parts.push(`[${aLast}][n${i}a]acrossfade=d=${xfd}[${aOut}]`);
-      vLast = vOut;
-      aLast = aOut;
-      offset += metas[i]!.duration - xfd;
-    }
-
     // --- lay the brand furniture on top ---
     // Both logo inputs are the same normalised box, so a single margin puts them
     // on the same baseline however different the uploaded files were.
     const margin = Math.round(shortSide(W, H) * 0.04);
-    let vCur = vLast;
+    let vCur = 'vcat';
 
     // --- timed captions ---
     // The model is told to draw no text at all, so every word the viewer reads
@@ -727,12 +761,11 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     let at = 0;
     for (let i = 0; i < clipCount; i++) {
       clipStart.push(at);
-      at += metas[i]!.duration - xfd;
+      at += metas[i]!.duration - X;
     }
     // Captions belong to the film, never to the end card that follows it.
     const bodyClips = endCardFile ? clipCount - 1 : clipCount;
     const bodyEnd = clipStart[bodyClips - 1]! + metas[bodyClips - 1]!.duration;
-    const totalDur = clipStart[clipCount - 1]! + metas[clipCount - 1]!.duration;
     const CARD_FADE = 0.28;
 
     const headSize = await captionSize((overlay.cards ?? []).map((c) => c.text ?? ''), W, H);
@@ -750,7 +783,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
 
       const png = await cardPng(text, card.sub, W, H, accent, ink, headSize);
       const cardH = (await sharp(png).metadata()).height ?? 0;
-      const idx = await addOverlayInput(`card-${cardNo}.png`, png, totalDur);
+      const idx = await addOverlayInput(`card-${cardNo}.png`, png, { from, seconds: to - from });
       const top = Math.max(margin, H - footerH - margin - cardH);
       const label = `cd${cardNo}`;
       const outLabel = `vc${cardNo}`;
@@ -758,7 +791,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
         `[${idx}:v]format=rgba,settb=AVTB,fade=t=in:st=${from.toFixed(3)}:d=${CARD_FADE}:alpha=1,` +
           `fade=t=out:st=${Math.max(from, to - CARD_FADE).toFixed(3)}:d=${CARD_FADE}:alpha=1[${label}]`,
       );
-      parts.push(`[${vCur}][${label}]overlay=${margin}:${top}[${outLabel}]`);
+      parts.push(`[${vCur}][${label}]overlay=${margin}:${top}:eof_action=pass[${outLabel}]`);
       vCur = outLabel;
       cardNo++;
     }
@@ -780,11 +813,13 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     const out = join(dir, 'final.mp4');
     await run('ffmpeg', [
       '-v', 'error', '-y',
+      ...clipInputs,
       ...inputs,
+      '-filter_complex_threads', FF_THREADS,
       '-filter_complex', parts.join(';'),
       '-map', '[vout]',
-      '-map', `[${aLast}]`,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+      '-map', '[acat]',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', FF_THREADS,
       '-c:a', 'aac', '-movflags', '+faststart',
       out,
     ]);
@@ -811,8 +846,8 @@ export async function trimClip(clip: Buffer, seconds: number): Promise<Buffer> {
     const { duration } = await probe(inF);
     if (!(seconds > 0) || duration <= seconds + 0.05) return clip;
     await run('ffmpeg', [
-      '-v', 'error', '-y', '-i', inF, '-t', seconds.toFixed(3),
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-v', 'error', '-y', '-threads', FF_THREADS, '-i', inF, '-t', seconds.toFixed(3),
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-threads', FF_THREADS,
       '-c:a', 'aac', '-movflags', '+faststart', outF,
     ]);
     return await readFile(outF);

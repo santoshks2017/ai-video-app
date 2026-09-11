@@ -56,6 +56,10 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
+      # 4Gi / 2 vCPU: stitching a long 1080p video runs ffmpeg with several 1080p
+      # decoders, overlays and an encoder at once. At 1Gi the instance was killed
+      # mid-run ("Memory limit of 1024 MiB exceeded"), which the browser only sees
+      # as "Failed to fetch". Billing is per request-second, so idle costs nothing.
       - name: Deploy API (Cloud Run)
         run: |
           gcloud run deploy ava-api \
@@ -64,8 +68,8 @@ jobs:
             --region "${{ vars.GCP_REGION }}" \
             --allow-unauthenticated \
             --timeout 3600 \
-            --memory 1Gi \
-            --cpu 1 \
+            --memory 4Gi \
+            --cpu 2 \
             --concurrency 4 \
             --max-instances 3 \
             --set-secrets "GOOGLE_API_KEY=GOOGLE_API_KEY:${{ vars.GOOGLE_API_KEY_VERSION }}" \

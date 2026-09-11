@@ -121,7 +121,13 @@ export function GenerationPanel({
     void loadEta();
     if (isApiError(r)) {
       setStatus('error');
-      setError(`${r.code}: ${r.message}`);
+      // "Failed to fetch" means no answer came back at all: the connection was cut
+      // before the video finished. Say that, rather than a browser error string.
+      setError(
+        r.code === 'network'
+          ? 'Lost the connection to the server before the video finished — the server may have restarted, or your connection dropped. Check History: an unfinished run shows as interrupted, and you can generate again.'
+          : `${r.code}: ${r.message}`,
+      );
       const partial = errorClips(r);
       void loadHistory();
       if (partial.length) setResult({ jobId: r.jobId ?? '', status: 'failed', clips: partial });

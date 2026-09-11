@@ -988,8 +988,10 @@ function buildOverlay(
     // A 1080p deliverable from a model that rendered 720p is upscaled here.
     targetShortSide: shortSideFor(wantedResolution(brief)),
     musicBed,
-    // Light under a presenter or voiceover; fuller when the film has no speech.
-    musicLoudness: buildContext(brief).mode.speaks ? -27 : -20,
+    // Up in the pauses and over the end card, down about 12 dB under every spoken
+    // line. A film with no speech has nothing to dip under.
+    musicLoudness: -20,
+    musicDuckDb: buildContext(brief).mode.speaks ? -12 : 0,
   };
 }
 
@@ -1011,7 +1013,8 @@ async function makeMusicBed(
     const bed = await generateMusicBed(
       {
         description: ctx.music || CATEGORY_BY_ID[brief.categories[0]!]?.music || '',
-        seconds: filmSeconds,
+        // Longer than the film and trimmed to it, so the track never has to repeat.
+        seconds: filmSeconds + 10,
         speaks: ctx.mode.speaks,
       },
       apiKey,

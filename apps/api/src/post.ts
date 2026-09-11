@@ -6,7 +6,7 @@
  * footers and invents manufacturer badges. So the prompt now asks for a clean
  * frame, and everything that must be exactly right is composited here instead:
  *
- *   segments → crossfade chain → end card → footer bar + logo overlays
+ *   segments → joined cut to cut → music under the voice → end card → footer bar + logo overlays
  *
  * Text/graphics are laid out as SVG and rasterised with sharp, which gives real
  * typography (and Devanagari, given the fonts in the image) rather than ffmpeg
@@ -71,8 +71,10 @@ export interface BrandOverlay {
    * every join, so the bed is generated once and mixed in here instead.
    */
   musicBed?: Buffer;
-  /** Loudness the bed is levelled to, in LUFS: low under speech, fuller when nobody speaks. */
+  /** Loudness the bed plays at wherever nobody is speaking, in LUFS. */
   musicLoudness?: number;
+  /** How far the bed dips under every spoken line, in dB (negative). 0 leaves it level. */
+  musicDuckDb?: number;
   accent?: string;
   ink?: string;
 }
@@ -136,6 +138,112 @@ async function probe(file: string): Promise<ClipMeta> {
     height: Number(j.streams?.[0]?.height ?? 1280),
     fps: Number.isFinite(fps) && fps > 0 ? fps : 24,
   };
+}
+
+/** What ffmpeg reports on stderr — where its analysis filters write. */
+function runForLog(cmd: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { maxBuffer: 1 << 26 }, (err, _stdout, stderr) => {
+      if (err) reject(new Error(`${cmd} failed: ${stderr || err.message}`));
+      else resolve(stderr);
+    });
+  });
+}
+
+/** A media file's length in seconds, from its container. */
+async function mediaSeconds(file: string): Promise<number> {
+  const out = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]);
+  return Number(out.trim()) || 0;
+}
+
+/** The music starts dipping this long before a line begins… */
+const DUCK_ATTACK = 0.3;
+/** …and takes this long to come back up after the line ends. */
+const DUCK_RELEASE = 0.8;
+/** A pause shorter than this keeps the music down: it would only swell and dip again. */
+const MIN_MUSIC_PAUSE = 1.2;
+
+/**
+ * When someone is speaking, as spans on the film's timeline.
+ *
+ * Read from each generated part's own audio, 50ms at a time, in the voice band only
+ * so room hum and rumble don't count. The line between speech and room sound is
+ * drawn 12 dB under the part's loud end (its 90th-percentile level): parts come back
+ * from the model at different loudness, and an average over a mostly spoken part
+ * sits so low that room tone reads as speech and the film never seems to pause. A
+ * pause must last 0.35s to count, and pauses too short for the music to rise and
+ * settle are folded into the speech around them, so it never pumps between words.
+ */
+export async function speechSpans(files: string[], durations: number[]): Promise<Array<[number, number]>> {
+  const WINDOW = 0.05;
+  const spans: Array<[number, number]> = [];
+  let offset = 0;
+  for (let i = 0; i < files.length; i++) {
+    const d = durations[i] ?? 0;
+    try {
+      const log = await runForLog('ffmpeg', [
+        '-v', 'info', '-i', files[i]!, '-vn',
+        '-af',
+        'highpass=f=120,lowpass=f=5000,aresample=48000,asetnsamples=n=2400:p=0,' +
+          'astats=metadata=1:reset=1,ametadata=mode=print:key=lavfi.astats.Overall.RMS_level',
+        '-f', 'null', '-',
+      ]);
+      const levels = [...log.matchAll(/lavfi\.astats\.Overall\.RMS_level=(\S+)/g)].map((m) => {
+        const v = Number(m[1]);
+        return Number.isFinite(v) ? v : -120;
+      });
+      const heard = levels.filter((v) => v > -100).sort((a, b) => a - b);
+      if (heard.length) {
+        const threshold = Math.max(-50, heard[Math.floor(heard.length * 0.9)]! - 12);
+        let from: number | null = null;
+        let quiet = 0;
+        const close = (endWindow: number): void => {
+          if (from === null) return;
+          const a = from * WINDOW;
+          const b = Math.min(d, endWindow * WINDOW);
+          if (b - a > 0.15) spans.push([offset + a, offset + b]);
+          from = null;
+        };
+        levels.forEach((v, w) => {
+          if (v >= threshold) {
+            if (from === null) from = w;
+            quiet = 0;
+          } else if (from !== null && ++quiet * WINDOW >= 0.35) {
+            close(w - quiet + 1);
+            quiet = 0;
+          }
+        });
+        close(levels.length);
+      }
+    } catch {
+      // A part whose sound can't be read keeps the music down — the safe side.
+      spans.push([offset, offset + d]);
+    }
+    offset += d;
+  }
+  const merged: Array<[number, number]> = [];
+  for (const [from, to] of spans) {
+    const last = merged[merged.length - 1];
+    if (last && from - last[1] < MIN_MUSIC_PAUSE) last[1] = Math.max(last[1], to);
+    else merged.push([from, to]);
+  }
+  return merged;
+}
+
+/**
+ * The music's gain over time, as an ffmpeg expression: 1 in the pauses, down by
+ * `duckDb` under speech. It dips just before a line starts — which a compressor
+ * listening to the voice can't do — and comes back up gently after it.
+ */
+export function duckVolume(spans: Array<[number, number]>, duckDb: number): string {
+  const depth = 1 - Math.pow(10, duckDb / 20);
+  // Spans are at least MIN_MUSIC_PAUSE apart, longer than a dip and a rise together,
+  // so the ramps never overlap and can simply be added.
+  const ramps = spans.map(
+    ([from, to]) =>
+      `clip(min((t-(${(from - DUCK_ATTACK).toFixed(3)}))/${DUCK_ATTACK},(${(to + DUCK_RELEASE).toFixed(3)}-t)/${DUCK_RELEASE}),0,1)`,
+  );
+  return `1-${depth.toFixed(4)}*clip(${ramps.join('+')},0,1)`;
 }
 
 
@@ -713,15 +821,41 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     if (overlay.musicBed) {
       const bed = join(dir, 'music-bed');
       await writeFile(bed, overlay.musicBed);
-      // Looped in case the track came back shorter than the film, trimmed to the
-      // film, eased in, and faded out over the end card.
-      clipInputs.push('-stream_loop', '-1', '-i', bed);
+      clipInputs.push('-i', bed);
       const m = clipIdx++;
-      // Levelled to a fixed loudness first: a generated track can come back mastered
-      // anywhere, and the bed has to sit at the same depth under every voice.
-      const lufs = Math.max(-40, Math.min(-14, overlay.musicLoudness ?? -27));
+      // Never looped: music restarting mid-film is the most audible glitch there is.
+      // The server asks for a track longer than the film and it is trimmed to fit; if
+      // one still comes back short, copies of it are joined with a slow crossfade.
+      const bedSeconds = await mediaSeconds(bed);
+      const XF = 2;
+      const copies =
+        bedSeconds > XF * 2 && bedSeconds < filmSeconds
+          ? Math.min(6, Math.ceil((filmSeconds - XF) / (bedSeconds - XF)))
+          : 1;
+      const norm = 'aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo';
+      if (copies > 1) {
+        parts.push(`[${m}:a]${norm},asplit=${copies}${Array.from({ length: copies }, (_, i) => `[bs${i}]`).join('')}`);
+        let prev = 'bs0';
+        for (let i = 1; i < copies; i++) {
+          const out = i === copies - 1 ? 'bedraw' : `bx${i}`;
+          parts.push(`[${prev}][bs${i}]acrossfade=d=${XF}:c1=qsin:c2=qsin[${out}]`);
+          prev = out;
+        }
+      } else {
+        parts.push(`[${m}:a]${norm}[bedraw]`);
+      }
+      // Levelled first — a generated track can come back mastered anywhere — to the
+      // level it plays at when nobody is speaking; then it dips under every line.
+      const open = Math.max(-40, Math.min(-14, overlay.musicLoudness ?? -20));
+      const duck = Math.min(0, overlay.musicDuckDb ?? 0);
+      const spans = duck < 0 ? await speechSpans(files, metas.slice(0, files.length).map((x) => x.duration)) : [];
       parts.push(
-        `[${m}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=${filmSeconds.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${lufs}:TP=-3:LRA=11,aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, filmSeconds - 1.5).toFixed(3)}:d=1.5[bed]`,
+        `[bedraw]atrim=end=${filmSeconds.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${open}:TP=-2:LRA=11,${norm},` +
+          `afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, filmSeconds - 1.5).toFixed(3)}:d=1.5` +
+          // Small frames first: volume is worked out once per frame, and loudnorm hands back
+          // its last seconds as one large frame, which held the music down over the end card.
+          (spans.length ? `,asetnsamples=n=1024:p=0,volume='${duckVolume(spans, duck)}':eval=frame` : '') +
+          '[bed]',
       );
       parts.push(`[voice][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed]`);
       audioOut = 'mixed';

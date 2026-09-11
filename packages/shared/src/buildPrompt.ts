@@ -297,7 +297,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     // Music a model makes lives inside each separately generated part and restarts
     // at every join, so the model is asked for none.
     L.push(
-      'No background music. One continuous music track is added under the finished video afterwards — keep only the voice and natural room sound.',
+      'No background music of any kind — no score, no jingle, no beat. One continuous music track is added under the finished video afterwards; keep only the voice and natural room sound.',
     );
 
     // A written line is the single biggest lever on spoken quality, so the lock
@@ -475,7 +475,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     } else {
       C.push('No spoken audio; carry the message through footage and on-screen text.');
     }
-    C.push('No background music — one continuous track is added under the finished video afterwards. Voice and natural room sound only.');
+    C.push('No background music of any kind — no score, no jingle, no beat. One continuous track is added under the finished video afterwards; voice and natural room sound only.');
     C.push(CLEAN_FRAME);
     const contDirection = (brief.extraDirection ?? []).filter((x) => x.trim());
     if (contDirection.length) {

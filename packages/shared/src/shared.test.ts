@@ -12,6 +12,9 @@ import {
   buildPrompt,
   overlayCards,
   sceneCard,
+  composeBrief,
+  emptyProject,
+  colourName,
   renderResolution,
   priceFor,
   OMNI_FLASH_DEFAULTS,
@@ -24,12 +27,15 @@ import {
   buildContext,
   isPromptOnly,
   CATEGORY_BY_ID,
+  categoryValues,
+  fieldLabel,
   filenameFromLabel,
   dedupeFilenames,
   applyFeedback,
   estimateSegmentsCost,
   LANGUAGE_SEEDS,
   type Brief,
+  type CarModelProfile,
 } from '@ava/shared';
 
 function base(overrides: Partial<Brief> = {}): Brief {
@@ -102,7 +108,7 @@ test('on-screen text is composited, never handed to the video model', () => {
     narration: 'presenter',
     durationSec: 24,
     maxChunkSec: 30,
-    fieldValues: { offer: { cashDiscount: 'Rs 40,000 Cash Discount', warrantyYears: '5 years', warrantyKm: 'Unlimited' } },
+    fieldValues: { offer: { offer1: 'Rs 40,000 cash discount', offer2: 'Free 5-year service pack' } },
   });
   const res = buildPrompt(b)!;
   const text = res.parts.map((p) => `${p.text}\n${p.continuationText}`).join('\n');
@@ -110,7 +116,8 @@ test('on-screen text is composited, never handed to the video model', () => {
 
   // Every card is still written — it just goes to post, not to the model.
   assert.ok(cards.length >= 2, 'offer brief should produce cards');
-  assert.ok(cards.some((c) => c.text === 'Rs 40,000' && c.sub === 'Cash Discount'));
+  assert.ok(cards.some((c) => c.text === 'Rs 40,000 cash discount'));
+  assert.ok(cards.some((c) => c.text === 'Free 5-year service pack'));
   assert.doesNotMatch(text, /ON-SCREEN TEXT — EXACT STRINGS/);
   for (const c of cards) {
     assert.ok(!text.includes(c.text), `"${c.text}" leaked into the prompt`);
@@ -375,4 +382,95 @@ test('1080p renders natively where a model can and upscales where it cannot', ()
   assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '1080p'), 0.12);
   assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '720p'), 0.1);
   assert.equal(priceFor(SEEDANCE_25_DEFAULTS, '1080p'), SEEDANCE_25_DEFAULTS.usdPerSecond);
+});
+
+test('the chosen paint reaches the model even when a variant is also picked', () => {
+  const img = (label: string, filename: string) => ({
+    refId: filename, storagePath: `refs/${filename}`, url: `/api/refs/${filename}`, label, filename,
+  });
+  const car = {
+    id: 'mahindra__xuv-3xo', brand: 'Mahindra', model: 'Xuv 3xo', slug: 'mahindra/xuv-3xo',
+    images: {
+      front: [img('Mahindra Xuv 3xo front 1', 'front-1.jpg'), img('Mahindra Xuv 3xo front 2', 'front-2.jpg')],
+      side: [img('Mahindra Xuv 3xo side 1', 'side-1.jpg'), img('Mahindra Xuv 3xo side 2', 'side-2.jpg')],
+      rear: [img('Mahindra Xuv 3xo rear 1', 'rear-1.jpg')],
+      interior: [img('Mahindra Xuv 3xo interior 1', 'interior-1.jpg'), img('Mahindra Xuv 3xo interior 2', 'interior-2.jpg')],
+    },
+    colours: [
+      { name: '227_Everest White', image: img('Mahindra Xuv 3xo — 227_Everest White', 'colour-227.jpg') },
+      { name: '226_Stealth Black', image: img('Mahindra Xuv 3xo — 226_Stealth Black', 'colour-226.jpg') },
+    ],
+    // Synced variants carry no colour list of their own — the case that dropped the paint.
+    variants: [{ name: 'AX5 Turbo', images: {}, colours: [] }],
+  } as unknown as CarModelProfile;
+  const project = {
+    ...emptyProject(),
+    useCases: ['walkaround'],
+    carId: car.id,
+    carIds: [car.id],
+    carVariant: 'AX5 Turbo',
+    carColour: '226_Stealth Black',
+  };
+
+  const brief = composeBrief(project as never, { car });
+  assert.equal(brief.carColour, 'Stealth Black');
+  const carRefs = brief.attachments.filter((a) => a.kind === 'car-model');
+  // The colour image leads, then ONE photo per angle — not every yellow photo in the library.
+  assert.deepEqual(carRefs.map((a) => a.filename), ['colour-226.jpg', 'front-1.jpg', 'side-1.jpg', 'rear-1.jpg', 'interior-1.jpg']);
+  assert.match(carRefs[0]!.label, /^Colour reference — Stealth Black: paint the car exactly this colour$/);
+  assert.ok(carRefs.slice(1).every((a) => /shape reference; its paint may differ$/.test(a.label)));
+
+  const text = buildPrompt(brief)!.parts[0]!.text;
+  assert.match(text, /Paint colour: Stealth Black\. The car is Stealth Black in every shot/);
+  assert.doesNotMatch(text, /226_/);
+
+  // No colour picked: every photo goes, and nothing tells the model a paint.
+  const plain = composeBrief({ ...project, carColour: undefined } as never, { car });
+  assert.equal(plain.carColour, undefined);
+  assert.equal(plain.attachments.filter((a) => a.kind === 'car-model').length, 7);
+  assert.doesNotMatch(buildPrompt(plain)!.parts[0]!.text, /Paint colour:/);
+
+  assert.equal(colourName('226_Stealth Black'), 'Stealth Black');
+  assert.equal(colourName('Atlas White with Titanium Black'), 'Atlas White with Titanium Black');
+});
+
+test('offers and features are repeatable rows — as many as the dealer has', () => {
+  const offerList = ['Benefits up to ₹1.5 lakh', 'Free 5-year service pack', 'Exchange bonus ₹25,000'];
+  const offers = base({
+    categories: ['offer'], narration: 'presenter', durationSec: 30, maxChunkSec: 30,
+    fieldValues: { offer: { offer1: offerList[0]!, offer2: offerList[1]!, offer3: offerList[2]! } },
+  });
+  const res = buildPrompt(offers)!;
+  assert.deepEqual(res.scenePlan.scenes.map((s) => s.beat.title).filter((t) => t.startsWith('Offer ')), ['Offer 1', 'Offer 2', 'Offer 3']);
+  const captions = overlayCards(res.scenePlan).map((c) => c.text);
+  for (const o of offerList) assert.ok(captions.includes(o), `caption for "${o}"`);
+  const prompt = res.parts.map((p) => `${p.text}\n${p.continuationText}`).join('\n');
+  for (const o of offerList) assert.ok(!prompt.includes(o), `"${o}" stays out of the video prompt`);
+  assert.ok(runChecks(offers).checks.every((c) => c.code !== 'missing-mandatory'));
+  assert.ok(runChecks(base({ categories: ['offer'], fieldValues: { offer: {} } })).checks.some((c) => c.code === 'missing-mandatory'));
+
+  const features = base({
+    categories: ['feature'], narration: 'presenter', durationSec: 30, maxChunkSec: 30,
+    fieldValues: { feature: { feature1: 'Sunroof', feature2: '26.03 cm touchscreen', feature3: '5-star safety rating', benefit3: 'your family is protected' } },
+  });
+  const fres = buildPrompt(features)!;
+  assert.deepEqual(fres.scenePlan.scenes.map((s) => s.beat.title).filter((t) => t.startsWith('Feature ')), ['Feature 1', 'Feature 2', 'Feature 3']);
+  // One feature is enough — the benefit line is optional now.
+  assert.ok(runChecks(base({ categories: ['feature'], fieldValues: { feature: { feature1: 'Sunroof' } } })).checks.every((c) => c.code !== 'missing-mandatory'));
+});
+
+test('offers saved in the old fixed boxes open as free-text offers', () => {
+  const legacy = { cashDiscount: 'Discount up to ₹1.15 Lacs*', warrantyYears: '7', warrantyKm: 'Unlimited', downPayment: '₹0' };
+  const v = categoryValues('offer', legacy);
+  assert.deepEqual([v.offer1, v.offer2, v.offer3], ['Discount up to ₹1.15 Lacs*', '7-year warranty, Unlimited km', '₹0 down payment']);
+  // Once a free-text offer exists the old boxes are ignored, never merged in.
+  assert.equal(categoryValues('offer', { ...legacy, offer1: 'New offer' }).offer2, undefined);
+
+  const b = base({ categories: ['offer'], durationSec: 30, maxChunkSec: 30, fieldValues: { offer: legacy } });
+  assert.ok(runChecks(b).checks.every((c) => c.code !== 'missing-mandatory'), 'an old project is not suddenly blocked');
+  assert.ok(overlayCards(buildPrompt(b)!.scenePlan).some((c) => c.text === 'Discount up to ₹1.15 Lacs*'));
+
+  assert.equal(fieldLabel(CATEGORY_BY_ID.offer, 'offer3'), 'Offer 3');
+  assert.equal(fieldLabel(CATEGORY_BY_ID.feature, 'benefit2'), 'Why feature 2 matters');
+  assert.equal(fieldLabel(CATEGORY_BY_ID.offer, 'offerRows'), 'offerRows');
 });

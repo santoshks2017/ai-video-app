@@ -4,7 +4,7 @@
  */
 
 import type { Beat } from './types.js';
-import { CATEGORY_BY_ID } from './categories.js';
+import { CATEGORY_BY_ID, categoryValues } from './categories.js';
 import { beatContext, type RenderContext } from './context.js';
 
 export function buildBeats(ctx: RenderContext): Beat[] {
@@ -14,7 +14,7 @@ export function buildBeats(ctx: RenderContext): Beat[] {
   for (const id of ctx.brief.categories) {
     const cat = CATEGORY_BY_ID[id];
     if (!cat) continue;
-    const values = ctx.brief.fieldValues[id] ?? {};
+    const values = categoryValues(id, ctx.brief.fieldValues[id]);
     for (const b of cat.beats(values, bctx) ?? []) {
       beats.push({ ...b, cat: cat.label });
     }

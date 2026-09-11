@@ -93,28 +93,47 @@ function toDealerPhoto(img: StoredImage, kind: DealerPhoto['kind']): DealerPhoto
   };
 }
 
-/** Car reference images for the chosen variant + colour, falling back to the model set. */
-export function carReferenceImages(
+/**
+ * A colour as a person says it. CarDekho's file names carry a paint code —
+ * "226_Stealth Black" — which is noise in a dropdown and in a prompt.
+ */
+export const colourName = (raw: string | undefined): string =>
+  String(raw ?? '').replace(/^\s*\d+\s*[_\-\s]+/, '').trim();
+
+/**
+ * The hero car's reference set: the chosen colour's image, and the angle shots.
+ *
+ * The colour is looked up on the variant first, then on the model. Variants are
+ * synced with an empty colour list while the picker lists the model's colours, so
+ * looking only at the variant silently dropped the chosen paint whenever a variant
+ * was also picked — and every reference sent was the launch colour. When a colour
+ * with an image is chosen, only the first shot of each angle is kept: those photos
+ * show whatever paint the source shot them in, and seven of them outvote one
+ * colour image.
+ */
+export function carReferenceSet(
   car: CarModelProfile,
   variantName?: string,
-  colourName?: string,
-): StoredImage[] {
+  colour?: string,
+): { swatch?: StoredImage; shots: StoredImage[] } {
   const variant = variantName ? car.variants.find((v) => v.name === variantName) : undefined;
-  const out: StoredImage[] = [];
-
+  const picked = colour
+    ? [...(variant?.colours ?? []), ...(car.colours ?? [])].find((c) => c.name === colour)
+    : undefined;
+  const shots: StoredImage[] = [];
   for (const angle of ANGLE_ORDER) {
     const fromVariant = variant?.images?.[angle] ?? [];
     const fromModel = car.images?.[angle] ?? [];
     const pick = fromVariant.length ? fromVariant : fromModel;
-    out.push(...pick);
+    shots.push(...(picked?.image ? pick.slice(0, 1) : pick));
   }
+  return { swatch: picked?.image, shots };
+}
 
-  // Put the chosen colour's swatch first — it's the strongest signal for paint.
-  const colour =
-    (colourName && (variant?.colours ?? car.colours).find((c) => c.name === colourName)) || undefined;
-  if (colour?.image) out.unshift(colour.image);
-
-  return out;
+/** Car reference images for the chosen variant + colour, the colour's image first. */
+export function carReferenceImages(car: CarModelProfile, variantName?: string, colour?: string): StoredImage[] {
+  const { swatch, shots } = carReferenceSet(car, variantName, colour);
+  return swatch ? [swatch, ...shots] : shots;
 }
 
 /**
@@ -211,6 +230,7 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
 
   if (car) {
     b.modelSpecific = true;
+    b.carColour = colourName(project.carColour) || undefined;
     b.carModel = [car.brand, car.model, vehicles.length === 1 ? project.carVariant : ''].filter(Boolean).join(' ');
     if (vehicles.length > 1) {
       b.alsoFeatured = vehicles.slice(1).map((v) => `${v.brand} ${v.model}`);
@@ -234,8 +254,19 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   if (vehicles.length) {
     // The hero gets its variant and colour; the others contribute one shot each
     // so the model knows what they look like without swamping the reference set.
-    for (const img of carReferenceImages(car!, project.carVariant, project.carColour)) {
-      attachments.push(toDealerPhoto(img, 'car-model'));
+    const hero = carReferenceSet(car!, project.carVariant, project.carColour);
+    const paint = colourName(project.carColour);
+    if (hero.swatch) {
+      attachments.push({
+        ...toDealerPhoto(hero.swatch, 'car-model'),
+        label: `Colour reference — ${paint}: paint the car exactly this colour`,
+      });
+    }
+    for (const img of hero.shots) {
+      const photo = toDealerPhoto(img, 'car-model');
+      // Said in the label because the label is what the prompt cites beside each
+      // file: the model must take shape, not paint, from these.
+      attachments.push(paint && hero.swatch ? { ...photo, label: `${photo.label} — shape reference; its paint may differ` } : photo);
     }
     for (const v of vehicles.slice(1)) {
       const first = carReferenceImages(v)[0];

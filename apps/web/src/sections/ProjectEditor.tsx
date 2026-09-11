@@ -17,9 +17,12 @@ import {
   type ProjectVideoSpec,
   renderResolution,
   priceFor,
+  colourName,
+  categoryValues,
 } from '@ava/shared';
 import { useApp, api, projectTabId } from '../state/appStore.js';
 import { Field, Panel, ImageUpload, Thumb, Confirm, Banner, Collapse } from '../components/ui.js';
+import { ListField } from '../components/ListField.js';
 import { isApiError } from '../lib/client.js';
 // `api` above is the library CRUD client; this one owns generation + scripting.
 import { api as genApi } from '../lib/api.js';
@@ -214,6 +217,20 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
       fieldValues: { ...project.fieldValues, [cat]: { ...(project.fieldValues[cat] ?? {}), [field]: value } },
     });
 
+  /**
+   * Several keys at once, written over the category's values as the editor shows
+   * them. For offers saved in the old fixed boxes that matters: the first edit
+   * saves every translated offer row, not just the one being typed into — writing
+   * one row alone would switch the translation off and lose the others.
+   */
+  const setFields = (cat: CategoryId, patch: Record<string, string>) =>
+    set({
+      fieldValues: {
+        ...project.fieldValues,
+        [cat]: { ...categoryValues(cat, project.fieldValues[cat] ?? {}), ...patch },
+      },
+    });
+
   return (
     <div className="editor-page">
       <div className="crumbs">
@@ -374,7 +391,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     <option value="">Any colour</option>
                     {colours.map((c) => (
                       <option key={c.name} value={c.name}>
-                        {c.name}
+                        {colourName(c.name)}
                       </option>
                     ))}
                   </select>
@@ -634,7 +651,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             <Panel title="5. Use-case details" step="Shown for selected use cases">
               {project.useCases.map((id) => {
                 const cat = CATEGORIES.find((c) => c.id === id)!;
-                const values = project.fieldValues[id] ?? {};
+                const values = categoryValues(id, project.fieldValues[id] ?? {});
                 const mandatory = new Set(cat.mandatory.map((m) => m.id));
                 return (
                   <div key={id} style={{ marginBottom: 14 }}>
@@ -644,7 +661,20 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     </div>
                     {cat.fields.map((f) => {
                       if (f.showIf && !values[f.showIf]) return null;
-                      const label = `${f.label}${mandatory.has(f.id) ? ' *' : ''}`;
+                      const label = `${f.label}${
+                        mandatory.has(f.id) || cat.mandatory.some((m) => m.list === f.id) ? ' *' : ''
+                      }`;
+                      if (f.type === 'list' && f.list) {
+                        return (
+                          <ListField
+                            key={f.id}
+                            field={f}
+                            label={label}
+                            values={values}
+                            onPatch={(patch) => setFields(id, patch)}
+                          />
+                        );
+                      }
                       if (f.type === 'checkbox') {
                         return (
                           <div className="check-row" key={f.id}>

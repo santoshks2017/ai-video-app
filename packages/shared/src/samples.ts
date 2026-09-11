@@ -42,11 +42,9 @@ export const SAMPLE_FIELDS: Record<CategoryId, Record<string, string>> = {
     festiveDressing: 'marigold garlands at the entrance, diyas along the display, rangoli on the showroom floor',
   },
   offer: {
-    cashDiscount: '₹75,000',
-    downPayment: '₹0',
-    interestRate: '7.99%',
-    warrantyYears: '7',
-    warrantyKm: 'Unlimited',
+    offer1: '₹75,000 cash discount',
+    offer2: 'Zero down payment at 7.99% interest',
+    offer3: '7-year, unlimited-km warranty',
     expirySignal: 'this month only, limited units',
   },
   testimonial: {

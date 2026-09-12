@@ -16,17 +16,21 @@ import {
   priceFor,
   shortSideFor,
   sceneCard,
+  sceneVisual,
   VEO_31_DEFAULTS,
   VEO_31_FAST_DEFAULTS,
   type SceneOverride,
   type Resolution,
   type Brief,
   type PromptPart,
+  type ScenePlan,
+  type DealerPhoto,
 } from '@ava/shared';
 import { loadConfig } from './config.js';
 import { generateClip, downloadFile, fetchInteractionVideo, OmniFlashError, type OmniRef } from './omniFlash.js';
 import { generateSeedanceClip, testSeedanceKey, SeedanceError, type SeedanceRef } from './seedance.js';
 import { generateVeoClip, VeoError } from './veo.js';
+import { checkVehicleFrame } from './vehicleCheck.js';
 import {
   saveJob,
   updateJob,
@@ -913,7 +917,7 @@ async function resolveModel(requestedId?: string): Promise<ResolvedModel | { err
       provider: 'google-gemini',
       modelId: config.omniFlashModel,
       apiKey: config.googleApiKey,
-      maxReferenceImages: 2,
+      maxReferenceImages: 3,
       usdPerSecond: config.usdPerSecond,
       supportsImageToVideo: true,
       minClipSec: 3,
@@ -940,7 +944,7 @@ async function resolveModel(requestedId?: string): Promise<ResolvedModel | { err
     provider,
     modelId: chosen.modelId,
     apiKey,
-    maxReferenceImages: Number(chosen.maxReferenceImages ?? 2),
+    maxReferenceImages: Number(chosen.maxReferenceImages ?? 3),
     usdPerSecond: Number(chosen.usdPerSecond ?? config.usdPerSecond),
     supportsImageToVideo: chosen.supportsImageToVideo !== false,
     minClipSec: Number(chosen.minClipSec ?? 3),
@@ -970,8 +974,8 @@ async function renderSegment(
     seedFrame?: Buffer;
     /** A frame of the vehicle from the opening part — what it must keep looking like. */
     anchorFrame?: Buffer;
-    /** Photos of the actual vehicle, attached to the project. These outrank everything. */
-    exactCarRefs?: OmniRef[];
+    /** Photos of the vehicle for this part, best first. These outrank everything. */
+    carRefs?: OmniRef[];
     references: OmniRef[];
   },
 ): Promise<{ bytes: Buffer; interactionId: string; renderResolution: Resolution }> {
@@ -1040,25 +1044,55 @@ async function renderSegment(
   // vehicle, already in the right place, and nothing a model would mistake for a shot.
   // Photos of the actual vehicle beat a frame of it: the frame can only be as right as
   // the part it came from, and a film that started from the wrong photos is wrong in it.
-  const exact = req.exactCarRefs ?? [];
-  if (seeded && exact.length) refs.push(...exact.slice(0, Math.max(0, model.maxReferenceImages - refs.length)));
-  else if (seeded && req.anchorFrame) {
-    refs.push({ data: req.anchorFrame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
+  const car = req.carRefs ?? [];
+  const room = () => Math.max(0, model.maxReferenceImages - refs.length);
+  if (seeded) {
+    // Photos of the vehicle first: the seed frame carries the setting and the
+    // presenter, but only a photo can hold the model to the right vehicle.
+    refs.push(...car.slice(0, room()));
+    if (!car.length && req.anchorFrame && room() > 0) {
+      refs.push({ data: req.anchorFrame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
+    }
+  } else {
+    // The opening part sets the whole film up, so it keeps one slot for the
+    // showroom and the rest for the vehicle — the car is what goes wrong, but a
+    // film with no idea what the dealership looks like is its own problem.
+    refs.push(...car.slice(0, Math.max(1, model.maxReferenceImages - 1)));
+    const rest = req.references.filter((r) => !refs.includes(r));
+    refs.push(...rest.slice(0, room()));
   }
-  if (!seeded) refs.push(...req.references.slice(0, Math.max(0, model.maxReferenceImages - refs.length)));
 
   const omniRes = render === '480p' ? '720p' : render;
-  const clip = await generateClip(
-    {
-      prompt: req.prompt,
-      aspect: req.aspect,
-      resolution: omniRes,
-      references: refs.length ? refs : undefined,
-      task: seeded ? 'image_to_video' : refs.length ? 'reference_to_video' : 'text_to_video',
-      model: model.modelId,
-    },
-    model.apiKey,
-  );
+  /**
+   * How many references the provider actually accepts is a property of the model,
+   * not of this code, and the profile's number is only our best guess. Asking for
+   * one too many comes back as an argument error — so it drops one and asks again
+   * rather than failing the run or quietly sending too few.
+   */
+  const send = async (list: OmniRef[]): Promise<Awaited<ReturnType<typeof generateClip>>> => {
+    try {
+      return await generateClip(
+        {
+          prompt: req.prompt,
+          aspect: req.aspect,
+          resolution: omniRes,
+          references: list.length ? list : undefined,
+          task: seeded ? 'image_to_video' : list.length ? 'reference_to_video' : 'text_to_video',
+          model: model.modelId,
+        },
+        model.apiKey,
+      );
+    } catch (err) {
+      const message = (err as Error).message ?? '';
+      const tooMany = /reference|image|invalid.?argument|too many|at most/i.test(message);
+      if (tooMany && list.length > 1) {
+        app.log.warn({ sent: list.length, message }, 'provider refused the reference set; retrying with one fewer');
+        return send(list.slice(0, list.length - 1));
+      }
+      throw err;
+    }
+  };
+  const clip = await send(refs);
   let bytes: Buffer | null = clip.base64 ? Buffer.from(clip.base64, 'base64') : null;
   if (!bytes && clip.fileId) {
     try {
@@ -1086,15 +1120,28 @@ async function renderSegment(
  * references get grounded into the model, logos are overlay assets that post
  * composites (the model garbles any logo it tries to draw).
  */
+/** A reference image with what it is a picture of, so a part can be given the right one. */
+interface CarRef {
+  ref: OmniRef;
+  filename: string;
+  label: string;
+  angle?: DealerPhoto['angle'];
+}
+
 async function loadBriefAssets(brief: Brief): Promise<{
   references: OmniRef[];
-  /** Photos attached to the project: the vehicle itself, not the library's idea of it. */
-  exactCar: OmniRef[];
+  /**
+   * Every photo of the vehicle in scope — attached to the project or from the
+   * library — each carrying the side it shows. Continuation parts are sent one of
+   * these rather than only a frame of the film, because a frame can only be as
+   * right as the part it came from.
+   */
+  carRefs: CarRef[];
   dealerLogo?: Buffer;
   brandLogo?: Buffer;
 }> {
   const references: OmniRef[] = [];
-  const exactCar: OmniRef[] = [];
+  const carRefs: CarRef[] = [];
   let dealerLogo: Buffer | undefined;
   let brandLogo: Buffer | undefined;
   for (const a of brief.attachments ?? []) {
@@ -1115,9 +1162,45 @@ async function loadBriefAssets(brief: Brief): Promise<{
       kind: 'image',
     };
     references.push(ref);
-    if (brief.attachedCarPhotos && a.kind === 'car-model') exactCar.push(ref);
+    if (a.kind === 'car-model') carRefs.push({ ref, filename: a.filename, label: a.label, angle: a.angle });
   }
-  return { references, exactCar, dealerLogo, brandLogo };
+  return { references, carRefs, dealerLogo, brandLogo };
+}
+
+/** Angles in the order they are worth showing when a part asks for nothing specific. */
+const ANGLE_PRIORITY: DealerPhoto['angle'][] = ['front', 'side', 'rear', 'interior'];
+
+/**
+ * The vehicle photos this part of the film should be built on, best first.
+ *
+ * A part that frames the cabin is sent the cabin photo; a part that frames the
+ * back is sent the back. What a part is never sent is nothing at all — which is
+ * what used to happen to every part after the first, and is why a film could open
+ * on the right car and finish on a different one.
+ */
+function carRefsForPart(
+  part: { start: number; end: number },
+  scenePlan: ScenePlan | null,
+  brief: Brief,
+  sceneOverrides: Record<string, SceneOverride> | undefined,
+  carRefs: CarRef[],
+): CarRef[] {
+  if (!carRefs.length) return [];
+  const wanted: string[] = [];
+  for (const sc of scenePlan?.scenes ?? []) {
+    if (sc.end <= part.start || sc.start >= part.end) continue;
+    const edit = sceneOverrides?.[sc.beat.key ?? ''] ?? {};
+    const visual = sceneVisual(edit.shot ?? sc.beat.shot, edit.ref, brief.attachments ?? [], brief.vehicleKind ?? 'car');
+    if (visual.kind === 'picked' || visual.kind === 'matched') wanted.push(visual.photo.filename);
+  }
+  const picked: CarRef[] = [];
+  const take = (r: CarRef | undefined) => {
+    if (r && !picked.includes(r)) picked.push(r);
+  };
+  for (const filename of wanted) take(carRefs.find((r) => r.filename === filename));
+  for (const angle of ANGLE_PRIORITY) take(carRefs.find((r) => r.angle === angle));
+  for (const r of carRefs) take(r);
+  return picked;
 }
 
 /**
@@ -1328,12 +1411,34 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     costUsd: cost.usd,
     usdPerSecond,
     clips,
+    // The receipt for this run: what it was made from, so a later one can be
+    // compared with it and a good one re-opened.
+    brief: { ...brief, attachments: (brief.attachments ?? []).map(({ src, ...rest }) => rest) },
+    projectSnapshot: req.body?.projectId
+      ? await getOne<Record<string, unknown>>('projects', req.body.projectId).catch(() => null)
+      : null,
+    sceneEdits: req.body?.sceneOverrides,
+    prompts: parts.map((p) => ({ part: p.partNum, text: p.partNum === 1 ? p.text : p.continuationText || p.text })),
+    vehicle: {
+      model: brief.carModel,
+      colour: brief.carColour,
+      photos: (brief.attachments ?? []).filter((a) => a.kind === 'car-model').length,
+      attached: Boolean(brief.attachedCarPhotos),
+      angles: [...new Set((brief.attachments ?? []).filter((a) => a.kind === 'car-model').map((a) => a.angle).filter(Boolean))] as string[],
+    },
   };
   await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
 
   // The music is made while the segments render, and waited for only at the stitch.
   const musicBed = makeMusicBed(brief, jobId, cost.totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0));
-  const { references, exactCar, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+  const { references, carRefs, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+  const scenePlan = buildPrompt(brief, { sceneOverrides: req.body?.sceneOverrides })?.scenePlan ?? null;
+  /** What each part was actually shown, kept on the record so a wrong car is traceable. */
+  const sentRefs: { part: number; files: string[] }[] = [];
+  /** What the checker made of the vehicle in each part. */
+  const vehicleChecks: { part: number; same: boolean; why: string; remade?: boolean }[] = [];
+  /** Retakes cost money, so a run buys at most this many of them. */
+  let retakesLeft = 2;
 
   // No `extend` — each segment is an independent create, seeded with the
   // PREVIOUS segment's last frame so the presenter / car / setting stay
@@ -1356,19 +1461,55 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       }
       const part = parts[i]!;
       const isFirst = i === 0;
-      const seedFrame = !isFirst && prevBytes ? ((await lastFrame(prevBytes)) ?? undefined) : undefined;
+      const seedFrame: Buffer | undefined =
+        !isFirst && prevBytes ? ((await lastFrame(prevBytes)) ?? undefined) : undefined;
+
+      // The photos of the vehicle this part frames — the cabin shot for a cabin
+      // scene, the rear for a rear scene — rather than whatever came first.
+      const partCars = carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs);
+      sentRefs.push({ part: part.partNum, files: partCars.map((r) => r.filename) });
 
       const renderStart = Date.now();
-      const { bytes, interactionId } = await renderSegment(resolved, {
-        prompt: isFirst ? part.text : part.continuationText || part.text,
-        aspect: brief.aspect,
-        duration: part.duration,
-        resolution: wanted,
-        seedFrame,
-        anchorFrame,
-        exactCarRefs: exactCar,
-        references,
-      });
+      const ask = (): Promise<{ bytes: Buffer; interactionId: string; renderResolution: Resolution }> =>
+        renderSegment(resolved, {
+          prompt: isFirst ? part.text : part.continuationText || part.text,
+          aspect: brief.aspect,
+          duration: part.duration,
+          resolution: wanted,
+          seedFrame,
+          anchorFrame,
+          carRefs: partCars.map((r) => r.ref),
+          references,
+        });
+      let { bytes, interactionId } = await ask();
+
+      /*
+       * Look at what came back before building the rest of the film on it.
+       *
+       * The model is held to the vehicle by photographs, and mostly that works —
+       * but "mostly" is not good enough at ₹300–1,000 a film, and a part that
+       * comes back as the wrong car poisons every part seeded from it. So one
+       * frame is compared against the reference photo, and a clear mismatch is
+       * made again. The judgement and the retake are both on the record.
+       */
+      if (partCars.length && brief.carModel && resolved.provider === 'google-gemini') {
+        const frame = await posterFrame(bytes, Math.min(2.5, part.duration * 0.5)).catch(() => null);
+        const refPhoto = partCars[0]!.ref.data ? Buffer.from(partCars[0]!.ref.data!, 'base64') : null;
+        if (frame && refPhoto) {
+          const verdict = await checkVehicleFrame(frame, refPhoto, brief.carModel, resolved.apiKey);
+          if (verdict.checked) {
+            const remade = !verdict.same && retakesLeft > 0;
+            vehicleChecks.push({ part: part.partNum, same: verdict.same, why: verdict.why, remade });
+            if (remade) {
+              retakesLeft -= 1;
+              app.log.warn({ jobId, part: part.partNum, why: verdict.why }, 'wrong vehicle on screen — making this part again');
+              const second = await ask();
+              bytes = second.bytes;
+              interactionId = second.interactionId;
+            }
+          }
+        }
+      }
 
       const storagePath = await uploadClip(jobId, part.partNum, bytes, 'video/mp4');
       clips[i] = { ...clips[i]!, interactionId, storagePath, status: 'done', renderMs: Date.now() - renderStart };
@@ -1433,6 +1574,8 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       status: stopped ? 'cancelled' : 'done',
       cancelRequested: false,
       clips,
+      referenceFiles: sentRefs,
+      vehicleChecks,
       finalStoragePath,
       posterPath,
       musicStoragePath: bed?.storagePath,
@@ -1698,7 +1841,8 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       : redo.length === parts.length
         ? makeMusicBed(brief, jobId, totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0))
         : Promise.resolve(null);
-    const { references, exactCar, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+    const { references, carRefs, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+    const scenePlan = buildPrompt(brief, { sceneOverrides: req.body?.sceneOverrides })?.scenePlan ?? null;
     // Images attached to this retake: "the car is wrong in these frames — here is the car".
     const attached: OmniRef[] = [];
     for (const a of req.body?.attachments ?? []) {
@@ -1753,7 +1897,9 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
             seedFrame,
             anchorFrame,
             // An image attached to the retake outranks even the project's vehicle photos.
-            exactCarRefs: attached.length ? attached : exactCar,
+            carRefs: attached.length
+              ? attached
+              : carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs).map((r) => r.ref),
             references: attached.length ? [...attached, ...references] : references,
           });
           bytes = rendered.bytes;
@@ -1843,6 +1989,33 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
     }
   },
 );
+
+/**
+ * One run, in full: the brief it was made from, the prompt each part was given,
+ * and the reference images each part was shown. This is what answers "why is the
+ * car wrong in this one and right in that one" without guessing.
+ */
+app.get<{ Params: { jobId: string } }>('/api/generations/:jobId', async (req, reply) => {
+  const job = await getJob(req.params.jobId);
+  if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such generation' });
+  return {
+    jobId: job.jobId,
+    createdAt: job.createdAt,
+    label: job.label,
+    modelName: job.modelName,
+    modelId: job.modelId,
+    status: job.status,
+    vehicle: job.vehicle,
+    vehicleChecks: job.vehicleChecks ?? [],
+    referenceFiles: job.referenceFiles ?? [],
+    prompts: job.prompts ?? [],
+    brief: job.brief ?? null,
+    sceneEdits: job.sceneEdits ?? null,
+    projectSnapshot: job.projectSnapshot ?? null,
+    feedback: job.feedback,
+    parentJobId: job.parentJobId,
+  };
+});
 
 /** Every generation ever made for a project — nothing is overwritten. */
 /**
@@ -1947,6 +2120,9 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req)
           ? undefined
           : Math.max(0, (j.finishedAt ?? j.updatedAt) - (j.startedAt ?? j.createdAt)) || undefined,
       renderResolution: j.renderResolution,
+      vehicle: j.vehicle,
+      /** Whether this run can be re-opened — older runs were saved before the receipt existed. */
+      restorable: Boolean(j.projectSnapshot),
       finalUrl: j.finalStoragePath ? `/api/clips/${j.jobId}/final` : null,
       posterUrl: j.posterPath ? `/api/clips/${j.jobId}/poster` : null,
     })),

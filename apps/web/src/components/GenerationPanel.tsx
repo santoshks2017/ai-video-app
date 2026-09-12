@@ -9,6 +9,7 @@ import {
   type ClipView,
   type GenerateResult,
   type GenerationHistoryItem,
+  type GenerationDetail,
 } from '../lib/api.js';
 import { GenTimer, fmtDur, type Eta } from './GenTimer.js';
 
@@ -30,6 +31,7 @@ export function GenerationPanel({
   sceneOverrides,
   resolution,
   onGenerated,
+  onRestore,
 }: {
   brief: Brief;
   parts: PromptPart[];
@@ -48,6 +50,8 @@ export function GenerationPanel({
   project?: { id: string; name: string };
   /** Lets the caller record the finished job against a project. */
   onGenerated?: (jobId: string, finalUrl: string | null) => void;
+  /** Put an earlier run's settings back into the project it was made from. */
+  onRestore?: (snapshot: Record<string, unknown>, when: number) => void;
 }) {
   const [status, setStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<GenerateResult | null>(null);
@@ -56,6 +60,21 @@ export function GenerationPanel({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [history, setHistory] = useState<GenerationHistoryItem[]>([]);
   const [viewing, setViewing] = useState<string | null>(null);
+  /** The run whose receipt is open, and the receipts already fetched. */
+  const [openRun, setOpenRun] = useState<string | null>(null);
+  const [runDetail, setRunDetail] = useState<Record<string, GenerationDetail | null>>({});
+
+  const showRun = async (jobId: string) => {
+    if (openRun === jobId) {
+      setOpenRun(null);
+      return;
+    }
+    setOpenRun(jobId);
+    if (runDetail[jobId] === undefined) {
+      const d = await api.generation(jobId);
+      setRunDetail((cur) => ({ ...cur, [jobId]: d }));
+    }
+  };
   // Refine: retake only the segments a reviewer flags, re-use the rest.
   const [feedback, setFeedback] = useState('');
   const [redo, setRedo] = useState<number[]>([]);
@@ -546,9 +565,10 @@ export function GenerationPanel({
             </div>
             {history.map((h) => {
               const on = (viewing ?? result?.jobId ?? history.find((x) => x.finalUrl)?.jobId) === h.jobId;
+              const detail = runDetail[h.jobId];
               return (
+                <div key={h.jobId} className="hist-item">
                 <button
-                  key={h.jobId}
                   type="button"
                   className={`hist-row${on ? ' on' : ''}`}
                   disabled={!h.finalUrl}
@@ -592,6 +612,106 @@ export function GenerationPanel({
                     {h.usdPerSecond ? <em>${h.usdPerSecond}/s</em> : null}
                   </span>
                 </button>
+
+                {/* The receipt for this run: what it was made from, and what the
+                    model was actually shown. It is also how an older version is
+                    put back — the video is kept, so nothing is ever overwritten. */}
+                <div className="hist-more">
+                  <button type="button" className="btn ghost small" onClick={() => void showRun(h.jobId)}>
+                    {openRun === h.jobId ? 'Hide details' : 'Details'}
+                  </button>
+                  {h.vehicle?.model && (
+                    <span className="hist-veh">
+                      {h.vehicle.model}
+                      {h.vehicle.photos
+                        ? ` · ${h.vehicle.photos} photo${h.vehicle.photos === 1 ? '' : 's'}${
+                            h.vehicle.angles?.length ? ` (${h.vehicle.angles.join(', ')})` : ''
+                          }${h.vehicle.attached ? ', attached' : ''}`
+                        : ' · no photos'}
+                    </span>
+                  )}
+                </div>
+
+                {openRun === h.jobId && (
+                  <div className="run-detail">
+                    {detail === undefined ? (
+                      <div className="hint">Reading the run…</div>
+                    ) : detail === null ? (
+                      <div className="hint">This run kept no details — it was made before they were recorded.</div>
+                    ) : (
+                      <>
+                        <dl className="run-facts">
+                          <dt>Model</dt>
+                          <dd>{detail.modelName ?? detail.modelId ?? '—'}</dd>
+                          <dt>Vehicle</dt>
+                          <dd>
+                            {detail.vehicle?.model ?? '—'}
+                            {detail.vehicle?.colour ? ` · ${detail.vehicle.colour}` : ''}
+                            {detail.vehicle
+                              ? ` · ${detail.vehicle.photos} photo${detail.vehicle.photos === 1 ? '' : 's'} ${
+                                  detail.vehicle.attached ? 'attached to the project' : 'from the library'
+                                }`
+                              : ''}
+                          </dd>
+                          {detail.referenceFiles.length > 0 && (
+                            <>
+                              <dt>Shown</dt>
+                              <dd>
+                                {detail.referenceFiles.map((r) => (
+                                  <div key={r.part}>
+                                    Part {r.part}: {r.files.length ? r.files.join(', ') : 'no vehicle photo'}
+                                  </div>
+                                ))}
+                              </dd>
+                            </>
+                          )}
+                          {detail.vehicleChecks?.length > 0 && (
+                            <>
+                              <dt>Vehicle check</dt>
+                              <dd>
+                                {detail.vehicleChecks.map((v) => (
+                                  <div key={v.part} className={v.same ? undefined : 'hist-err'}>
+                                    Part {v.part}: {v.same ? 'the right vehicle' : `wrong vehicle — ${v.why}`}
+                                    {v.remade ? ' · made again' : ''}
+                                  </div>
+                                ))}
+                              </dd>
+                            </>
+                          )}
+                          {detail.feedback && (
+                            <>
+                              <dt>Retake note</dt>
+                              <dd>{detail.feedback}</dd>
+                            </>
+                          )}
+                        </dl>
+
+                        {detail.prompts.length > 0 && (
+                          <details className="run-prompts">
+                            <summary>The prompt each part was given</summary>
+                            {detail.prompts.map((pr) => (
+                              <div key={pr.part}>
+                                <b>Part {pr.part}</b>
+                                <pre>{pr.text}</pre>
+                              </div>
+                            ))}
+                          </details>
+                        )}
+
+                        {onRestore && detail.projectSnapshot && (
+                          <button
+                            type="button"
+                            className="btn small"
+                            onClick={() => onRestore(detail.projectSnapshot!, detail.createdAt)}
+                          >
+                            Restore this version's settings
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+                </div>
               );
             })}
           </div>

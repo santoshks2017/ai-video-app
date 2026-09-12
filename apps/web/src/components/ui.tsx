@@ -1,4 +1,5 @@
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { isApiError, uploadRef } from '../lib/client.js';
 import type { StoredImage } from '@ava/shared';
 
@@ -169,36 +170,49 @@ export function ImageUpload({
   kind = 'dealer',
   onUploaded,
   buttonText = 'Upload image',
+  multiple = false,
 }: {
   label: string;
   kind?: string;
   onUploaded: (img: StoredImage) => void;
   buttonText?: string;
+  /** Take a whole set in one go — the four angles of a car, say. */
+  multiple?: boolean;
 }) {
   const ref = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
 
-  const pick = async (file: File | undefined) => {
-    if (!file) return;
-    setBusy(true);
+  const pick = async (files: FileList | null) => {
+    const list = [...(files ?? [])];
+    if (!list.length) return;
     setErr('');
-    const r = await uploadRef(file, label, kind);
-    setBusy(false);
-    if (isApiError(r)) {
-      setErr(r.message);
-      return;
+    for (const [i, file] of list.entries()) {
+      setBusy(list.length > 1 ? `Uploading ${i + 1} of ${list.length}…` : 'Uploading…');
+      const r = await uploadRef(file, list.length > 1 ? `${label} ${i + 1}` : label, kind);
+      if (isApiError(r)) {
+        setErr(r.message);
+        break;
+      }
+      onUploaded(r as StoredImage);
     }
-    onUploaded(r as StoredImage);
+    setBusy('');
     if (ref.current) ref.current.value = '';
   };
 
   return (
     <>
-      <button className="btn small" type="button" disabled={busy} onClick={() => ref.current?.click()}>
-        {busy ? 'Uploading…' : buttonText}
+      <button className="btn small" type="button" disabled={Boolean(busy)} onClick={() => ref.current?.click()}>
+        {busy || buttonText}
       </button>
-      <input ref={ref} type="file" accept="image/*" hidden onChange={(e) => pick(e.target.files?.[0])} />
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        multiple={multiple}
+        hidden
+        onChange={(e) => pick(e.target.files)}
+      />
       {err && <div className="hint" style={{ color: 'var(--bad)' }}>{err}</div>}
     </>
   );
@@ -258,5 +272,107 @@ export function Collapse({
       </summary>
       <div className="collapse-body">{children}</div>
     </details>
+  );
+}
+
+/**
+ * A menu that opens over the page.
+ *
+ * It is drawn into the body rather than inside the field, for two reasons: a
+ * dropdown that pushes the form down moves what you were about to click, and a
+ * menu inside a column that scrolls gets cut off at the column's edge. Clicking
+ * anywhere else closes it, as does Escape, as does scrolling the page under it.
+ */
+export function Dropdown({
+  label,
+  title,
+  children,
+  minWidth = 260,
+}: {
+  /** What the closed field shows. */
+  label: ReactNode;
+  title?: string;
+  children: ReactNode;
+  minWidth?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+
+  const place = () => {
+    const r = btn.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = Math.max(r.width, minWidth);
+    setBox({
+      top: r.bottom + 4,
+      // Never off the right edge of the window.
+      left: Math.min(r.left, window.innerWidth - width - 8),
+      width,
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (open) place();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!btn.current?.contains(t) && !pop.current?.contains(t)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    // A fixed menu would drift away from its field, so it follows on scroll —
+    // and gives up only once the field itself has left the window. (Closing on
+    // any scroll shut it the instant focus scrolled the field into view.)
+    const follow = () => {
+      const r = btn.current?.getBoundingClientRect();
+      if (!r || r.bottom < 0 || r.top > window.innerHeight) {
+        setOpen(false);
+        return;
+      }
+      place();
+    };
+    document.addEventListener('mousedown', outside);
+    document.addEventListener('keydown', key);
+    window.addEventListener('scroll', follow, true);
+    window.addEventListener('resize', follow);
+    return () => {
+      document.removeEventListener('mousedown', outside);
+      document.removeEventListener('keydown', key);
+      window.removeEventListener('scroll', follow, true);
+      window.removeEventListener('resize', follow);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        title={title}
+        className={`dropdown-btn${open ? ' on' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="dropdown-label">{label}</span>
+        <span className="dropdown-caret" aria-hidden>
+          ▾
+        </span>
+      </button>
+      {open &&
+        box &&
+        createPortal(
+          <div className="dropdown-pop" ref={pop} style={{ top: box.top, left: box.left, width: box.width }}>
+            {children}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }

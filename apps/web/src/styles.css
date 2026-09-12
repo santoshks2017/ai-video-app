@@ -507,13 +507,14 @@ code {
   font-size: 12px;
 }
 .btn.ghost {
-  background: transparent;
-  border-color: transparent;
+  /* Still quiet, but unmistakably a control: a hairline and a surface of its own. */
+  background: var(--surface);
+  border-color: var(--line);
   color: var(--ink-muted);
 }
 .btn.ghost:hover {
   background: var(--surface-2);
-  border-color: transparent;
+  border-color: var(--ink-faint);
   color: var(--ink);
 }
 .toolbar {
@@ -1470,18 +1471,7 @@ textarea.guide {
 .syncrow.bad { background: var(--bad-wash); }
 
 /* ---- vehicle picker: several models per film, scoped to the client's brand ---- */
-.vehpick > summary {
-  cursor: pointer; list-style: none; padding: 8px 10px; font-size: 13.5px;
-  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.vehpick > summary::-webkit-details-marker { display: none; }
-.vehpick > summary::after { content: ' ▾'; color: var(--ink-faint); }
-.vehpick[open] > summary { border-color: var(--accent); }
-.vehlist {
-  margin-top: 4px; padding: 6px; max-height: 260px; overflow-y: auto;
-  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
-}
+.vehlist { display: grid; gap: 1px; }
 .vehrow {
   display: flex; align-items: center; gap: 8px; padding: 5px 7px; margin: 0;
   border-radius: 6px; cursor: pointer; font-size: 12.5px; font-weight: 400; color: var(--ink);
@@ -1777,3 +1767,204 @@ textarea.guide {
   text-transform: uppercase;
   color: var(--ink-faint);
 }
+
+/* ============================================================================
+   Browsing a library — segment, then brand, then the thing itself.
+
+   A flat list of 163 vehicles in one column is not a library, it is a wall. The
+   three columns narrow in order, the way a notebook app does, and each one
+   scrolls on its own so the detail pane never runs away from the list.
+   ========================================================================= */
+.browse { display: grid; gap: 12px; align-content: start; }
+.browse > .card { margin-bottom: 0; }
+.browse-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.browse-search {
+  flex: 1 1 240px;
+  min-width: 180px;
+}
+.browse-cols {
+  display: grid;
+  grid-template-columns: 210px 250px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.browse-cols.two { grid-template-columns: 280px minmax(0, 1fr); }
+@media (max-width: 820px) {
+  .browse-cols.two { grid-template-columns: 1fr; }
+}
+.browse-bar select { width: auto; min-width: 120px; flex: 0 1 auto; }
+@media (max-width: 1180px) {
+  .browse-cols { grid-template-columns: 190px minmax(0, 1fr); }
+  .browse-detail { grid-column: 1 / -1; }
+}
+@media (max-width: 700px) {
+  .browse-cols { grid-template-columns: 1fr; }
+}
+.browse-col {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.browse-col-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.browse-col-head span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browse-col-head span:last-child { font-family: var(--font-mono); }
+.browse-list {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+  padding: 6px;
+  max-height: min(62vh, 560px);
+  overflow-y: auto;
+}
+.browse-item {
+  display: grid;
+  gap: 1px;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.browse-item b { font-size: 12.5px; font-weight: 500; }
+.browse-item span { font-size: 10.5px; color: var(--ink-faint); }
+.browse-item:hover { background: var(--surface-2); }
+.browse-item.on {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+}
+.browse-item.on b { color: var(--accent); font-weight: 600; }
+.browse-detail > .card { margin-bottom: 0; }
+
+/* ---- a menu that opens over the page, not through it ---- */
+.dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+}
+.dropdown-btn:hover { border-color: var(--ink-faint); }
+.dropdown-btn.on { border-color: var(--accent); }
+.dropdown-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dropdown-caret { flex: none; color: var(--ink-faint); font-size: 10px; }
+.dropdown-pop {
+  position: fixed;
+  z-index: 80;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+}
+
+/* ---- what a dealership has already had made, and who was in it ---- */
+.usual-actor {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-wash);
+  color: var(--ink);
+}
+.campaigns { display: grid; gap: 4px; }
+.campaign {
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.campaign:hover { border-color: var(--ink-faint); }
+.campaign > b { font-family: var(--font-display); font-size: 13.5px; font-weight: 600; }
+.campaign-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.campaign-meta { font-size: 10.5px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.campaign-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.campaign-row span { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
+/* ---- a run's receipt: what it was made from, and what it was shown ---- */
+.hist-item { display: grid; gap: 4px; margin-bottom: 8px; }
+.hist-item .hist-row { margin-bottom: 0; }
+.hist-more { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-left: 2px; }
+.hist-veh { font-size: 10.5px; color: var(--ink-faint); }
+.run-detail {
+  display: grid;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.run-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 12px;
+  font-size: 12px;
+}
+.run-facts dt { color: var(--ink-faint); font-weight: 600; }
+.run-facts dd { margin: 0; }
+.run-prompts > summary { cursor: pointer; font-size: 12px; color: var(--ink-muted); }
+.run-prompts pre {
+  margin: 4px 0 10px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 240px;
+  overflow: auto;
+}
+.run-prompts b { font-size: 11px; color: var(--ink-faint); }
+
+/* A vehicle photo and the side of the vehicle it shows. */
+.veh-photo { display: grid; gap: 4px; width: 92px; }
+.veh-photo select { padding: 3px 5px; font-size: 11px; }

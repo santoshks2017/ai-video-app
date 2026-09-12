@@ -67,6 +67,11 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
         brief.attachedCarPhotos ? 'the attached photos' : 'the supplied reference images and reference frame'
       } — same generation, same face, same grille, same lamps, same wheels, same badges, same proportions. Never an earlier generation, never a facelift, never another model from the same family however similar it looks, and never a generic ${noun}. If a shot cannot show it accurately, show less of it — a detail, or the ${noun} out of focus — rather than a different ${noun}.`,
     );
+    // The name is a label on a photograph, not a design to be recalled: a model
+    // that has seen the name on an older car will draw the older car from it.
+    lines.push(
+      `- Take the ${noun}'s design from the supplied images only. The name "${brief.carModel}" is a label, not a description — do not build the ${noun} from what the name brings to mind, and do not fill in any part of it from another ${noun} of that name.`,
+    );
   }
   lines.push(
     `- The ${noun} is a real, physical, three-dimensional vehicle in the location — standing on the floor or moving on the road, lit by the scene, with real reflections and a real shadow. Never show it as a photo, poster, print, billboard, screen image, cutout or any flat picture. The reference photos show what the ${noun} looks like; they are never objects to put in the scene. Every shot is filmed in the real location — the showroom or the road — never a studio product shot, a plain white or grey backdrop, or a catalogue-style picture of the ${noun}.`,

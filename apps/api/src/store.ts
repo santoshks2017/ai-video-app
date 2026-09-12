@@ -111,6 +111,29 @@ export interface JobRecord {
   refinedParts?: number[];
   /** The reviewer's note that drove the retake. */
   feedback?: string;
+
+  /* ---- provenance: what this run was made from ----
+   *
+   * A finished video on its own cannot answer "why is the car wrong" or "what
+   * did I change since the good one". These fields are the run's receipt: the
+   * brief it was built from, the prompt each part was given, and the reference
+   * images each part was actually shown. They are also what an older run is
+   * re-opened from, so a good video can be tweaked instead of rebuilt.
+   */
+  /** The brief, as composed for this run. Image bytes are not here — only their paths. */
+  brief?: unknown;
+  /** Storyboard edits in force for this run. */
+  sceneEdits?: unknown;
+  /** The prompt sent for each part. */
+  prompts?: { part: number; text: string }[];
+  /** The reference images each part was shown, by filename. */
+  referenceFiles?: { part: number; files: string[] }[];
+  /** Which vehicle the film was supposed to show, and where its photos came from. */
+  vehicle?: { model?: string; colour?: string; photos: number; attached: boolean; angles: string[] };
+  /** The project exactly as it stood when this ran — what "restore this version" puts back. */
+  projectSnapshot?: unknown;
+  /** What the vehicle checker made of each part, and whether it was made again. */
+  vehicleChecks?: { part: number; same: boolean; why: string; remade?: boolean }[];
 }
 
 /** The newest generations across every project — the history an ETA is learned from. */

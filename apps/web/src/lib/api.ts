@@ -46,6 +46,30 @@ export interface GenerationHistoryItem {
   durationMs?: number;
   /** Set when the video was upscaled — what the model actually rendered. */
   renderResolution?: string;
+  /** Which vehicle this run was told to show, and how much of it the model was shown. */
+  vehicle?: { model?: string; colour?: string; photos: number; attached: boolean; angles: string[] };
+  /** Whether this run kept a copy of the project, so its settings can be put back. */
+  restorable?: boolean;
+}
+
+/** One run in full — what it was made from, and what each part was shown. */
+export interface GenerationDetail {
+  jobId: string;
+  createdAt: number;
+  label?: string;
+  modelName?: string;
+  modelId?: string;
+  status: string;
+  vehicle?: GenerationHistoryItem['vehicle'];
+  /** What the vehicle checker made of each part, and whether it had to be made again. */
+  vehicleChecks: { part: number; same: boolean; why: string; remade?: boolean }[];
+  referenceFiles: { part: number; files: string[] }[];
+  prompts: { part: number; text: string }[];
+  brief: Record<string, unknown> | null;
+  sceneEdits: Record<string, unknown> | null;
+  projectSnapshot: Record<string, unknown> | null;
+  feedback?: string;
+  parentJobId?: string;
 }
 
 export interface ScriptLineView {
@@ -140,6 +164,12 @@ export const api = {
   },
 
   /** Every generation for a project, newest first — nothing is overwritten. */
+  /** Everything one run was made from — the receipt behind a finished video. */
+  async generation(jobId: string): Promise<GenerationDetail | null> {
+    const r = await req<GenerationDetail>(`/api/generations/${jobId}`);
+    return isApiError(r) ? null : r;
+  },
+
   async history(projectId: string): Promise<GenerationHistoryItem[]> {
     const r = await req<{ items: GenerationHistoryItem[] }>(`/api/projects/${projectId}/generations`);
     if (isApiError(r)) return [];

@@ -22,17 +22,19 @@ import {
   type ProjectVideoSpec,
   renderResolution,
   priceFor,
+  type CarAngle,
   colourName,
   categoryValues,
   storyGuidance,
   storyTheme,
   listRows,
+  usualActorFor,
   PROJECT_STAGES,
   projectStage,
   type ProjectStage,
 } from '@ava/shared';
 import { useApp, api, projectTabId } from '../state/appStore.js';
-import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Banner } from '../components/ui.js';
+import { Field, Panel, Section, Dropdown, ImageUpload, Thumb, Confirm, Banner } from '../components/ui.js';
 import { ListField } from '../components/ListField.js';
 import { isApiError, abs } from '../lib/client.js';
 // `api` above is the library CRUD client; this one owns generation + scripting.
@@ -312,6 +314,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   }
 
   const stage = projectStage(project);
+  // The face this dealership's audience already knows. Offered, never forced.
+  const usual = usualActorFor(projects, project.clientId);
+  const usualActor = usual ? actors.find((a) => a.id === usual.actorId) : null;
   const fit = formatFit(brief?.durationSec ?? project.spec.durationSec, project.spec.aspect);
   const parts = built?.parts ?? [];
   const sells = client?.vehicleKind ?? 'car';
@@ -469,7 +474,14 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   ))}
                 </select>
               </Field>
-              <Field label="Actor">
+              <Field
+                label="Actor"
+                hint={
+                  usualActor && usual
+                    ? `${usualActor.name} fronts ${usual.count} of ${usual.total} films for this client.`
+                    : undefined
+                }
+              >
                 <select value={project.actorId ?? ''} onChange={(e) => set({ actorId: e.target.value || undefined })}>
                   <option value="">— none —</option>
                   {actors.map((a) => (
@@ -478,6 +490,16 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     </option>
                   ))}
                 </select>
+                {usualActor && project.actorId !== usualActor.id && (
+                  <button
+                    className="btn ghost small"
+                    type="button"
+                    style={{ marginTop: 6 }}
+                    onClick={() => set({ actorId: usualActor.id })}
+                  >
+                    Use {usualActor.name}
+                  </button>
+                )}
               </Field>
               <Field
                 label="Vehicles"
@@ -489,12 +511,13 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                       : 'Leave empty to feature the whole range.'
                 }
               >
-                <details className="vehpick">
-                  <summary>
-                    {vehicleIds.length === 0
+                <Dropdown
+                  label={
+                    vehicleIds.length === 0
                       ? '— whole range —'
-                      : vehicles.map((v) => `${v.brand} ${v.model}`).join(', ') || `${vehicleIds.length} selected`}
-                  </summary>
+                      : vehicles.map((v) => `${v.brand} ${v.model}`).join(', ') || `${vehicleIds.length} selected`
+                  }
+                >
                   <div className="vehlist">
                     {pickableVehicles.length === 0 && (
                       <div className="hint">
@@ -551,7 +574,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                       </details>
                     )}
                   </div>
-                </details>
+                </Dropdown>
               </Field>
             </div>
             {selectedCar && (
@@ -926,34 +949,66 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               needs.
             </div>
 
-            {/* Photos attached here are the vehicle. A library holding the wrong generation
-                of a model is how an XUV300 ended up in a film about the XUV 3XO. */}
+            {/* Photos attached here ARE the vehicle: the library is not consulted at all.
+                Which side each one shows travels with it, so a scene about the cabin is
+                built on the cabin photo — and a side nobody attached is a side the model
+                has to invent, which is how an XUV300 ended up in a film about the 3XO. */}
             <Field
               label="Photos of this exact vehicle"
-              hint="Photos of the car or bike this film shows. They replace the library's for this project, and the vehicle is built from them and nothing else."
+              hint="Attach the car or bike this film shows — several at once. The library is then ignored completely and every shot is built on these."
             >
               <div className="thumbs">
                 {(project.carRefs ?? []).map((r) => (
-                  <Thumb
-                    key={r.refId}
-                    img={r}
-                    onRemove={() => set({ carRefs: (project.carRefs ?? []).filter((x) => x.refId !== r.refId) })}
-                  />
+                  <div className="veh-photo" key={r.refId}>
+                    <Thumb
+                      img={r}
+                      onRemove={() => set({ carRefs: (project.carRefs ?? []).filter((x) => x.refId !== r.refId) })}
+                    />
+                    <select
+                      aria-label={`What ${r.label} shows`}
+                      value={r.angle ?? ''}
+                      onChange={(e) =>
+                        set({
+                          carRefs: (project.carRefs ?? []).map((x) =>
+                            x.refId === r.refId
+                              ? { ...x, angle: (e.target.value || undefined) as CarAngle | undefined }
+                              : x,
+                          ),
+                        })
+                      }
+                    >
+                      <option value="">Which side?</option>
+                      <option value="front">Front</option>
+                      <option value="side">Side</option>
+                      <option value="rear">Rear</option>
+                      <option value="interior">Interior</option>
+                    </select>
+                  </div>
                 ))}
                 <ImageUpload
                   label={`${[car?.brand, car?.model].filter(Boolean).join(' ') || project.name || 'Vehicle'} — exact photo`}
                   kind="car-model"
-                  buttonText="Attach vehicle photo"
+                  buttonText="Attach vehicle photos"
+                  multiple
                   onUploaded={(img) => set({ carRefs: [...(project.carRefs ?? []), img] })}
                 />
               </div>
-              {(project.carRefs?.length ?? 0) > 0 && (
-                <Banner kind="warn">
-                  Using {project.carRefs!.length} attached photo{project.carRefs!.length === 1 ? '' : 's'} instead of the
-                  library's for {[car?.brand, car?.model].filter(Boolean).join(' ') || 'this vehicle'}. Every shot of the
-                  vehicle is built on these.
-                </Banner>
-              )}
+              {(project.carRefs?.length ?? 0) > 0 &&
+                (() => {
+                  const have = new Set((project.carRefs ?? []).map((r) => r.angle).filter(Boolean));
+                  const missing = (['front', 'side', 'rear', 'interior'] as CarAngle[]).filter((a) => !have.has(a));
+                  return (
+                    <Banner kind={missing.length > 1 ? 'warn' : 'ok'}>
+                      {project.carRefs!.length} attached photo{project.carRefs!.length === 1 ? '' : 's'} —{' '}
+                      {[car?.brand, car?.model].filter(Boolean).join(' ') || 'this vehicle'} is built from{' '}
+                      {project.carRefs!.length === 1 ? 'this' : 'these'} alone, and the library is ignored.
+                      {missing.length
+                        ? ` Nothing shows the ${missing.join(', ')} — the model invents those, and for a model name it has
+                            seen on an older car, what it invents is that older car. Attach them.`
+                        : ' All four sides are covered.'}
+                    </Banner>
+                  );
+                })()}
             </Field>
             <div className="divider" />
             <div className="thumbs">
@@ -1096,6 +1151,27 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               project={{ id: project.id, name: project.name }}
               sceneOverrides={project.sceneEdits}
               resolution={project.spec.resolution}
+              onRestore={(snapshot, when) => {
+                const was = snapshot as Partial<Project>;
+                const stamp = new Date(when).toLocaleString();
+                if (!window.confirm(`Put this project back to how it was for the ${stamp} run? Every video you have already made is kept.`)) return;
+                set({
+                  prompt: was.prompt ?? '',
+                  useCases: was.useCases ?? [],
+                  spec: was.spec ?? project.spec,
+                  fieldValues: was.fieldValues ?? {},
+                  sceneEdits: was.sceneEdits ?? {},
+                  clientId: was.clientId,
+                  actorId: was.actorId,
+                  carId: was.carId,
+                  carIds: was.carIds,
+                  carVariant: was.carVariant,
+                  carColour: was.carColour,
+                  carRefs: was.carRefs ?? [],
+                  extraRefs: was.extraRefs ?? [],
+                  scriptAngle: was.scriptAngle,
+                });
+              }}
               onGenerated={(jobId, finalUrl) =>
                 set({
                   status: 'generated',

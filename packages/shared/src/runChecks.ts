@@ -111,6 +111,28 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
     }
   }
 
+  /*
+   * How much of the vehicle the model has actually been shown.
+   *
+   * Every side it has no photo of, it invents — and for a car whose name it has
+   * seen attached to an older generation, what it invents is that older car. One
+   * attached photo replacing a four-angle library set is how a whole film came
+   * back as an XUV300.
+   */
+  const carPhotos = (brief.attachments ?? []).filter((a) => a.kind === 'car-model');
+  const sides = new Set(carPhotos.map((a) => a.angle).filter(Boolean));
+  if (carPhotos.length && sides.size < 2) {
+    checks.push({
+      level: brief.attachedCarPhotos ? 'warn' : 'ok',
+      code: 'few-vehicle-angles',
+      text: brief.attachedCarPhotos
+        ? `The model is shown ${carPhotos.length} attached photo${carPhotos.length === 1 ? '' : 's'} of the vehicle${
+            sides.size ? ` (${[...sides].join(', ')} only)` : ''
+          } and nothing else. Every other side it has to invent — attach front, side, rear and interior to hold it to the real vehicle.`
+        : 'Only one angle of the vehicle is in scope.',
+    });
+  }
+
   // Dangling attachment reference (P0.4): a filename cited but not present.
   // (In this build attachments are always in scope by construction; this guards
   //  against a future edited-storyboard path that hand-references a filename.)

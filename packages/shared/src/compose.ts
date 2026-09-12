@@ -302,7 +302,10 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
     for (const img of attachedCar) {
       attachments.push({
         ...toDealerPhoto(img, 'car-model'),
-        label: `${img.label?.trim() || 'Attached photo'} — the exact vehicle this film shows`,
+        // The side it shows travels with it, so a scene about the cabin is matched
+        // to the cabin photo rather than the model inventing one.
+        angle: img.angle,
+        label: `${img.label?.trim() || 'Attached photo'}${img.angle ? ` (${img.angle})` : ''} — the exact vehicle this film shows`,
       });
     }
   } else if (vehicles.length) {

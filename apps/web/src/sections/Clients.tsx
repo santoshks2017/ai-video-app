@@ -2,11 +2,16 @@ import { useMemo, useState } from 'react';
 import {
   suggestDisplayName,
   defaultFooterText,
+  usualActorFor,
+  CATEGORIES,
+  formatInr,
+  PROJECT_STAGES,
+  projectStage,
   type ClientProfile,
   type StoredImage,
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Panel, Section, PickList, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
+import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
 import { isApiError, post, abs } from '../lib/client.js';
 
 function blank(): ClientProfile {
@@ -22,6 +27,14 @@ function blank(): ClientProfile {
     updatedAt: now,
   };
 }
+
+/** Typed once, chosen after that — the states these dealerships are actually in. */
+const STATES = [
+  'Andhra Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Delhi', 'Goa', 'Gujarat', 'Haryana',
+  'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra',
+  'Odisha', 'Punjab', 'Rajasthan', 'Tamil Nadu', 'Telangana', 'Uttar Pradesh', 'Uttarakhand',
+  'West Bengal',
+];
 
 interface GmbResult {
   placeId: string;
@@ -43,10 +56,56 @@ export function ClientsSection() {
   const [gmbBusy, setGmbBusy] = useState(false);
   const [gmbNote, setGmbNote] = useState('');
   const [brandDraft, setBrandDraft] = useState('');
+  const [q, setQ] = useState('');
+  const [fBrand, setFBrand] = useState('');
+  const [fKind, setFKind] = useState('');
+  const [fCity, setFCity] = useState('');
+  const [fState, setFState] = useState('');
 
   const set = (p: Partial<ClientProfile>) => setDraft((d) => (d ? { ...d, ...p } : d));
 
   const cars = useApp((s) => s.cars);
+  const actors = useApp((s) => s.actors);
+  const projects = useApp((s) => s.projects);
+  const go = useApp((s) => s.go);
+
+  const clientBrandsOf = (c: ClientProfile) => (c.brands?.length ? c.brands : [c.brand]).filter(Boolean);
+  /** Every value the list can be narrowed by, taken from the clients themselves. */
+  const facets = useMemo(() => {
+    const uniq = (xs: (string | undefined)[]) =>
+      [...new Set(xs.map((x) => (x ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    return {
+      brands: uniq(clients.flatMap(clientBrandsOf)),
+      cities: uniq(clients.map((c) => c.city)),
+      states: uniq(clients.map((c) => c.state)),
+    };
+  }, [clients]);
+
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return clients
+      .filter((c) => !fBrand || clientBrandsOf(c).some((b) => b.toLowerCase() === fBrand.toLowerCase()))
+      .filter((c) => !fKind || (c.vehicleKind ?? 'car') === fKind)
+      .filter((c) => !fCity || (c.city ?? '') === fCity)
+      .filter((c) => !fState || (c.state ?? '') === fState)
+      .filter((c) => {
+        if (!needle) return true;
+        return [c.name, c.displayName, c.city, c.state, c.address, c.phone, ...clientBrandsOf(c)]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(needle);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [clients, q, fBrand, fKind, fCity, fState]);
+
+  /** Every film made for the open client, newest first. */
+  const campaigns = useMemo(
+    () => (draft?.id ? projects.filter((p) => p.clientId === draft.id).sort((a, b) => b.updatedAt - a.updatedAt) : []),
+    [projects, draft?.id],
+  );
+  const usual = usualActorFor(projects, draft?.id);
+  const actorName = (id?: string) => actors.find((a) => a.id === id)?.name ?? '';
   /** Brands that exist in the vehicle library, so the picker only offers what can be filmed. */
   const libraryBrands = useMemo(
     () => [...new Set(cars.map((c) => c.brand.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
@@ -109,38 +168,112 @@ export function ClientsSection() {
   };
 
   return (
-    <div className="grid two">
-      <Panel
-        title="Clients"
-        step={`${clients.length} saved`}
-        actions={
-          <button className="btn small" type="button" onClick={() => { setDraft(blank()); setGmbNote(''); setGmbInput(''); }}>
-            New client
-          </button>
-        }
-      >
-        <div className="section-desc">
-          Dealers you make videos for. The footer bar, end card and reference images of every project tagged to a
-          client come from here.
+    <div className="browse">
+      <datalist id="ava-states">
+        {STATES.map((st) => (
+          <option key={st} value={st} />
+        ))}
+      </datalist>
+      <div className="card">
+        <div className="head">
+          <div className="head-left">
+            <h2>Clients</h2>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="step">
+              {shown.length === clients.length
+                ? `${clients.length} saved`
+                : `${shown.length} of ${clients.length}`}
+            </span>
+            <button
+              className="btn small primary"
+              type="button"
+              onClick={() => { setDraft(blank()); setGmbNote(''); setGmbInput(''); }}
+            >
+              New client
+            </button>
+          </div>
         </div>
-        <PickList
-          items={clients}
-          activeId={draft?.id ?? null}
-          onPick={(id) => { setDraft(clients.find((c) => c.id === id) ?? null); setGmbNote(''); }}
-          emptyText="No clients yet."
-          render={(c) => (
-            <>
-              <b>{c.name}</b>
-              <span>
-                {[c.displayName && c.displayName !== c.name ? `“${c.displayName}”` : null, c.brand, c.city]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </span>
-            </>
-          )}
-        />
-      </Panel>
+        <div className="body tight">
+          <div className="browse-bar">
+            <input
+              className="browse-search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search a dealer, city or brand…"
+              aria-label="Search clients"
+            />
+            <select value={fBrand} onChange={(e) => setFBrand(e.target.value)} aria-label="Filter by brand">
+              <option value="">Any brand</option>
+              {facets.brands.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+            <select value={fKind} onChange={(e) => setFKind(e.target.value)} aria-label="Filter by what they sell">
+              <option value="">Cars & bikes</option>
+              <option value="car">Cars</option>
+              <option value="bike">Bikes & scooters</option>
+            </select>
+            <select value={fCity} onChange={(e) => setFCity(e.target.value)} aria-label="Filter by city">
+              <option value="">Any city</option>
+              {facets.cities.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <select value={fState} onChange={(e) => setFState(e.target.value)} aria-label="Filter by state">
+              <option value="">Any state</option>
+              {facets.states.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            {(q || fBrand || fKind || fCity || fState) && (
+              <button
+                className="btn ghost small"
+                type="button"
+                onClick={() => { setQ(''); setFBrand(''); setFKind(''); setFCity(''); setFState(''); }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
+      <div className="browse-cols two">
+        <div className="browse-col">
+          <div className="browse-col-head">
+            <span>Dealers</span>
+            <span>{shown.length}</span>
+          </div>
+          <div className="browse-list">
+            {shown.length === 0 && (
+              <div className="hint" style={{ padding: 8 }}>
+                {clients.length ? 'Nothing matches those filters.' : 'No clients yet.'}
+              </div>
+            )}
+            {shown.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={`browse-item${c.id === draft?.id ? ' on' : ''}`}
+                onClick={() => { setDraft(clients.find((x) => x.id === c.id) ?? null); setGmbNote(''); }}
+              >
+                <b>{c.name}</b>
+                <span>
+                  {[clientBrandsOf(c).join(' + '), c.city, c.state].filter(Boolean).join(' · ')}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+      <div className="browse-detail">
       {draft ? (
         <Panel
           title={draft.id ? 'Edit client' : 'New client'}
@@ -220,6 +353,14 @@ export function ClientsSection() {
             <Field label="City">
               <input value={draft.city ?? ''} onChange={(e) => set({ city: e.target.value })} placeholder="e.g. Jaipur" />
             </Field>
+            <Field label="State">
+              <input
+                value={draft.state ?? ''}
+                onChange={(e) => set({ state: e.target.value })}
+                placeholder="e.g. Rajasthan"
+                list="ava-states"
+              />
+            </Field>
             <Field label="Phone">
               <input value={draft.phone ?? ''} onChange={(e) => set({ phone: e.target.value })} placeholder="98765 43210" />
             </Field>
@@ -273,6 +414,51 @@ export function ClientsSection() {
             </div>
           </div>
           <div className="sec-stack">
+            {draft.id && (
+              <Section
+                sub
+                title="Campaigns"
+                step={campaigns.length ? `${campaigns.length} film${campaigns.length === 1 ? '' : 's'}` : 'None yet'}
+                defaultOpen={campaigns.length > 0}
+              >
+                {usual && (
+                  <div className="usual-actor">
+                    <span>
+                      <b>{actorName(usual.actorId) || 'One presenter'}</b> fronts {usual.count} of {usual.total} films
+                      for this dealer. Keeping the same face is what makes a dealership recognisable — change it only
+                      on purpose.
+                    </span>
+                  </div>
+                )}
+                {campaigns.length === 0 ? (
+                  <div className="hint">No films for this client yet.</div>
+                ) : (
+                  <div className="campaigns">
+                    {campaigns.map((p) => (
+                      <button key={p.id} type="button" className="campaign" onClick={() => go('projects', p.id)}>
+                        <b>{p.name || 'Untitled project'}</b>
+                        <span className="campaign-tags">
+                          {p.useCases.map((u) => (
+                            <span className="chip accent" key={u}>
+                              {CATEGORIES.find((c) => c.id === u)?.label ?? u}
+                            </span>
+                          ))}
+                          {actorName(p.actorId) && <span className="chip">{actorName(p.actorId)}</span>}
+                        </span>
+                        <span className="campaign-meta">
+                          {PROJECT_STAGES.find((st) => st.id === projectStage(p))?.label}
+                          {' · '}
+                          {new Date(p.updatedAt).toLocaleDateString()}
+                          {p.generationCount ? ` · ${p.generationCount} run${p.generationCount === 1 ? '' : 's'}` : ''}
+                          {p.totalCostInr ? ` · ${formatInr(p.totalCostInr)}` : ''}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Section>
+            )}
+
             <Section sub title="On-screen branding" step="Footer, tone, logos" defaultOpen>
               <Field
                 label="Footer strip"
@@ -411,6 +597,8 @@ export function ClientsSection() {
           <Empty icon="🏢">Pick a client on the left, or create a new one.</Empty>
         </Panel>
       )}
+      </div>
+      </div>
     </div>
   );
 }

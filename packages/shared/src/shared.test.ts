@@ -38,6 +38,8 @@ import {
   applyBriefPlan,
   projectStage,
   PROJECT_STAGES,
+  ageBandOf,
+  usualActorFor,
   type BriefPlan,
   type CarModelProfile,
   type ActorProfile,
@@ -807,4 +809,33 @@ test('a project sits on the board where its history puts it', () => {
   // Moved by hand, it stays where it was put.
   assert.equal(projectStage({ ...p, stage: 'delivered', status: 'generating' }), 'delivered');
   assert.equal(projectStage({ ...p, stage: 'open', status: 'generated', generationCount: 4 }), 'open');
+});
+
+/* ---------------------------------------------------------------------------
+ * Reading a library of people.
+ * ------------------------------------------------------------------------ */
+
+test('an actor falls in the age band their age text implies', () => {
+  assert.equal(ageBandOf({ ageBand: '46+', age: 'late 20s' }), '46+', 'a band chosen by hand wins');
+  assert.equal(ageBandOf({ age: '24' }), '18–25');
+  assert.equal(ageBandOf({ age: 'early 20s' }), '18–25');
+  assert.equal(ageBandOf({ age: 'late 20s' }), '26–35');
+  assert.equal(ageBandOf({ age: 'mid 30s' }), '26–35', 'mid thirties is 35');
+  assert.equal(ageBandOf({ age: 'late 30s' }), '36–45');
+  assert.equal(ageBandOf({ age: '52' }), '46+');
+  assert.equal(ageBandOf({ age: 'young' }), undefined, 'no number, no band');
+  assert.equal(ageBandOf({}), undefined);
+});
+
+test('a client has a usual actor, and ties go to the one seen last', () => {
+  const p = (clientId: string, actorId: string, updatedAt: number) => ({ clientId, actorId, updatedAt });
+  assert.equal(usualActorFor([], 'c1'), null);
+  assert.equal(usualActorFor([p('c1', 'meera', 1)], undefined), null);
+
+  const runs = [p('c1', 'meera', 3), p('c1', 'meera', 5), p('c1', 'riya', 9), p('c2', 'neha', 4)];
+  const usual = usualActorFor(runs, 'c1');
+  assert.deepEqual(usual, { actorId: 'meera', count: 2, total: 3 });
+
+  const tied = usualActorFor([p('c1', 'meera', 3), p('c1', 'riya', 9)], 'c1');
+  assert.equal(tied?.actorId, 'riya', 'the dealership was last seen with Riya');
 });

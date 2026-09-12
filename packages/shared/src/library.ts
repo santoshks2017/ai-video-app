@@ -15,15 +15,29 @@ export interface StoredImage {
   url?: string;
   label: string;
   filename: string;
+  /**
+   * For a vehicle photo attached by hand, which side of the vehicle it shows.
+   * A scene about the cabin is matched to the cabin photo, and a part of the film
+   * is sent the photo of what it frames — see visuals.ts.
+   */
+  angle?: CarAngle;
 }
+
+/** Coarse age bands, so a library of actors can be narrowed to the right one. */
+export const AGE_BANDS = ['18–25', '26–35', '36–45', '46+'] as const;
+export type AgeBand = (typeof AGE_BANDS)[number];
 
 export interface ActorProfile {
   id: string;
   name: string;
   gender: Gender;
   age?: string;
+  /** Which band the age falls in, for filtering. Read from `age` when unset. */
+  ageBand?: AgeBand;
   /** Wardrobe / look — injected verbatim into the prompt. */
   style?: string;
+  /** What they are dressed in, in one or two words: saree, kurta, formal shirt. */
+  attire?: string;
   /** Delivery notes — pace, warmth, energy. */
   voice?: string;
   /** Where the high-res original lives, for the designer. */
@@ -188,6 +202,8 @@ export interface ClientProfile {
    */
   vehicleKind?: VehicleKind;
   city?: string;
+  /** State, for filtering a long client list down to a region. */
+  state?: string;
   address?: string;
   phone?: string;
   tier: 'Metro Premium' | 'Regional/Volume' | 'Hyperlocal';
@@ -526,7 +542,13 @@ export const OMNI_FLASH_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' 
   aspects: ['9:16', '16:9'],
   supportsImageToVideo: true,
   supportsReferenceImages: true,
-  maxReferenceImages: 2,
+  /**
+   * Three, not two: a continuation part needs the frame it carries on from AND a
+   * photo of the vehicle, and with room for only two the vehicle was the one that
+   * got dropped. If the provider refuses three it is asked again with fewer, so
+   * this number can be raised without risking a run.
+   */
+  maxReferenceImages: 3,
   usdPerSecond: 0.1,
   enabled: true,
   isDefault: true,

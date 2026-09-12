@@ -16,6 +16,7 @@ import type {
   ClientProfile,
   GlobalInstruction,
   Project,
+  ProjectStage,
   ProjectVideoSpec,
   StoredImage,
   CarAngle,
@@ -56,9 +57,40 @@ export function emptyProject(): Project {
     sceneEdits: {},
     extraRefs: [],
     status: 'draft',
+    stage: 'open',
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/**
+ * The board a designer works from, left to right.
+ *
+ * The wording is the team's, not the pipeline's: a film is open until someone
+ * picks it up, in progress while it is being made, in review while someone else
+ * is looking at it, and delivered once the client has it.
+ */
+export const PROJECT_STAGES: { id: ProjectStage; label: string; hint: string }[] = [
+  { id: 'open', label: 'Open', hint: 'Briefed, not started' },
+  { id: 'wip', label: 'In progress', hint: 'Being written or generated' },
+  { id: 'review', label: 'In review', hint: 'Waiting on a look' },
+  { id: 'delivered', label: 'Delivered', hint: 'Sent to the client' },
+];
+
+/**
+ * Which column a project belongs in.
+ *
+ * Projects made before the board existed have no stage of their own, so one is
+ * read from what has happened to them: a film that has been generated is waiting
+ * on someone's eyes, a film mid-render is in progress, everything else is open.
+ */
+export function projectStage(
+  p: Pick<Project, 'stage' | 'status' | 'generationCount'>,
+): ProjectStage {
+  if (p.stage) return p.stage;
+  if (p.status === 'generating') return 'wip';
+  if (p.status === 'generated' || (p.generationCount ?? 0) > 0) return 'review';
+  return 'open';
 }
 
 /** The vehicles a project features, including the older single-car field. */

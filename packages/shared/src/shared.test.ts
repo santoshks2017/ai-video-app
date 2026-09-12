@@ -36,6 +36,8 @@ import {
   LANGUAGE_SEEDS,
   plainSpoken,
   applyBriefPlan,
+  projectStage,
+  PROJECT_STAGES,
   type BriefPlan,
   type CarModelProfile,
   type ActorProfile,
@@ -781,3 +783,28 @@ test('a brief fills the blanks, checks what it is told, and never overwrites an 
   assert.equal(forced.spec?.cta, 'Visit us this Ganesh Chaturthi');
 });
 
+/* ---------------------------------------------------------------------------
+ * The board: where a project stands, for projects that were never moved.
+ * ------------------------------------------------------------------------ */
+
+test('a project sits on the board where its history puts it', () => {
+  assert.deepEqual(
+    PROJECT_STAGES.map((s) => s.id),
+    ['open', 'wip', 'review', 'delivered'],
+    'the columns read left to right, the way the work moves',
+  );
+
+  const p = emptyProject();
+  assert.equal(projectStage({ ...p, stage: undefined }), 'open', 'nothing has happened to it yet');
+  assert.equal(projectStage({ ...p, stage: undefined, status: 'generating' }), 'wip');
+  assert.equal(
+    projectStage({ ...p, stage: undefined, status: 'generated' }),
+    'review',
+    'a film that exists is waiting on someone to watch it',
+  );
+  assert.equal(projectStage({ ...p, stage: undefined, status: 'draft', generationCount: 2 }), 'review');
+
+  // Moved by hand, it stays where it was put.
+  assert.equal(projectStage({ ...p, stage: 'delivered', status: 'generating' }), 'delivered');
+  assert.equal(projectStage({ ...p, stage: 'open', status: 'generated', generationCount: 4 }), 'open');
+});

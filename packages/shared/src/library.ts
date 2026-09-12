@@ -265,6 +265,15 @@ export interface ProjectVideoSpec {
 
 export type ProjectStatus = 'draft' | 'ready' | 'generating' | 'generated' | 'failed';
 
+/**
+ * Where a project sits on the team's board.
+ *
+ * `status` says what the machine has done; this says what the team still owes.
+ * A film can be generated and still be in review, or delivered months after its
+ * last render — so the two never collapse into one field.
+ */
+export type ProjectStage = 'open' | 'wip' | 'review' | 'delivered';
+
 export interface Project {
   id: string;
   name: string;
@@ -319,6 +328,8 @@ export interface Project {
   /** Extra reference images added on this project only. */
   extraRefs: StoredImage[];
   status: ProjectStatus;
+  /** The board column this project sits in. Unset means it has never been moved. */
+  stage?: ProjectStage;
   /** Most recent generation job. */
   lastJobId?: string;
   lastFinalUrl?: string;
@@ -341,6 +352,7 @@ export interface ProjectSummary {
   carName?: string;
   useCases: CategoryId[];
   status: ProjectStatus;
+  stage?: ProjectStage;
   lastFinalUrl?: string;
   updatedAt: number;
 }

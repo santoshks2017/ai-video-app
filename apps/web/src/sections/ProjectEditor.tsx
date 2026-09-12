@@ -26,9 +26,13 @@ import {
   categoryValues,
   storyGuidance,
   storyTheme,
+  listRows,
+  PROJECT_STAGES,
+  projectStage,
+  type ProjectStage,
 } from '@ava/shared';
 import { useApp, api, projectTabId } from '../state/appStore.js';
-import { Field, Panel, ImageUpload, Thumb, Confirm, Banner, Collapse } from '../components/ui.js';
+import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Banner } from '../components/ui.js';
 import { ListField } from '../components/ListField.js';
 import { isApiError, abs } from '../lib/client.js';
 // `api` above is the library CRUD client; this one owns generation + scripting.
@@ -50,6 +54,12 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (stored && !project) setProject(stored);
   }, [stored, project]);
+
+  // A card moved on the board lands here too, instead of being written back by
+  // this editor's next autosave.
+  useEffect(() => {
+    if (stored?.stage) setProject((cur) => (cur && cur.stage !== stored.stage ? { ...cur, stage: stored.stage } : cur));
+  }, [stored?.stage]);
 
   // Autosave a moment after edits settle.
   useEffect(() => {
@@ -162,6 +172,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     preflight?.checks.some((c) => c.code === 'no-spoken-script' || c.code === 'no-pronunciation-spelling'),
   );
   const [storyboardOpen, setStoryboardOpen] = useState(false);
+  /** Use-case details are folded away; picking a use case opens its own block. */
+  const [openCats, setOpenCats] = useState<CategoryId[]>([]);
   const [planning, setPlanning] = useState(false);
   const [planNote, setPlanNote] = useState('');
   const [planUndo, setPlanUndo] = useState<Project | null>(null);
@@ -299,6 +311,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     );
   }
 
+  const stage = projectStage(project);
   const fit = formatFit(brief?.durationSec ?? project.spec.durationSec, project.spec.aspect);
   const parts = built?.parts ?? [];
   const sells = client?.vehicleKind ?? 'car';
@@ -316,12 +329,12 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   // A festival is the setting, not a topic, so it does not count towards crowding the ad.
   const topicCount = project.useCases.filter((id) => CATEGORIES.find((c) => c.id === id)?.layer !== 'theme').length;
 
-  const toggleUseCase = (id: CategoryId) =>
-    set({
-      useCases: project.useCases.includes(id)
-        ? project.useCases.filter((u) => u !== id)
-        : [...project.useCases, id],
-    });
+  const toggleUseCase = (id: CategoryId) => {
+    const on = project.useCases.includes(id);
+    // Picking a use case opens what it needs answered; dropping it puts that away.
+    setOpenCats((cur) => (on ? cur.filter((x) => x !== id) : [...cur, id]));
+    set({ useCases: on ? project.useCases.filter((u) => u !== id) : [...project.useCases, id] });
+  };
 
   const setField = (cat: CategoryId, field: string, value: string) =>
     set({
@@ -351,6 +364,22 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         <span className="hint">
           {savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : 'Changes save automatically'}
         </span>
+        <div className="stage-pick">
+          <span>Stage</span>
+          <div className="seg">
+            {PROJECT_STAGES.map((st) => (
+              <button
+                key={st.id}
+                type="button"
+                title={st.hint}
+                className={stage === st.id ? 'on' : ''}
+                onClick={() => set({ stage: st.id as ProjectStage })}
+              >
+                {st.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <Confirm
           onConfirm={async () => {
             removed.current = true;
@@ -372,7 +401,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
       <div className="grid">
         <div className="left-col">
-          <Panel title="1. Project" step="Name, brief and tags">
+          <Panel num="01" title="Project" step="Name, brief and tags">
             <Field label="Project name">
               <input
                 value={project.name}
@@ -382,7 +411,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             </Field>
             <Field
               label="Your brief / prompt"
-              hint="Free-text steer. Added to the master prompt on top of the structured brief."
+              hint="A free-text steer. What is still blank below is filled in from it."
             >
               <textarea
                 value={project.prompt ?? ''}
@@ -559,7 +588,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           </Panel>
 
           <Panel
-            title="2. Use case"
+            num="02"
+            title="Use case"
             step={promptOnly ? 'Prompt-only — no video generation' : 'Composable — pick 1 or more'}
           >
             {project.useCases.length > 1 && brief && (
@@ -591,10 +621,100 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 );
               })}
             </div>
+
+            {/* What a use case needs answered, right under where it was picked. Closed
+                until it is wanted, and opened by picking the use case itself. */}
+            {project.useCases.map((id) => {
+              const cat = CATEGORIES.find((c) => c.id === id)!;
+              const values = categoryValues(id, project.fieldValues[id] ?? {});
+              const mandatory = new Set(cat.mandatory.map((m) => m.id));
+              const missing = cat.mandatory.filter((m) =>
+                m.list ? !listRows(values, m.list).some((r) => r.text) : !String(values[m.id] ?? '').trim(),
+              ).length;
+              return (
+                <Section
+                  key={id}
+                  sub
+                  title={cat.label}
+                  need={missing ? `${missing} to fill in` : undefined}
+                  step={missing ? undefined : 'Ready'}
+                  open={openCats.includes(id)}
+                  onOpenChange={(o) => setOpenCats((cur) => (o ? [...cur, id] : cur.filter((x) => x !== id)))}
+                >
+                  <div className="section-desc">{cat.purpose}</div>
+                  <div className="field-grid">
+                    {cat.fields.map((f) => {
+                      if (f.showIf && !values[f.showIf]) return null;
+                      const label = `${f.label}${
+                        mandatory.has(f.id) || cat.mandatory.some((m) => m.list === f.id) ? ' *' : ''
+                      }`;
+                      if (f.type === 'list' && f.list) {
+                        return (
+                          <div className="span" key={f.id}>
+                            <ListField
+                              field={f}
+                              label={label}
+                              values={values}
+                              onPatch={(patch) => setFields(id, patch)}
+                            />
+                          </div>
+                        );
+                      }
+                      if (f.type === 'checkbox') {
+                        return (
+                          <div className="check-row" key={f.id}>
+                            <input
+                              type="checkbox"
+                              id={`${id}_${f.id}`}
+                              checked={!!values[f.id]}
+                              onChange={(e) => setField(id, f.id, e.target.checked ? 'yes' : '')}
+                            />
+                            <label htmlFor={`${id}_${f.id}`}>{f.label}</label>
+                          </div>
+                        );
+                      }
+                      if (f.type === 'textarea') {
+                        return (
+                          <div className="span" key={f.id}>
+                            <Field label={label}>
+                              <textarea
+                                value={values[f.id] ?? ''}
+                                placeholder={f.ph}
+                                onChange={(e) => setField(id, f.id, e.target.value)}
+                              />
+                            </Field>
+                          </div>
+                        );
+                      }
+                      return (
+                        <Field key={f.id} label={label}>
+                          {f.type === 'select' ? (
+                            <select value={values[f.id] ?? ''} onChange={(e) => setField(id, f.id, e.target.value)}>
+                              <option value="">Select…</option>
+                              {(f.options ?? []).map((o) => (
+                                <option key={o} value={o}>
+                                  {o}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              value={values[f.id] ?? ''}
+                              placeholder={f.ph}
+                              onChange={(e) => setField(id, f.id, e.target.value)}
+                            />
+                          )}
+                        </Field>
+                      );
+                    })}
+                  </div>
+                </Section>
+              );
+            })}
           </Panel>
 
-          <Panel title="3. Video" step="The essentials — everything else has a sensible default">
-            <div className="row3">
+          <Panel num="03" title="Video" step="Length, shape, language, model">
+            <div className="field-grid">
               <Field label="Length">
                 <div className="length-pick">
                   <select
@@ -633,11 +753,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               </Field>
               <Field
                 label="Language"
-                hint={
-                  language
-                    ? `Spoken and written in ${language.name}. Its rules live in the Languages section.`
-                    : 'No languages configured — add one in Languages.'
-                }
+                hint={language ? undefined : 'No languages configured — add one in Languages.'}
               >
                 <select
                   value={project.spec.languageId ?? ''}
@@ -659,7 +775,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 hint={
                   activeModel
                     ? `${activeModel.minClipSec}–${activeModel.maxClipSec}s per clip · $${activeModel.usdPerSecond}/s`
-                    : 'No models registered — add one in APIs & models.'
+                    : 'None registered — add one in APIs & models.'
                 }
               >
                 <select
@@ -678,140 +794,139 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 </select>
               </Field>
             </div>
-            <div className="hint" style={{ marginTop: -4 }}>
+            <div className="hint" style={{ marginTop: 8 }}>
               {formatFitSummary(fit)}. {fit.notes.join(' ')}
-            </div>
-
-            <div style={{ marginTop: 14 }}>
-              <Collapse title="Narration &amp; audio" hint={NARRATION[project.spec.narration].label}>
-                <div className="row2">
-                  <Field label="Narration mode" hint={NARRATION[project.spec.narration].hint}>
-                    <select
-                      value={project.spec.narration}
-                      onChange={(e) => setSpec({ narration: e.target.value as ProjectVideoSpec['narration'] })}
-                    >
-                      {Object.values(NARRATION).map((m) => (
-                        <option key={m.key} value={m.key}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Music / audio bed">
-                    <input value={project.spec.music} onChange={(e) => setSpec({ music: e.target.value })} />
-                  </Field>
-                </div>
-              </Collapse>
-
-              <Collapse title="On-screen text &amp; end card">
-                <div className="row2">
-                  <Field label="On-screen text">
-                    <select
-                      value={project.spec.textLang}
-                      onChange={(e) => setSpec({ textLang: e.target.value as ProjectVideoSpec['textLang'] })}
-                    >
-                      <option value="english">English only</option>
-                      <option value="mixed">Hindi + English</option>
-                      <option value="hindi">Devanagari-led</option>
-                    </select>
-                  </Field>
-                  <Field label="Copy tone">
-                    <select
-                      value={project.spec.captionStyle}
-                      onChange={(e) =>
-                        setSpec({ captionStyle: e.target.value as ProjectVideoSpec['captionStyle'] })
-                      }
-                    >
-                      <option value="Long Narrative">Long Narrative</option>
-                      <option value="Short Punchy">Short Punchy</option>
-                      <option value="Structured">Structured minimal</option>
-                    </select>
-                  </Field>
-                </div>
-                <Field label="Primary CTA">
-                  <input value={project.spec.cta} onChange={(e) => setSpec({ cta: e.target.value })} />
-                </Field>
-                <Field label="Footer strip" hint="Set once per client, in the Clients section.">
-                  <input readOnly value={client ? footerPreview : 'Select a client to set the footer'} />
-                </Field>
-                <div className="check-row">
-                  <input
-                    type="checkbox"
-                    id="pe_endcard"
-                    checked={project.spec.endCardOn}
-                    onChange={(e) => setSpec({ endCardOn: e.target.checked })}
-                  />
-                  <label htmlFor="pe_endcard">End on a dealer details + CTA card</label>
-                </div>
-                {project.spec.endCardOn && (
-                  <Field label="End card content" hint="One line per row, or separate with |. Composited, not generated.">
-                    <textarea value={project.spec.endCard} onChange={(e) => setSpec({ endCard: e.target.value })} />
-                  </Field>
-                )}
-              </Collapse>
-
-              <Collapse title="Advanced" hint="Look, resolution, clip length">
-                <Field label="Visual style">
-                  <input
-                    value={project.spec.visualStyle}
-                    onChange={(e) => setSpec({ visualStyle: e.target.value })}
-                  />
-                </Field>
-                <div className="row2">
-                  <Field
-                    label="Resolution"
-                    hint={(() => {
-                      if (!activeModel) return undefined;
-                      const r = renderResolution(activeModel.modelId, project.spec.resolution, activeModel.resolutions);
-                      return r.upscale
-                        ? `${activeModel.name} renders ${r.render}; the finished video is upscaled to ${project.spec.resolution} in post.`
-                        : `${activeModel.name} renders ${r.render} natively.`;
-                    })()}
-                  >
-                    <select
-                      value={project.spec.resolution}
-                      onChange={(e) => setSpec({ resolution: e.target.value as ProjectVideoSpec['resolution'] })}
-                    >
-                      <option value="1080p">1080p — Full HD</option>
-                      <option value="720p">720p</option>
-                      <option value="480p">480p</option>
-                    </select>
-                  </Field>
-                  <Field
-                    label="Max seconds per clip"
-                    hint={activeModel ? `This model caps at ${activeModel.maxClipSec}s.` : undefined}
-                  >
-                    <input
-                      type="number"
-                      min={activeModel?.minClipSec ?? 3}
-                      max={activeModel?.maxClipSec ?? 30}
-                      value={project.spec.maxChunkSec}
-                      onChange={(e) =>
-                        setSpec({
-                          maxChunkSec: Math.min(
-                            Number(e.target.value),
-                            activeModel?.maxClipSec ?? Number(e.target.value),
-                          ),
-                        })
-                      }
-                    />
-                  </Field>
-                </div>
-              </Collapse>
             </div>
           </Panel>
 
-          <Panel title="4. Reference images" step="Pulled in automatically from the client and car">
+          {/* The rest of the video setup, each part its own section rather than a
+              fold inside a fold. Closed until something needs changing. */}
+          <Section title="Narration & audio" step={NARRATION[project.spec.narration].label}>
+            <div className="row2">
+              <Field label="Narration mode" hint={NARRATION[project.spec.narration].hint}>
+                <select
+                  value={project.spec.narration}
+                  onChange={(e) => setSpec({ narration: e.target.value as ProjectVideoSpec['narration'] })}
+                >
+                  {Object.values(NARRATION).map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Music / audio bed" hint="Scored after the film is cut, ducked under the voice.">
+                <input
+                  value={project.spec.music}
+                  onChange={(e) => setSpec({ music: e.target.value })}
+                  placeholder="e.g. warm acoustic, light percussion"
+                />
+              </Field>
+            </div>
+          </Section>
+
+          <Section
+            title="On-screen text & end card"
+            step={project.spec.endCardOn ? 'Ends on a dealer card' : 'No end card'}
+          >
+            <div className="field-grid">
+              <Field label="On-screen text">
+                <select
+                  value={project.spec.textLang}
+                  onChange={(e) => setSpec({ textLang: e.target.value as ProjectVideoSpec['textLang'] })}
+                >
+                  <option value="english">English only</option>
+                  <option value="mixed">Hindi + English</option>
+                  <option value="hindi">Devanagari-led</option>
+                </select>
+              </Field>
+              <Field label="Copy tone">
+                <select
+                  value={project.spec.captionStyle}
+                  onChange={(e) => setSpec({ captionStyle: e.target.value as ProjectVideoSpec['captionStyle'] })}
+                >
+                  <option value="Long Narrative">Long Narrative</option>
+                  <option value="Short Punchy">Short Punchy</option>
+                  <option value="Structured">Structured minimal</option>
+                </select>
+              </Field>
+              <Field label="Primary CTA">
+                <input value={project.spec.cta} onChange={(e) => setSpec({ cta: e.target.value })} />
+              </Field>
+              <Field label="Footer strip" hint="Set once per client, in Clients.">
+                <input readOnly value={client ? footerPreview : 'Select a client to set the footer'} />
+              </Field>
+            </div>
+            <div className="check-row">
+              <input
+                type="checkbox"
+                id="pe_endcard"
+                checked={project.spec.endCardOn}
+                onChange={(e) => setSpec({ endCardOn: e.target.checked })}
+              />
+              <label htmlFor="pe_endcard">End on a dealer details + CTA card</label>
+            </div>
+            {project.spec.endCardOn && (
+              <Field label="End card content" hint="One line per row, or separate with |. Composited, not generated.">
+                <textarea value={project.spec.endCard} onChange={(e) => setSpec({ endCard: e.target.value })} />
+              </Field>
+            )}
+          </Section>
+
+          <Section title="Advanced" step="Look, resolution, clip length">
+            <Field label="Visual style">
+              <input value={project.spec.visualStyle} onChange={(e) => setSpec({ visualStyle: e.target.value })} />
+            </Field>
+            <div className="row2">
+              <Field
+                label="Resolution"
+                hint={(() => {
+                  if (!activeModel) return undefined;
+                  const r = renderResolution(activeModel.modelId, project.spec.resolution, activeModel.resolutions);
+                  return r.upscale
+                    ? `${activeModel.name} renders ${r.render}; upscaled to ${project.spec.resolution} in post.`
+                    : `${activeModel.name} renders ${r.render} natively.`;
+                })()}
+              >
+                <select
+                  value={project.spec.resolution}
+                  onChange={(e) => setSpec({ resolution: e.target.value as ProjectVideoSpec['resolution'] })}
+                >
+                  <option value="1080p">1080p — Full HD</option>
+                  <option value="720p">720p</option>
+                  <option value="480p">480p</option>
+                </select>
+              </Field>
+              <Field
+                label="Max seconds per clip"
+                hint={activeModel ? `This model caps at ${activeModel.maxClipSec}s.` : undefined}
+              >
+                <input
+                  type="number"
+                  min={activeModel?.minClipSec ?? 3}
+                  max={activeModel?.maxClipSec ?? 30}
+                  value={project.spec.maxChunkSec}
+                  onChange={(e) =>
+                    setSpec({
+                      maxChunkSec: Math.min(Number(e.target.value), activeModel?.maxClipSec ?? Number(e.target.value)),
+                    })
+                  }
+                />
+              </Field>
+            </div>
+          </Section>
+
+          <Panel num="04" title="Reference images" step="Pulled in from the client and vehicle">
             <div className="section-desc">
-              The client's photos and the car's image set are pulled in automatically. Add anything extra this
-              particular video needs.
+              The client's photos and the vehicle's image set come in automatically. Add anything extra this video
+              needs.
             </div>
 
             {/* Photos attached here are the vehicle. A library holding the wrong generation
                 of a model is how an XUV300 ended up in a film about the XUV 3XO. */}
             <Field
               label="Photos of this exact vehicle"
-              hint="Attach photos of the car or bike this film shows. They replace the library's photos for this project, and the model is told to build the vehicle from them and nothing else."
+              hint="Photos of the car or bike this film shows. They replace the library's for this project, and the vehicle is built from them and nothing else."
             >
               <div className="thumbs">
                 {(project.carRefs ?? []).map((r) => (
@@ -886,91 +1001,16 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             )}
           </Panel>
 
-          {project.useCases.length > 0 && (
-            <Panel title="5. Use-case details" step="Shown for selected use cases">
-              {project.useCases.map((id) => {
-                const cat = CATEGORIES.find((c) => c.id === id)!;
-                const values = categoryValues(id, project.fieldValues[id] ?? {});
-                const mandatory = new Set(cat.mandatory.map((m) => m.id));
-                return (
-                  <div key={id} style={{ marginBottom: 14 }}>
-                    <h3 style={{ marginBottom: 6 }}>{cat.label}</h3>
-                    <div className="hint" style={{ marginBottom: 10 }}>
-                      {cat.purpose}
-                    </div>
-                    {cat.fields.map((f) => {
-                      if (f.showIf && !values[f.showIf]) return null;
-                      const label = `${f.label}${
-                        mandatory.has(f.id) || cat.mandatory.some((m) => m.list === f.id) ? ' *' : ''
-                      }`;
-                      if (f.type === 'list' && f.list) {
-                        return (
-                          <ListField
-                            key={f.id}
-                            field={f}
-                            label={label}
-                            values={values}
-                            onPatch={(patch) => setFields(id, patch)}
-                          />
-                        );
-                      }
-                      if (f.type === 'checkbox') {
-                        return (
-                          <div className="check-row" key={f.id}>
-                            <input
-                              type="checkbox"
-                              id={`${id}_${f.id}`}
-                              checked={!!values[f.id]}
-                              onChange={(e) => setField(id, f.id, e.target.checked ? 'yes' : '')}
-                            />
-                            <label htmlFor={`${id}_${f.id}`}>{f.label}</label>
-                          </div>
-                        );
-                      }
-                      return (
-                        <Field key={f.id} label={label}>
-                          {f.type === 'textarea' ? (
-                            <textarea
-                              value={values[f.id] ?? ''}
-                              placeholder={f.ph}
-                              onChange={(e) => setField(id, f.id, e.target.value)}
-                            />
-                          ) : f.type === 'select' ? (
-                            <select value={values[f.id] ?? ''} onChange={(e) => setField(id, f.id, e.target.value)}>
-                              <option value="">Select…</option>
-                              {(f.options ?? []).map((o) => (
-                                <option key={o} value={o}>
-                                  {o}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <input
-                              value={values[f.id] ?? ''}
-                              placeholder={f.ph}
-                              onChange={(e) => setField(id, f.id, e.target.value)}
-                            />
-                          )}
-                        </Field>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </Panel>
-          )}
-
           {built?.scenePlan && built.scenePlan.scenes.length > 0 && (
-            <Collapse
+            <Section
+              num="05"
               title="Storyboard"
               open={storyboardOpen}
-              hint={
-                scriptMissing
-                  ? 'Needs a script — open and press Write the script'
-                  : `${built.scenePlan.scenes.length} scenes · ${built.scenePlan.parts} segment${
-                      built.scenePlan.parts > 1 ? 's' : ''
-                    } · edit any scene's script or shot`
-              }
+              onOpenChange={setStoryboardOpen}
+              need={scriptMissing ? 'Needs a script' : undefined}
+              step={`${built.scenePlan.scenes.length} scenes · ${built.scenePlan.parts} segment${
+                built.scenePlan.parts > 1 ? 's' : ''
+              }`}
             >
               <Storyboard
                 scenePlan={built.scenePlan}
@@ -999,7 +1039,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 onDeleteScene={deleteScene}
                 onRestoreScene={restoreScene}
               />
-            </Collapse>
+            </Section>
           )}
         </div>
 
@@ -1053,7 +1093,13 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               sceneOverrides={project.sceneEdits}
               resolution={project.spec.resolution}
               onGenerated={(jobId, finalUrl) =>
-                set({ status: 'generated', lastJobId: jobId, lastFinalUrl: finalUrl ?? undefined })
+                set({
+                  status: 'generated',
+                  // A film that has been made is no longer waiting to be started.
+                  stage: stage === 'open' ? 'wip' : stage,
+                  lastJobId: jobId,
+                  lastFinalUrl: finalUrl ?? undefined,
+                })
               }
             />
           )}

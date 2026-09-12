@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { isApiError, uploadRef } from '../lib/client.js';
 import type { StoredImage } from '@ava/shared';
 
@@ -21,11 +21,14 @@ export function Field({
 }
 
 export function Panel({
+  num,
   title,
   step,
   actions,
   children,
 }: {
+  /** The step's place in the sequence, shown as a scene slate. */
+  num?: string;
   title: string;
   step?: string;
   actions?: ReactNode;
@@ -34,13 +37,79 @@ export function Panel({
   return (
     <div className="card">
       <div className="head">
-        <h2>{title}</h2>
+        <div className="head-left">
+          {num && <span className="slate">{num}</span>}
+          <h2>{title}</h2>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {step && <span className="step">{step}</span>}
           {actions}
         </div>
       </div>
       <div className="body">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * A panel that folds away.
+ *
+ * Same chrome as a Panel, so a section that is optional does not look like a
+ * lesser kind of thing — it is the same card, closed. Pass `open`/`onOpenChange`
+ * to drive it from outside (a use case opening as it is picked); leave them out
+ * and it keeps its own state.
+ */
+export function Section({
+  num,
+  title,
+  step,
+  need,
+  sub,
+  defaultOpen = false,
+  open,
+  onOpenChange,
+  children,
+}: {
+  num?: string;
+  title: string;
+  step?: string;
+  /** A short count of what is still missing, shown instead of `step`. */
+  need?: string;
+  /** Nested inside another section — quieter chrome. */
+  sub?: boolean;
+  defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  const [selfOpen, setSelfOpen] = useState(defaultOpen);
+  const isOpen = open ?? selfOpen;
+  const bodyId = useId();
+  const toggle = () => {
+    setSelfOpen(!isOpen);
+    onOpenChange?.(!isOpen);
+  };
+  return (
+    <div className={`sec${isOpen ? ' open' : ''}${sub ? ' sub' : ''}`}>
+      <button
+        type="button"
+        className="sec-head"
+        aria-expanded={isOpen}
+        aria-controls={bodyId}
+        onClick={toggle}
+      >
+        <span className="sec-caret" aria-hidden>
+          ▶
+        </span>
+        {num && <span className="slate">{num}</span>}
+        <h2>{title}</h2>
+        {need ? <span className="sec-need">{need}</span> : step ? <span className="sec-step">{step}</span> : null}
+      </button>
+      {isOpen && (
+        <div className="sec-body" id={bodyId}>
+          {children}
+        </div>
+      )}
     </div>
   );
 }

@@ -386,7 +386,7 @@ export function Storyboard({
           <div className="sb-length">
             <div className="sb-length-group">
               <label>Length at 1x</label>
-              <div className="sb-seg">
+              <div className="seg">
                 <button type="button" className={length.auto ? 'on' : ''} onClick={() => onLength({ durationAuto: true })}>
                   Auto · {length.suggested}s
                 </button>
@@ -412,7 +412,7 @@ export function Storyboard({
             </div>
             <div className="sb-length-group">
               <label>Pace</label>
-              <div className="sb-seg">
+              <div className="seg">
                 {PACES.map((p) => (
                   <button
                     key={p}

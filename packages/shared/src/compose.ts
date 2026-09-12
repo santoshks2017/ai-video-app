@@ -262,7 +262,18 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
 
   // Reference images, most-specific first: car → client logo/photos → project extras.
   const attachments: DealerPhoto[] = [];
-  if (vehicles.length) {
+  // Photos attached to the project are the vehicle. They outrank the library, because
+  // the library is what got it wrong.
+  const attachedCar = (project.carRefs ?? []).filter((img) => img?.storagePath);
+  if (attachedCar.length) {
+    b.attachedCarPhotos = true;
+    for (const img of attachedCar) {
+      attachments.push({
+        ...toDealerPhoto(img, 'car-model'),
+        label: `${img.label?.trim() || 'Attached photo'} — the exact vehicle this film shows`,
+      });
+    }
+  } else if (vehicles.length) {
     // The hero gets its variant and colour; the others contribute one shot each
     // so the model knows what they look like without swamping the reference set.
     const hero = carReferenceSet(car!, project.carVariant, project.carColour);

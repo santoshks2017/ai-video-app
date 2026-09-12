@@ -195,7 +195,12 @@ function shortlist(urls: string[], hints: string[], limit: number): string[] {
     if (/(banner|hero)/.test(path)) n -= 1;
     return n;
   };
-  return [...urls].sort((a, b) => score(b) - score(a)).slice(0, limit);
+  // A manufacturer's model page also shows its other models — the XUV 7XO and the Thar
+  // sit in the footer of the XUV 3XO's page. When the page names this model in its own
+  // image paths, only those photos are this model's.
+  const named = urls.filter((u) => hints.some((h) => h && squash(u.split('?')[0]!).includes(h)));
+  const pool = named.length >= 3 ? named : urls;
+  return [...pool].sort((a, b) => score(b) - score(a)).slice(0, limit);
 }
 
 /** The view a filename claims, for when there is no key to look at the photo with. */
@@ -244,7 +249,7 @@ async function lookAtPhotos(
     'side three-quarter, "rear" for a rear or rear three-quarter, "interior" for anything shot inside the cabin',
     '(dashboard, seats, screen, legroom), "detail" for a close-up of one exterior part (lamp, grille, alloy,',
     'badge), "other" for anything that is not a photo of this vehicle — a graphic, a logo, a person, a map, a',
-    'different vehicle.',
+    'different vehicle — a different model from the same brand counts as a different vehicle.',
     'vehicle — true only if the whole picture is this vehicle or its cabin.',
     'colour — the body colour if the shot is clearly of one paint colour, otherwise leave it out.',
     '',

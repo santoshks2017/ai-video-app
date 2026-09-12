@@ -63,7 +63,9 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
     // part, working from one frame, reached for the older generation it has seen more
     // of — an XUV300 in a film about the XUV 3XO.
     lines.push(
-      `- The ${noun} is the ${brief.carModel} and nothing else: the exact vehicle in the supplied reference images and reference frame — same generation, same face, same grille, same lamps, same wheels, same badges, same proportions. Never an earlier generation, never a facelift, never another model from the same family however similar it looks, and never a generic ${noun}. If a shot cannot show it accurately, show less of it — a detail, or the ${noun} out of focus — rather than a different ${noun}.`,
+      `- The ${noun} is the ${brief.carModel} and nothing else: the exact vehicle in ${
+        brief.attachedCarPhotos ? 'the attached photos' : 'the supplied reference images and reference frame'
+      } — same generation, same face, same grille, same lamps, same wheels, same badges, same proportions. Never an earlier generation, never a facelift, never another model from the same family however similar it looks, and never a generic ${noun}. If a shot cannot show it accurately, show less of it — a detail, or the ${noun} out of focus — rather than a different ${noun}.`,
     );
   }
   lines.push(
@@ -306,7 +308,14 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         // The library's angle photos are usually one launch colour. Unless the
         // paint is said outright, the model copies whatever colour they show.
         L.push(
-          `Paint colour: ${brief.carColour}. The car is ${brief.carColour} in every shot — every painted body panel, in every scene. The colour reference image shows this paint. The other car photos are shape references and may show the car in a different colour: take its shape, face, lamps and wheels from them, never their paint.`,
+          brief.attachedCarPhotos
+            ? `Paint colour: ${brief.carColour}. The car is ${brief.carColour} in every shot, on every painted body panel. The attached photos are the vehicle: take its shape, face, lamps and wheels from them, and paint it ${brief.carColour} even if a photo shows another colour.`
+            : `Paint colour: ${brief.carColour}. The car is ${brief.carColour} in every shot — every painted body panel, in every scene. The colour reference image shows this paint. The other car photos are shape references and may show the car in a different colour: take its shape, face, lamps and wheels from them, never their paint.`,
+        );
+      }
+      if (brief.attachedCarPhotos) {
+        L.push(
+          `The attached vehicle photos ARE the ${ctx.vehicle === 'bike' ? 'bike' : 'car'} in this film — the only reference for what it looks like. Match them exactly: the same generation, the same face, grille, lamps, wheels, proportions and badges. Take nothing about this vehicle from anywhere else — not from another version of this model, not from an earlier generation of it, not from anything you have seen before. Where a detail is not visible in these photos, work it out from them; never fill it in from memory.`,
         );
       }
       if (attachments.length) {
@@ -515,6 +524,12 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     C.push('');
     continuityLock(brief, mode, ctx.vehicle).forEach((line) => C.push(line));
     C.push('');
+    if (brief.attachedCarPhotos) {
+      C.push(
+        'The vehicle photos supplied with this segment are the vehicle. Build every shot of it on them and on the reference frame, and on nothing else you know about this model.',
+        '',
+      );
+    }
     if (mode.onCameraPerson) {
       // A continuation that re-imagines its presenter leaves two of them on screen, the
       // one from the seed frame fading away behind the new one.

@@ -308,6 +308,14 @@ export interface Project {
    * can see what the copy is arguing before judging the lines themselves.
    */
   scriptAngle?: { viewer: string; idea: string; throughline: string; proof: string[] };
+  /**
+   * Photos of the exact vehicle this film shows, attached to the project.
+   *
+   * They replace the library's photo set for this project: a library holding the wrong
+   * generation of a model is how an XUV300 ended up in a film about the XUV 3XO, and the
+   * fix has to be in the hands of whoever is making the film.
+   */
+  carRefs?: StoredImage[];
   /** Extra reference images added on this project only. */
   extraRefs: StoredImage[];
   status: ProjectStatus;

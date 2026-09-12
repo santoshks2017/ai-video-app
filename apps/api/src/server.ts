@@ -970,6 +970,8 @@ async function renderSegment(
     seedFrame?: Buffer;
     /** A frame of the vehicle from the opening part — what it must keep looking like. */
     anchorFrame?: Buffer;
+    /** Photos of the actual vehicle, attached to the project. These outrank everything. */
+    exactCarRefs?: OmniRef[];
     references: OmniRef[];
   },
 ): Promise<{ bytes: Buffer; interactionId: string; renderResolution: Resolution }> {
@@ -1036,7 +1038,11 @@ async function renderSegment(
   // but with nothing but one frame to go on, a later part drifted to an older generation of
   // the car. So it gets a frame of the car from THIS film's opening part instead: the right
   // vehicle, already in the right place, and nothing a model would mistake for a shot.
-  if (seeded && req.anchorFrame) {
+  // Photos of the actual vehicle beat a frame of it: the frame can only be as right as
+  // the part it came from, and a film that started from the wrong photos is wrong in it.
+  const exact = req.exactCarRefs ?? [];
+  if (seeded && exact.length) refs.push(...exact.slice(0, Math.max(0, model.maxReferenceImages - refs.length)));
+  else if (seeded && req.anchorFrame) {
     refs.push({ data: req.anchorFrame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
   }
   if (!seeded) refs.push(...req.references.slice(0, Math.max(0, model.maxReferenceImages - refs.length)));
@@ -1082,10 +1088,13 @@ async function renderSegment(
  */
 async function loadBriefAssets(brief: Brief): Promise<{
   references: OmniRef[];
+  /** Photos attached to the project: the vehicle itself, not the library's idea of it. */
+  exactCar: OmniRef[];
   dealerLogo?: Buffer;
   brandLogo?: Buffer;
 }> {
   const references: OmniRef[] = [];
+  const exactCar: OmniRef[] = [];
   let dealerLogo: Buffer | undefined;
   let brandLogo: Buffer | undefined;
   for (const a of brief.attachments ?? []) {
@@ -1100,13 +1109,15 @@ async function loadBriefAssets(brief: Brief): Promise<{
       brandLogo = obj.bytes;
       continue;
     }
-    references.push({
+    const ref: OmniRef = {
       data: obj.bytes.toString('base64'),
       mimeType: obj.contentType || 'image/jpeg',
       kind: 'image',
-    });
+    };
+    references.push(ref);
+    if (brief.attachedCarPhotos && a.kind === 'car-model') exactCar.push(ref);
   }
-  return { references, dealerLogo, brandLogo };
+  return { references, exactCar, dealerLogo, brandLogo };
 }
 
 /**
@@ -1322,7 +1333,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
 
   // The music is made while the segments render, and waited for only at the stitch.
   const musicBed = makeMusicBed(brief, jobId, cost.totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0));
-  const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+  const { references, exactCar, dealerLogo, brandLogo } = await loadBriefAssets(brief);
 
   // No `extend` — each segment is an independent create, seeded with the
   // PREVIOUS segment's last frame so the presenter / car / setting stay
@@ -1355,6 +1366,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
         resolution: wanted,
         seedFrame,
         anchorFrame,
+        exactCarRefs: exactCar,
         references,
       });
 
@@ -1686,7 +1698,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       : redo.length === parts.length
         ? makeMusicBed(brief, jobId, totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0))
         : Promise.resolve(null);
-    const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+    const { references, exactCar, dealerLogo, brandLogo } = await loadBriefAssets(brief);
     // Images attached to this retake: "the car is wrong in these frames — here is the car".
     const attached: OmniRef[] = [];
     for (const a of req.body?.attachments ?? []) {
@@ -1740,7 +1752,8 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
             resolution: wantedResolution(brief),
             seedFrame,
             anchorFrame,
-            // An attached image outranks the library's photos for the parts being redone.
+            // An image attached to the retake outranks even the project's vehicle photos.
+            exactCarRefs: attached.length ? attached : exactCar,
             references: attached.length ? [...attached, ...references] : references,
           });
           bytes = rendered.bytes;

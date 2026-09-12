@@ -234,6 +234,11 @@ export interface Brief {
   carColour?: string;
   /** What the showroom sells. Two-wheelers are ridden: "test ride", never "test drive". */
   vehicleKind?: 'car' | 'bike';
+  /**
+   * The vehicle photos were attached to this project rather than taken from the library:
+   * they are the only thing the model may build the vehicle from.
+   */
+  attachedCarPhotos?: boolean;
   /** Storyboard scenes the designer deleted, by beat key. */
   omitScenes?: string[];
   /** Delivery speed. 1 is a natural read; 1.1 says the same script 10% faster, in a film 10% shorter. */

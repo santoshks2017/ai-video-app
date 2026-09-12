@@ -30,7 +30,7 @@ import {
 import { useApp, api, projectTabId } from '../state/appStore.js';
 import { Field, Panel, ImageUpload, Thumb, Confirm, Banner, Collapse } from '../components/ui.js';
 import { ListField } from '../components/ListField.js';
-import { isApiError } from '../lib/client.js';
+import { isApiError, abs } from '../lib/client.js';
 // `api` above is the library CRUD client; this one owns generation + scripting.
 import { api as genApi } from '../lib/api.js';
 import { Storyboard } from '../components/Storyboard.js';
@@ -806,6 +806,37 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               The client's photos and the car's image set are pulled in automatically. Add anything extra this
               particular video needs.
             </div>
+
+            {/* Photos attached here are the vehicle. A library holding the wrong generation
+                of a model is how an XUV300 ended up in a film about the XUV 3XO. */}
+            <Field
+              label="Photos of this exact vehicle"
+              hint="Attach photos of the car or bike this film shows. They replace the library's photos for this project, and the model is told to build the vehicle from them and nothing else."
+            >
+              <div className="thumbs">
+                {(project.carRefs ?? []).map((r) => (
+                  <Thumb
+                    key={r.refId}
+                    img={r}
+                    onRemove={() => set({ carRefs: (project.carRefs ?? []).filter((x) => x.refId !== r.refId) })}
+                  />
+                ))}
+                <ImageUpload
+                  label={`${[car?.brand, car?.model].filter(Boolean).join(' ') || project.name || 'Vehicle'} — exact photo`}
+                  kind="car-model"
+                  buttonText="Attach vehicle photo"
+                  onUploaded={(img) => set({ carRefs: [...(project.carRefs ?? []), img] })}
+                />
+              </div>
+              {(project.carRefs?.length ?? 0) > 0 && (
+                <Banner kind="warn">
+                  Using {project.carRefs!.length} attached photo{project.carRefs!.length === 1 ? '' : 's'} instead of the
+                  library's for {[car?.brand, car?.model].filter(Boolean).join(' ') || 'this vehicle'}. Every shot of the
+                  vehicle is built on these.
+                </Banner>
+              )}
+            </Field>
+            <div className="divider" />
             <div className="thumbs">
               {project.extraRefs.map((r) => (
                 <Thumb
@@ -825,6 +856,33 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 {brief.attachments.length} reference image{brief.attachments.length === 1 ? '' : 's'} in scope
                 (car + client + extras).
               </div>
+            )}
+
+            {/* The vehicle photos the model will actually be given. Worth a look before
+                paying for a run: the wrong generation here is the wrong car on screen. */}
+            {brief && brief.attachments.some((a) => a.kind === 'car-model') && (
+              <>
+                <div className="hint" style={{ marginTop: 8 }}>
+                  What the model is given for the vehicle — if this is not the car you mean, attach the right photos
+                  above or fix it in Vehicles.
+                </div>
+                <div className="thumbs">
+                  {brief.attachments
+                    .filter((a) => a.kind === 'car-model')
+                    .map((a, i) => (
+                      <Thumb
+                        key={`${a.filename}-${i}`}
+                        img={{
+                          refId: a.refId ?? `${a.filename}-${i}`,
+                          storagePath: a.storagePath ?? '',
+                          label: a.label,
+                          filename: a.filename,
+                          url: abs(a.src ?? null) ?? a.src,
+                        }}
+                      />
+                    ))}
+                </div>
+              </>
             )}
           </Panel>
 

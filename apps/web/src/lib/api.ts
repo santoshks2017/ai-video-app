@@ -4,7 +4,7 @@
  * clip URLs served back through /api/clips/:jobId/:part.
  */
 
-import type { Brief, PromptPart, DealerPhoto } from '@ava/shared';
+import type { Brief, PromptPart, DealerPhoto, BriefPlan } from '@ava/shared';
 import { apiBase as BASE, req, isApiError as sharedIsApiError, type ApiError as SharedApiError } from './client.js';
 
 export interface ClipView {
@@ -24,7 +24,7 @@ export interface GenerationHistoryItem {
   jobId: string;
   label?: string;
   modelName?: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'cancelled';
   createdAt: number;
   totalSeconds?: number;
   costInr?: number;
@@ -58,7 +58,7 @@ export interface ScriptLineView {
 
 export interface GenerateResult {
   jobId: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'cancelled';
   /** The one finished video (stitched if it needed multiple runs). */
   finalUrl?: string | null;
   clips: ClipView[];
@@ -95,6 +95,8 @@ export const api = {
     project?: { id: string; name: string },
     /** Storyboard edits — the server needs the edited captions to composite them. */
     sceneOverrides?: Record<string, unknown>,
+    /** Named by the browser so the run can be stopped while this request is still open. */
+    jobId?: string,
   ) {
     const r = await req<GenerateResult>('/api/generate', {
       method: 'POST',
@@ -104,6 +106,7 @@ export const api = {
         confirmedCostInr,
         modelId,
         sceneOverrides,
+        jobId,
         projectId: project?.id,
         projectName: project?.name,
       }),
@@ -114,6 +117,26 @@ export const api = {
       return r;
     }
     return hydrate(r);
+  },
+
+  /**
+   * Stop a run. No provider can be interrupted mid-render, so it stops after the part
+   * it is on; what is already made is stitched and kept.
+   */
+  async stop(jobId: string) {
+    return await req<{ ok: boolean; status: string }>(`/api/generate/${jobId}/stop`, { method: 'POST', body: '{}' });
+  },
+
+  /**
+   * Read the brief and propose the project — use cases, their fields, the vehicle, the
+   * presenter, the call to action. What is written into the project is decided by
+   * applyBriefPlan, which only fills what the designer left blank.
+   */
+  async plan(prompt: string, clientId?: string) {
+    return await req<BriefPlan>('/api/projects/plan', {
+      method: 'POST',
+      body: JSON.stringify({ prompt, clientId }),
+    });
   },
 
   /** Every generation for a project, newest first — nothing is overwritten. */
@@ -142,6 +165,8 @@ export const api = {
     modelId?: string,
     project?: { id: string; name: string },
     sceneOverrides?: Record<string, unknown>,
+    /** Images attached to the retake — what the vehicle must look like in the parts redone. */
+    attachments?: { storagePath?: string; refId?: string; label?: string }[],
   ) {
     const r = await req<GenerateResult>(`/api/generate/${jobId}/refine`, {
       method: 'POST',
@@ -153,6 +178,7 @@ export const api = {
         confirmedCostInr,
         modelId,
         sceneOverrides,
+        attachments,
         projectId: project?.id,
         projectName: project?.name,
       }),

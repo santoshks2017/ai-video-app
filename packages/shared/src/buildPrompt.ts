@@ -58,6 +58,14 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
     );
   }
   const noun = vehicle === 'bike' ? 'bike' : 'car';
+  if (brief.carModel) {
+    // The opening part is built on the reference photos and comes out right; a later
+    // part, working from one frame, reached for the older generation it has seen more
+    // of — an XUV300 in a film about the XUV 3XO.
+    lines.push(
+      `- The ${noun} is the ${brief.carModel} and nothing else: the exact vehicle in the supplied reference images and reference frame — same generation, same face, same grille, same lamps, same wheels, same badges, same proportions. Never an earlier generation, never a facelift, never another model from the same family however similar it looks, and never a generic ${noun}. If a shot cannot show it accurately, show less of it — a detail, or the ${noun} out of focus — rather than a different ${noun}.`,
+    );
+  }
   lines.push(
     `- The ${noun} is a real, physical, three-dimensional vehicle in the location — standing on the floor or moving on the road, lit by the scene, with real reflections and a real shadow. Never show it as a photo, poster, print, billboard, screen image, cutout or any flat picture. The reference photos show what the ${noun} looks like; they are never objects to put in the scene. Every shot is filmed in the real location — the showroom or the road — never a studio product shot, a plain white or grey backdrop, or a catalogue-style picture of the ${noun}.`,
   );
@@ -711,20 +719,28 @@ export function joinPromptParts(parts: PromptPart[]): string {
  * this block, which pins everything else down so the retake still cuts against
  * its neighbours.
  */
-export function applyFeedback(prompt: string, feedback: string): string {
+export function applyFeedback(prompt: string, feedback: string, attached = 0): string {
   const notes = (feedback ?? '')
     .split(/\r?\n|;/)
     .map((n) => n.replace(/^[-*\u2022\d.)\s]+/, '').trim())
     .filter(Boolean);
-  if (!notes.length) return prompt;
+  if (!notes.length && !attached) return prompt;
 
   return [
     prompt,
     '',
     '## RETAKE — THIS SHOT HAS ALREADY BEEN FILMED',
     'Everything above was generated once and approved except for the corrections listed below. This is a retake of the SAME shot, not a new idea: same person with the same face, hair, wardrobe and expression, the same car in the same colour, trim and position, the same location and background, the same time of day and lighting, the same lens, framing and camera move, the same on-screen text, the same pacing and the same first and last frame composition.',
-    'Change ONLY these points:',
-    ...notes.map((n, i) => `${i + 1}. ${n}`),
+    ...(attached
+      ? [
+          `${attached} reference image${attached === 1 ? ' is' : 's are'} attached to this retake. ${
+            attached === 1 ? 'It shows' : 'They show'
+          } exactly what the vehicle must look like here — match its design, colour, lamps, wheels and badges shot for shot. ${
+            attached === 1 ? 'It is' : 'They are'
+          } a guide for how it looks, never something to show in the video as a picture.`,
+        ]
+      : []),
+    ...(notes.length ? ['Change ONLY these points:', ...notes.map((n, i) => `${i + 1}. ${n}`)] : []),
     'Change nothing else. Any difference other than the points listed above is a failed retake.',
   ].join('\n');
 }

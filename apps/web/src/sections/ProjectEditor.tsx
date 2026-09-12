@@ -3,6 +3,7 @@ import {
   CATEGORIES,
   NARRATION,
   buildPrompt,
+  applyBriefPlan,
   buildBeats,
   buildContext,
   suggestDuration,
@@ -161,9 +162,48 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     preflight?.checks.some((c) => c.code === 'no-spoken-script' || c.code === 'no-pronunciation-spelling'),
   );
   const [storyboardOpen, setStoryboardOpen] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const [planNote, setPlanNote] = useState('');
+  const [planUndo, setPlanUndo] = useState<Project | null>(null);
+  /** The brief this project was last read from, so it is not read twice for nothing. */
+  const plannedFor = useRef('');
   useEffect(() => {
     if (scriptMissing) setStoryboardOpen(true);
   }, [scriptMissing]);
+
+  /**
+   * Read the brief and fill the project in: the use cases, their fields, the vehicle,
+   * the presenter, the video settings. It only fills what is still blank — an answer
+   * already given is never overwritten — and Undo puts everything back.
+   */
+  const fillFromBrief = async (force: boolean) => {
+    const prompt = project?.prompt?.trim();
+    if (!project || !prompt || planning) return;
+    plannedFor.current = prompt;
+    setPlanning(true);
+    setPlanNote('');
+    const r = await genApi.plan(prompt, project.clientId);
+    setPlanning(false);
+    if (isApiError(r)) {
+      setPlanNote(`${r.code}: ${r.message}`);
+      return;
+    }
+    const patch = applyBriefPlan(project, r, { cars, actors, force });
+    if (!Object.keys(patch).length) {
+      setPlanNote(r.why ? `${r.why} Everything it suggested is already set.` : 'Everything it suggested is already set.');
+      return;
+    }
+    setPlanUndo(project);
+    set(patch);
+    const filled = [
+      patch.useCases ? `the use case${patch.useCases.length > 1 ? 's' : ''}` : '',
+      patch.fieldValues ? 'their fields' : '',
+      patch.carIds ? 'the vehicle' : '',
+      patch.actorId ? 'the presenter' : '',
+      patch.spec ? 'the video settings' : '',
+    ].filter(Boolean);
+    setPlanNote(`${r.why ?? 'Read your brief.'} Filled ${filled.join(', ')} — change anything that is not right.`);
+  };
 
   /** Fill every spoken scene with a real line, then let the designer edit them. */
   const writeScript = async (): Promise<string> => {
@@ -262,8 +302,10 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const fit = formatFit(brief?.durationSec ?? project.spec.durationSec, project.spec.aspect);
   const parts = built?.parts ?? [];
   const sells = client?.vehicleKind ?? 'car';
+  // A dealer can sell several brands; every one of them can be filmed.
+  const clientBrands = (client?.brands?.length ? client.brands : [client?.brand]).filter((b): b is string => Boolean(b?.trim()));
   const pickableVehicles = cars.filter(
-    (c) => (c.kind ?? 'car') === sells && (!client?.brand || brandMatches(c.brand, client.brand)),
+    (c) => (c.kind ?? 'car') === sells && (!clientBrands.length || clientBrands.some((b) => brandMatches(c.brand, b))),
   );
   const otherVehicles = cars.filter((c) => !pickableVehicles.includes(c));
 
@@ -345,8 +387,47 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               <textarea
                 value={project.prompt ?? ''}
                 onChange={(e) => set({ prompt: e.target.value })}
-                placeholder="e.g. Lead on safety, keep it warm and family-first. Show the delivery bay at the end."
+                // Written once, read once: whatever is still blank is filled in from it.
+                onBlur={() => {
+                  const p = (project.prompt ?? '').trim();
+                  if (p && p !== plannedFor.current) void fillFromBrief(false);
+                }}
+                placeholder="e.g. Ganesh Chaturthi post inviting customers to buy a bike this festive season."
               />
+              <div className="toolbar" style={{ marginTop: 6 }}>
+                <button
+                  className="btn ghost small"
+                  type="button"
+                  disabled={planning || !(project.prompt ?? '').trim()}
+                  onClick={() => void fillFromBrief(true)}
+                  title="Read the brief again and replace what is already filled in"
+                >
+                  {planning ? 'Reading the brief…' : 'Fill from brief'}
+                </button>
+                {planUndo && (
+                  <button
+                    className="btn ghost small"
+                    type="button"
+                    onClick={() => {
+                      const before = planUndo;
+                      setPlanUndo(null);
+                      setPlanNote('Put back as it was.');
+                      set({
+                        useCases: before.useCases,
+                        fieldValues: before.fieldValues,
+                        spec: before.spec,
+                        carId: before.carId,
+                        carIds: before.carIds,
+                        carColour: before.carColour,
+                        actorId: before.actorId,
+                      });
+                    }}
+                  >
+                    Undo
+                  </button>
+                )}
+              </div>
+              {planNote && <div className="hint">{planNote}</div>}
             </Field>
             <div className="row3">
               <Field label="Client">
@@ -374,8 +455,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 hint={
                   vehicleIds.length > 1
                     ? `${vehicleIds.length} models — the first is the hero and carries the variant and colour.`
-                    : client?.brand
-                      ? `${client.brand} ${client.vehicleKind === 'bike' ? 'bikes & scooters' : 'cars'} in your library. Leave empty to feature the whole range.`
+                    : clientBrands.length
+                      ? `${clientBrands.join(' + ')} ${client?.vehicleKind === 'bike' ? 'bikes & scooters' : 'cars'} in your library. Leave empty to feature the whole range.`
                       : 'Leave empty to feature the whole range.'
                 }
               >
@@ -388,7 +469,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   <div className="vehlist">
                     {pickableVehicles.length === 0 && (
                       <div className="hint">
-                        Nothing in the library for {client?.brand || 'this client'} yet — sync the brand in
+                        Nothing in the library for {clientBrands.join(' or ') || 'this client'} yet — sync the brand in
                         Vehicles.
                       </div>
                     )}

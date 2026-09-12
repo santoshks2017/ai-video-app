@@ -247,7 +247,8 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
     // No model picked. Rather than leave the video model to invent one — which
     // is how an outdated generation ends up on screen — hand it the brand's
     // current range from the library and let it choose within that.
-    const brand = client.brand.trim();
+    // A dealer with several brands leads with the first.
+    const brand = (client.brands?.find((b) => b.trim()) ?? client.brand).trim();
     const sells: VehicleKind = client.vehicleKind ?? 'car';
     const models = (inputs.library ?? [])
       .filter((c) => (c.kind ?? 'car') === sells && brandMatches(c.brand, brand))

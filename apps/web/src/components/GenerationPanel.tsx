@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fmtTime, formatInr, type Brief, type PromptPart, type ScenePlan, clampPace } from '@ava/shared';
+import { fmtTime, formatInr, type Brief, type PromptPart, type ScenePlan, type StoredImage, clampPace } from '@ava/shared';
 import { useApp } from '../state/appStore.js';
+import { ImageUpload, Thumb } from './ui.js';
 import {
   api,
   isApiError,
@@ -61,6 +62,11 @@ export function GenerationPanel({
   const [refineStatus, setRefineStatus] = useState<'idle' | 'running'>('idle');
   const [refineErr, setRefineErr] = useState('');
   const [refineConfirmed, setRefineConfirmed] = useState(false);
+  /** Named before the request goes out, so Stop has something to address. */
+  const [runId, setRunId] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  /** "The car is wrong in these frames — here is the car." */
+  const [attachments, setAttachments] = useState<StoredImage[]>([]);
   /** Clips of jobs opened from history — the list payload doesn't carry them. */
   const [jobClips, setJobClips] = useState<Record<string, ClipView[]>>({});
   // Tell the workspace this project is busy, so its tab says so from anywhere.
@@ -104,6 +110,9 @@ export function GenerationPanel({
   }, [startedAt]);
 
   const run = async () => {
+    const id = crypto.randomUUID();
+    setRunId(id);
+    setStopping(false);
     setStatus('running');
     setError('');
     setResult(null);
@@ -116,6 +125,7 @@ export function GenerationPanel({
       modelId,
       project,
       sceneOverrides,
+      id,
     );
     setStartedAt(null);
     void loadEta();
@@ -138,9 +148,16 @@ export function GenerationPanel({
     setRedo([]);
     setFeedback('');
     setRefineErr('');
-    setStatus(r.status === 'done' ? 'done' : 'running');
+    setStatus(r.status === 'running' ? 'running' : 'done');
     onGenerated?.(r.jobId, r.finalUrl ?? null);
     void loadHistory();
+  };
+
+  /** Stop asks the run to finish the part it is on and keep what it has. */
+  const stopRun = async () => {
+    if (!runId) return;
+    setStopping(true);
+    await api.stop(runId);
   };
 
   const clips: ClipView[] = result?.clips ?? [];
@@ -196,20 +213,32 @@ export function GenerationPanel({
   const toggleRedo = (partNum: number) =>
     setRedo((r) => (r.includes(partNum) ? r.filter((n) => n !== partNum) : [...r, partNum].sort((a, b) => a - b)));
 
-  const runRefine = async () => {
-    if (!activeJobId) return;
+  /** A run that was stopped: the parts it never got to. */
+  const stoppedRun = result?.status === 'cancelled';
+  const missingParts = parts
+    .filter((p) => !(result?.clips ?? []).some((c) => c.partNum === p.partNum && c.status === 'done'))
+    .map((p) => p.partNum);
+
+  const runRefine = async (
+    jobId = activeJobId,
+    which = redo,
+    note = feedback,
+    confirm = refineNeedsConfirm ? refineInr : undefined,
+  ) => {
+    if (!jobId) return;
     setRefineStatus('running');
     setRefineErr('');
     const r = await api.refine(
-      activeJobId,
+      jobId,
       brief,
       parts,
-      redo,
-      feedback,
-      refineNeedsConfirm ? refineInr : undefined,
+      which,
+      note,
+      confirm,
       modelId,
       project,
       sceneOverrides,
+      attachments,
     );
     setRefineStatus('idle');
     if (isApiError(r)) {
@@ -221,6 +250,7 @@ export function GenerationPanel({
     setViewing(null);
     setStatus('done');
     setRedo([]);
+    setAttachments([]);
     setRefineConfirmed(false);
     onGenerated?.(r.jobId, r.finalUrl ?? null);
     void loadHistory();
@@ -263,10 +293,51 @@ export function GenerationPanel({
                 ? 'Regenerate'
                 : 'Generate video'}
           </button>
+          {status === 'running' && runId && (
+            <button className="btn" type="button" disabled={stopping} onClick={stopRun}>
+              {stopping ? 'Stopping…' : 'Stop'}
+            </button>
+          )}
           {status !== 'running' && eta && (
             <span className="hint">Usually ready in about {fmtDur(eta.seconds)}</span>
           )}
         </div>
+        {stopping && status === 'running' && (
+          <div className="hint">
+            Stopping after the part it is on — a model cannot be interrupted mid-render, and those seconds are
+            already paid for. Everything made so far is kept and stitched.
+          </div>
+        )}
+        {stoppedRun && (
+          <div className="check warn" style={{ marginTop: 8 }}>
+            <span className="icon">!</span>
+            <span>
+              Stopped{missingParts.length ? ` with ${missingParts.length} of ${parts.length} parts still to make` : ''}.
+              What was made is stitched into the video below and saved in history.
+              {missingParts.length > 0 && canGenerateRole && (
+                <>
+                  {' '}
+                  <button
+                    className="btn small"
+                    type="button"
+                    disabled={refineStatus === 'running'}
+                    onClick={() =>
+                      runRefine(
+                        result?.jobId,
+                        missingParts,
+                        '',
+                        // The spend for the whole video was confirmed when it started.
+                        Math.round((costInr * missingParts.length) / Math.max(1, parts.length)),
+                      )
+                    }
+                  >
+                    {refineStatus === 'running' ? 'Working…' : `Make the remaining ${missingParts.length}`}
+                  </button>
+                </>
+              )}
+            </span>
+          </div>
+        )}
 
         {status === 'running' && startedAt && (
           <GenTimer startedAt={startedAt} now={now} eta={eta} segments={parts.length} />
@@ -375,6 +446,25 @@ export function GenerationPanel({
                     }
                   />
                   <div className="refine-label">
+                    Attach a picture if the fix is "use this one" — the car, a logo, a look. It goes to the model as
+                    the reference for the segments you tick.
+                  </div>
+                  <div className="thumbs">
+                    {attachments.map((img) => (
+                      <Thumb
+                        key={img.refId}
+                        img={img}
+                        onRemove={() => setAttachments((a) => a.filter((x) => x.refId !== img.refId))}
+                      />
+                    ))}
+                    <ImageUpload
+                      label="Retake reference"
+                      kind="car-model"
+                      buttonText="Attach"
+                      onUploaded={(img) => setAttachments((a) => [...a, img])}
+                    />
+                  </div>
+                  <div className="refine-label">
                     Which segments need the retake? Anything left unticked is re-used exactly as it is, and costs
                     nothing.
                   </div>
@@ -416,7 +506,7 @@ export function GenerationPanel({
                     <button
                       className="btn primary"
                       disabled={!canGenerateRole || refineStatus === 'running' || (refineNeedsConfirm && !refineConfirmed)}
-                      onClick={runRefine}
+                      onClick={() => runRefine()}
                     >
                       {refineStatus === 'running'
                         ? 'Working…'

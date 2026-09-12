@@ -79,7 +79,9 @@ export interface JobRecord {
   posterPath?: string;
   /** The film's one continuous music track, kept so a retake lays the same bed back. */
   musicStoragePath?: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'cancelled';
+  /** Set by the Stop button. The run puts down its tools after the part it is on. */
+  cancelRequested?: boolean;
   createdAt: number;
   updatedAt: number;
   categories: string[];

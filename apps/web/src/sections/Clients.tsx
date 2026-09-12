@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   suggestDisplayName,
   defaultFooterText,
@@ -42,8 +42,26 @@ export function ClientsSection() {
   const [gmbInput, setGmbInput] = useState('');
   const [gmbBusy, setGmbBusy] = useState(false);
   const [gmbNote, setGmbNote] = useState('');
+  const [brandDraft, setBrandDraft] = useState('');
 
   const set = (p: Partial<ClientProfile>) => setDraft((d) => (d ? { ...d, ...p } : d));
+
+  const cars = useApp((s) => s.cars);
+  /** Brands that exist in the vehicle library, so the picker only offers what can be filmed. */
+  const libraryBrands = useMemo(
+    () => [...new Set(cars.map((c) => c.brand.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [cars],
+  );
+  const brands = draft?.brands?.length ? draft.brands : draft?.brand ? [draft.brand] : [];
+  const extraBrands = brands.filter((b) => !libraryBrands.includes(b));
+  // The first brand is the main one: it is what the films lead with.
+  const setBrands = (next: string[]) => set({ brands: next, brand: next[0] ?? '' });
+  const toggleBrand = (b: string) => setBrands(brands.includes(b) ? brands.filter((x) => x !== b) : [...brands, b]);
+  const addBrand = () => {
+    const b = brandDraft.trim();
+    if (b && !brands.some((x) => x.toLowerCase() === b.toLowerCase())) setBrands([...brands, b]);
+    setBrandDraft('');
+  };
 
   const save = async () => {
     if (!draft?.name.trim()) {
@@ -169,8 +187,48 @@ export function ClientsSection() {
                 placeholder="e.g. Sterling Hyundai"
               />
             </Field>
-            <Field label="Brand">
-              <input value={draft.brand} onChange={(e) => set({ brand: e.target.value })} placeholder="e.g. Hyundai" />
+            <Field
+              label="Brands"
+              hint="What this dealer sells, from your vehicle library. Pick more than one for a multi-brand group — the first is the one films lead with."
+            >
+              <div className="brandgrid">
+                {libraryBrands.map((b) => (
+                  <button
+                    key={b}
+                    type="button"
+                    className={`brandchip${brands.includes(b) ? ' on' : ''}`}
+                    onClick={() => toggleBrand(b)}
+                  >
+                    {b}
+                  </button>
+                ))}
+                {extraBrands.map((b) => (
+                  <button key={b} type="button" className="brandchip on" onClick={() => toggleBrand(b)}>
+                    {b}
+                  </button>
+                ))}
+              </div>
+              {libraryBrands.length === 0 && (
+                <div className="hint">
+                  No vehicles synced yet — sync a brand in Vehicles, or type one in below.
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                <input
+                  value={brandDraft}
+                  onChange={(e) => setBrandDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addBrand();
+                    }
+                  }}
+                  placeholder="A brand not in the library yet"
+                />
+                <button className="btn small" type="button" disabled={!brandDraft.trim()} onClick={addBrand}>
+                  Add
+                </button>
+              </div>
             </Field>
           </div>
           <Field

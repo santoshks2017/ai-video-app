@@ -18,5 +18,6 @@ export * from './compose.js';
 export * from './duration.js';
 export * from './visuals.js';
 export * from './spoken.js';
+export * from './planApply.js';
 export * from './languageSeeds.js';
 export * from './changelog.js';

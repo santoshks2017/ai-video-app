@@ -85,6 +85,7 @@ import {
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
 import { syncOemModel, OemSyncError } from './oemSync.js';
+import { planFromBrief, PlanError, type PlanContext } from './planBrief.js';
 import { importPlace, PlacesError } from './places.js';
 import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './credentials.js';
 
@@ -411,6 +412,46 @@ async function scriptKey(): Promise<string | undefined> {
   const google = creds.find((c) => c.provider === 'google-gemini' && c.enabled !== false);
   return google && google.usesEnvKey === false ? await getCredentialKey(google.id) : config.googleApiKey;
 }
+
+/**
+ * Read the brief and propose the project: which use cases, what goes in their fields,
+ * the vehicle, the presenter, the call to action. What may actually be written into the
+ * project is decided by applyBriefPlan, which only fills what the designer left blank.
+ */
+app.post<{ Body: { prompt?: string; clientId?: string } }>('/api/projects/plan', async (req, reply) => {
+  const prompt = (req.body?.prompt ?? '').trim();
+  if (!prompt) return reply.code(400).send({ code: 'plan-no-brief', message: 'Write the brief first.' });
+  const apiKey = await scriptKey();
+  if (!apiKey) {
+    return reply
+      .code(503)
+      .send({ code: 'plan-no-key', message: 'Reading the brief needs a Google Gemini key. Add one in APIs & models.' });
+  }
+  try {
+    const client = req.body?.clientId
+      ? await getOne<Record<string, any>>('clients', req.body.clientId).catch(() => null)
+      : null;
+    const [cars, actors] = await Promise.all([
+      listAll<Record<string, any>>('cars'),
+      listAll<Record<string, any>>('actors'),
+    ]);
+    // A dealer's own brands first: those are the vehicles this film can actually show.
+    const brands: string[] = client?.brands?.length ? client.brands : client?.brand ? [client.brand] : [];
+    const mine = brands.length ? cars.filter((c) => brands.some((b) => brandMatches(String(c.brand ?? ''), b))) : cars;
+    return await planFromBrief(
+      {
+        prompt,
+        client: client as PlanContext['client'],
+        cars: (mine.length ? mine : cars) as PlanContext['cars'],
+        actors: actors as PlanContext['actors'],
+      },
+      apiKey,
+    );
+  } catch (e) {
+    const err = e as PlanError;
+    return reply.code(err.status ?? 502).send({ code: err.code ?? 'plan-failed', message: err.message });
+  }
+});
 
 /**
  * Re-run the pronunciation pass alone, against the current language guide.
@@ -838,6 +879,8 @@ interface GenerateBody {
   projectName?: string;
   /** Storyboard edits — the captions are composited from these. */
   sceneOverrides?: Record<string, SceneOverride>;
+  /** Chosen by the browser so it can stop the run while this request is still open. */
+  jobId?: string;
 }
 
 interface ResolvedModel {
@@ -925,6 +968,8 @@ async function renderSegment(
     /** The deliverable resolution. The model may render lower; post upscales. */
     resolution: Resolution;
     seedFrame?: Buffer;
+    /** A frame of the vehicle from the opening part — what it must keep looking like. */
+    anchorFrame?: Buffer;
     references: OmniRef[];
   },
 ): Promise<{ bytes: Buffer; interactionId: string; renderResolution: Resolution }> {
@@ -986,10 +1031,14 @@ async function renderSegment(
   // continues the motion rather than restarting it.
   const refs: OmniRef[] = [];
   if (seeded) refs.push({ data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
-  // A continuation is built on the previous part's last frame, which already carries the
-  // car, the presenter and the showroom. Sending the car's catalogue photos with it as well
-  // is how a white-backdrop product shot got cut into the middle of a film — so, as Veo
-  // and Seedance already do, the seed frame carries a continuation on its own.
+  // A continuation is built on the previous part's last frame. Sending the car's catalogue
+  // photos with it is how a white-backdrop product shot got cut into the middle of a film —
+  // but with nothing but one frame to go on, a later part drifted to an older generation of
+  // the car. So it gets a frame of the car from THIS film's opening part instead: the right
+  // vehicle, already in the right place, and nothing a model would mistake for a shot.
+  if (seeded && req.anchorFrame) {
+    refs.push({ data: req.anchorFrame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
+  }
   if (!seeded) refs.push(...req.references.slice(0, Math.max(0, model.maxReferenceImages - refs.length)));
 
   const omniRes = render === '480p' ? '720p' : render;
@@ -1229,7 +1278,10 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     });
   }
 
-  const jobId = randomUUID();
+  // The browser names the run so it can stop it: this request does not answer until
+  // the video is finished, and until then there is nothing else to address it by.
+  const asked = String(req.body?.jobId ?? '');
+  const jobId = /^[0-9a-f-]{10,64}$/i.test(asked) ? asked : randomUUID();
   const now = Date.now();
   const clips: JobClip[] = parts.map((p) => ({
     partNum: p.partNum,
@@ -1280,8 +1332,17 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   try {
     const segmentBytes: Buffer[] = [];
     let prevBytes: Buffer | null = null;
+    /** A frame of the vehicle from the opening part, handed to every part after it. */
+    let anchorFrame: Buffer | undefined;
+    let stopped = false;
 
     for (let i = 0; i < parts.length; i++) {
+      // A provider cannot be interrupted mid-render, so Stop is honoured between parts:
+      // whatever is already made is kept and stitched.
+      if (await stopRequested(jobId)) {
+        stopped = true;
+        break;
+      }
       const part = parts[i]!;
       const isFirst = i === 0;
       const seedFrame = !isFirst && prevBytes ? ((await lastFrame(prevBytes)) ?? undefined) : undefined;
@@ -1293,6 +1354,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
         duration: part.duration,
         resolution: wanted,
         seedFrame,
+        anchorFrame,
         references,
       });
 
@@ -1302,6 +1364,27 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
 
       segmentBytes.push(bytes);
       prevBytes = bytes;
+      // Taken a little way into the opening part, where the vehicle is established.
+      if (isFirst) anchorFrame = (await posterFrame(bytes, Math.min(3, part.duration * 0.6))) ?? undefined;
+      if (await stopRequested(jobId)) {
+        stopped = true;
+        break;
+      }
+    }
+
+    if (stopped && !segmentBytes.length) {
+      await updateJob(jobId, {
+        ...record,
+        status: 'cancelled',
+        cancelRequested: false,
+        clips,
+        costInr: 0,
+        costUsd: 0,
+        totalSeconds: 0,
+        error: 'Stopped before the first part finished.',
+        finishedAt: Date.now(),
+      });
+      return { jobId, status: 'cancelled' as const, cost, clips: clipsForClient(jobId, clips) };
     }
 
     // Post-production: join the segments, lay one continuous music track under
@@ -1322,15 +1405,29 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       posterPath = put?.storagePath;
     }
 
+    // Only the parts that actually rendered are billed, so a stopped run is charged
+    // for what it made.
+    const made = clips.filter((c) => c.status === 'done');
+    const billed = stopped
+      ? estimateSegmentsCost(made.reduce((a, c) => a + (c.seconds ?? 0), 0), made.length, {
+          usdPerSecond: resolved.usdPerSecond,
+        })
+      : cost;
+
     // The whole record again, not just what changed: if the first save was lost,
     // this write alone still files the video under its project.
     await updateJob(jobId, {
       ...record,
-      status: 'done',
+      status: stopped ? 'cancelled' : 'done',
+      cancelRequested: false,
       clips,
       finalStoragePath,
       posterPath,
       musicStoragePath: bed?.storagePath,
+      costInr: billed.inr,
+      costUsd: billed.usd,
+      totalSeconds: billed.totalSeconds,
+      error: stopped ? `Stopped after ${made.length} of ${parts.length} parts. What was made is kept.` : undefined,
       finishedAt: Date.now(),
     });
     if (req.caller) {
@@ -1362,7 +1459,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     }
     return {
       jobId,
-      status: 'done',
+      status: stopped ? ('cancelled' as const) : ('done' as const),
       cost,
       finalUrl: `/api/clips/${jobId}/final`,
       clips: clipsForClient(jobId, clips),
@@ -1413,6 +1510,26 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   }
 });
 
+/** Has Stop been pressed on this run? Read between parts, never mid-render. */
+async function stopRequested(jobId: string): Promise<boolean> {
+  return Boolean((await getJob(jobId).catch(() => null))?.cancelRequested);
+}
+
+/**
+ * Stop a run.
+ *
+ * No provider can be interrupted mid-render — the seconds are already being paid for —
+ * so this asks the run to stop after the part it is on. What is already made is stitched
+ * and kept, and the parts that never ran can be picked up afterwards as a retake.
+ */
+app.post<{ Params: { jobId: string } }>('/api/generate/:jobId/stop', async (req, reply) => {
+  const job = await getJob(req.params.jobId);
+  if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such job' });
+  if (job.status !== 'running') return { ok: true, status: job.status };
+  await updateJob(req.params.jobId, { cancelRequested: true });
+  return { ok: true, status: 'stopping' as const };
+});
+
 app.get<{ Params: { jobId: string } }>('/api/generate/:jobId', async (req, reply) => {
   const job = await getJob(req.params.jobId);
   if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such job' });
@@ -1439,6 +1556,8 @@ interface RefineBody {
   /** Part numbers to regenerate. Empty = restitch the stored segments only. */
   redo?: number[];
   feedback?: string;
+  /** Images attached to the retake — what the vehicle must look like in the parts redone. */
+  attachments?: { storagePath?: string; refId?: string; label?: string }[];
   modelId?: string;
   projectId?: string;
   projectName?: string;
@@ -1568,12 +1687,31 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         ? makeMusicBed(brief, jobId, totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0))
         : Promise.resolve(null);
     const { references, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+    // Images attached to this retake: "the car is wrong in these frames — here is the car".
+    const attached: OmniRef[] = [];
+    for (const a of req.body?.attachments ?? []) {
+      const obj = a.storagePath ? await readObject(a.storagePath).catch(() => null) : null;
+      if (obj) attached.push({ data: obj.bytes.toString('base64'), mimeType: obj.contentType || 'image/jpeg', kind: 'image' });
+    }
 
     try {
       const segmentBytes: Buffer[] = [];
       let prevBytes: Buffer | null = null;
+      let anchorFrame: Buffer | undefined;
 
       for (let i = 0; i < parts.length; i++) {
+        // Stopping a retake abandons it: the video it was refining is untouched.
+        if (await stopRequested(jobId)) {
+          await updateJob(jobId, {
+            ...record,
+            status: 'cancelled',
+            cancelRequested: false,
+            clips,
+            error: 'Stopped during the retake. The video it was refining is untouched.',
+            finishedAt: Date.now(),
+          }).catch(() => {});
+          return { jobId, status: 'cancelled' as const, cost, clips: clipsForClient(jobId, clips) };
+        }
         const part = parts[i]!;
         let bytes: Buffer;
 
@@ -1596,12 +1734,14 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
           const seedFrame = !isFirst && prevBytes ? ((await lastFrame(prevBytes)) ?? undefined) : undefined;
           const renderStart = Date.now();
           const rendered = await renderSegment(resolved!, {
-            prompt: applyFeedback(isFirst ? part.text : part.continuationText || part.text, feedback),
+            prompt: applyFeedback(isFirst ? part.text : part.continuationText || part.text, feedback, attached.length),
             aspect: brief.aspect,
             duration: part.duration,
             resolution: wantedResolution(brief),
             seedFrame,
-            references,
+            anchorFrame,
+            // An attached image outranks the library's photos for the parts being redone.
+            references: attached.length ? [...attached, ...references] : references,
           });
           bytes = rendered.bytes;
           clips[i] = {
@@ -1616,6 +1756,8 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         await updateJob(jobId, { clips });
         segmentBytes.push(bytes);
         prevBytes = bytes;
+        // The vehicle as this film already showed it, for the parts that follow.
+        if (i === 0) anchorFrame = (await posterFrame(bytes, Math.min(3, part.duration * 0.6))) ?? undefined;
       }
 
       // Overlay copy is rebuilt from the current brief, so a footer or end-card

@@ -172,8 +172,13 @@ export interface ClientProfile {
    * Jasper Cars Private Limited, Malviya Nagar", which no overlay can carry.
    */
   displayName?: string;
-  /** Brand(s) the dealer sells, e.g. "Hyundai". */
+  /** The dealer's main brand, e.g. "Hyundai" — the first of `brands`. */
   brand: string;
+  /**
+   * Every brand this dealer sells, named as the vehicle library names them. A
+   * multi-brand group picks more than one; the first is the one the films lead with.
+   */
+  brands?: string[];
   /**
    * Does this dealer sell cars or two-wheelers?
    *

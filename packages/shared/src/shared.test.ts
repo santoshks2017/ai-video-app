@@ -35,6 +35,11 @@ import {
   estimateSegmentsCost,
   LANGUAGE_SEEDS,
   plainSpoken,
+  applyBriefPlan,
+  type BriefPlan,
+  type CarModelProfile,
+  type ActorProfile,
+  type CategoryId,
   storyGuidance,
   adaptTrial,
   overlayCopy,
@@ -698,5 +703,81 @@ test('spoken lines reach the model as plain words — no stress capitals, no syl
     assert.ok(!/[A-Z]{2,}/.test(g.say.replace(/\b(SUV|EV|EMI)\b/g, '')), g.say);
     assert.ok(!/[A-Za-z]-[A-Za-z]/.test(g.say), g.say);
   }
+});
+
+test('every part names the car and rules out an earlier generation of it', () => {
+  const b = base({
+    categories: ['feature'],
+    narration: 'presenter',
+    durationSec: 40,
+    maxChunkSec: 10,
+    modelSpecific: true,
+    carModel: 'Mahindra XUV 3XO',
+    fieldValues: { feature: { feature1: 'Sunroof', feature2: '6 airbags' } },
+  });
+  const res = buildPrompt(b)!;
+  assert.ok(res.parts.length > 1);
+  for (const text of [res.parts[0]!.text, ...res.parts.slice(1).map((p) => p.continuationText ?? '')]) {
+    assert.match(text, /The car is the Mahindra XUV 3XO and nothing else/);
+    assert.match(text, /Never an earlier generation/);
+  }
+});
+
+test('a brief fills the blanks, checks what it is told, and never overwrites an answer', () => {
+  const car: CarModelProfile = {
+    id: 'x3xo',
+    brand: 'Mahindra',
+    model: 'XUV 3XO',
+    slug: 'mahindra/xuv-3xo',
+    images: {},
+    colours: [{ name: 'Stealth Black' }, { name: 'Tango Red' }],
+    variants: [],
+    syncStatus: 'ok',
+    createdAt: 0,
+    updatedAt: 0,
+  };
+  const actor: ActorProfile = { id: 'meera', name: 'Meera', gender: 'female', createdAt: 0, updatedAt: 0 };
+  const project = { ...emptyProject(), id: 'p1', prompt: 'Ganesh Chaturthi post inviting customers to buy a bike' };
+  const plan: BriefPlan = {
+    useCases: ['festival', 'offer', 'not-a-use-case' as CategoryId],
+    fieldValues: {
+      festival: { occasionName: 'Ganesh Chaturthi', occasionType: 'Not one of the options', festiveDressing: 'marigold garlands' },
+      offer: { offer1: 'Festive benefits', nonsense: 'made up field' },
+    },
+    spec: { narration: 'presenter', aspect: '9:16', cta: 'Visit us this Ganesh Chaturthi', captionStyle: 'Short Punchy' },
+    vehicle: { model: 'XUV 3XO', colour: 'Stealth Black' },
+    actor: 'Meera',
+    why: 'A festive invitation to the showroom.',
+  };
+
+  const patch = applyBriefPlan(project, plan, { cars: [car], actors: [actor] });
+  assert.deepEqual(patch.useCases, ['festival', 'offer'], 'a use case the library does not have is dropped');
+  assert.equal(patch.fieldValues?.festival?.occasionName, 'Ganesh Chaturthi');
+  assert.equal(patch.fieldValues?.festival?.occasionType, undefined, 'a select only takes one of its own options');
+  assert.equal(patch.fieldValues?.offer?.offer1, 'Festive benefits');
+  assert.equal(patch.fieldValues?.offer?.nonsense, undefined, 'a field the use case does not have is dropped');
+  assert.deepEqual(patch.carIds, ['x3xo']);
+  assert.equal(patch.carColour, 'Stealth Black');
+  assert.equal(patch.actorId, 'meera');
+  assert.equal(patch.spec?.cta, 'Visit us this Ganesh Chaturthi');
+
+  // What the designer has already answered stays as it is.
+  const chosen = {
+    ...project,
+    useCases: ['feature'] as CategoryId[],
+    carColour: 'Tango Red',
+    carIds: ['x3xo'],
+    spec: { ...project.spec, cta: 'Book now' },
+  };
+  const second = applyBriefPlan(chosen, plan, { cars: [car], actors: [actor] });
+  assert.equal(second.useCases, undefined, 'use cases already picked are left alone');
+  assert.equal(second.carColour, undefined);
+  assert.equal((second.spec ?? chosen.spec).cta, 'Book now');
+
+  // Asked for a fresh fill, it replaces them.
+  const forced = applyBriefPlan(chosen, plan, { cars: [car], actors: [actor], force: true });
+  assert.deepEqual(forced.useCases, ['festival', 'offer']);
+  assert.equal(forced.carColour, 'Stealth Black');
+  assert.equal(forced.spec?.cta, 'Visit us this Ganesh Chaturthi');
 });
 

@@ -73,6 +73,7 @@ import {
   type ProviderKind,
   type Role,
   type VehicleKind,
+  type VehicleDataSource,
   speakingSeconds,
   sceneEditFor,
   DEFAULT_USD_TO_INR,
@@ -83,6 +84,7 @@ import {
   plainSpoken,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
+import { syncOemModel, OemSyncError } from './oemSync.js';
 import { importPlace, PlacesError } from './places.js';
 import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './credentials.js';
 
@@ -728,7 +730,7 @@ app.post<{ Body: { brand?: string; kind?: VehicleKind; limit?: number; refresh?:
       try {
         const profile = await syncVehicleModel(`${b.slug}/${m.slug}`, { kind: b.kind });
         const prior = existing.find((c) => c.id === profile.id);
-        await upsert('cars', { ...profile, createdAt: prior?.createdAt ?? profile.createdAt });
+        await upsert('cars', { ...profile, source: 'cardekho', createdAt: prior?.createdAt ?? profile.createdAt });
         results.push({
           slug: m.slug,
           name: m.name,
@@ -745,21 +747,64 @@ app.post<{ Body: { brand?: string; kind?: VehicleKind; limit?: number; refresh?:
   },
 );
 
-app.post<{ Body: { query?: string; kind?: 'car' | 'bike'; refresh?: boolean } }>(
-  '/api/cars/sync',
-  async (req, reply) => {
-    const query = req.body?.query?.trim();
-    if (!query) return reply.code(400).send({ code: 'bad-request', message: 'query required (e.g. "Hyundai Creta")' });
-    try {
-      const profile = await syncVehicleModel(query, { kind: req.body?.kind ?? 'car' });
-      const existing = await getOne<{ createdAt?: number }>('cars', profile.id);
-      const saved = await upsert('cars', { ...profile, createdAt: existing?.createdAt ?? profile.createdAt });
-      return saved;
-    } catch (e) {
-      return reply.code(502).send({ code: 'car-sync-failed', message: (e as Error).message });
+app.post<{
+  Body: {
+    query?: string;
+    kind?: 'car' | 'bike';
+    refresh?: boolean;
+    /** Which site to read this vehicle from. Defaults to CarDekho, as it always did. */
+    source?: VehicleDataSource;
+    /** The manufacturer's page, when the source is the OEM. */
+    url?: string;
+    /** Re-syncing a vehicle already in the library: its record is kept, so projects follow the switch. */
+    id?: string;
+  };
+}>('/api/cars/sync', async (req, reply) => {
+  const source: VehicleDataSource = req.body?.source === 'oem' ? 'oem' : 'cardekho';
+  const held = req.body?.id ? await getOne<Record<string, any>>('cars', req.body.id) : null;
+
+  if (source === 'oem') {
+    const url = (req.body?.url ?? held?.oemUrl ?? '').trim();
+    if (!url) {
+      return reply.code(400).send({ code: 'bad-request', message: 'A manufacturer page URL is required.' });
     }
-  },
-);
+    try {
+      const profile = await syncOemModel({
+        url,
+        kind: req.body?.kind ?? held?.kind ?? 'car',
+        // A vehicle already in the library keeps its record, its id and its name.
+        id: held?.id,
+        brand: held?.brand,
+        model: held?.model,
+        apiKey: (await scriptKey()) ?? '',
+      });
+      const prior = held ?? (await getOne<{ createdAt?: number }>('cars', profile.id));
+      return await upsert('cars', { ...profile, createdAt: prior?.createdAt ?? profile.createdAt });
+    } catch (e) {
+      const err = e as OemSyncError;
+      return reply.code(err.status ?? 502).send({ code: err.code ?? 'oem-sync-failed', message: err.message });
+    }
+  }
+
+  const query = req.body?.query?.trim() || [held?.brand, held?.model].filter(Boolean).join(' ');
+  if (!query) return reply.code(400).send({ code: 'bad-request', message: 'query required (e.g. "Hyundai Creta")' });
+  try {
+    const profile = await syncVehicleModel(query, { kind: req.body?.kind ?? held?.kind ?? 'car' });
+    // Switching an existing vehicle back to CarDekho writes into the same record; the
+    // manufacturer's page is kept so the switch can be made again without retyping it.
+    const id = held?.id ?? profile.id;
+    const existing = held ?? (await getOne<{ createdAt?: number }>('cars', profile.id));
+    return await upsert('cars', {
+      ...profile,
+      id,
+      source: 'cardekho',
+      oemUrl: held?.oemUrl,
+      createdAt: existing?.createdAt ?? profile.createdAt,
+    });
+  } catch (e) {
+    return reply.code(502).send({ code: 'car-sync-failed', message: (e as Error).message });
+  }
+});
 
 /* ---- client import from a Google Business Profile link ---- */
 app.post<{ Body: { url?: string; query?: string } }>('/api/clients/gmb', async (req, reply) => {

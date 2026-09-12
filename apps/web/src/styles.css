@@ -1421,3 +1421,16 @@ textarea.guide {
   color: var(--ink-muted);
 }
 .sb-deleted-chip .btn { padding: 2px 8px; }
+
+/* Which site a vehicle's photos and numbers came from. */
+.source-pick {
+  margin: 10px 0 14px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  display: grid;
+  gap: 8px;
+}
+.source-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; justify-content: space-between; }
+.source-pick .hint { line-height: 1.45; }

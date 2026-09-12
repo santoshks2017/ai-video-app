@@ -38,6 +38,13 @@ export interface ActorProfile {
 
 export type CarAngle = 'front' | 'side' | 'rear' | 'interior';
 
+/**
+ * Where a vehicle's images and specs come from. CarDekho is quick and uniform;
+ * the manufacturer's own site is what a dealer can show a client who asks where
+ * the pictures came from. Either can be re-synced at any time.
+ */
+export type VehicleDataSource = 'cardekho' | 'oem';
+
 export interface CarColour {
   name: string;
   /** Hex sampled from the source filename when CarDekho encodes it. */
@@ -141,6 +148,10 @@ export interface CarModelProfile {
    * airbags"), safe to quote because nothing was inferred.
    */
   highlights?: string[];
+  /** Which site this record was last synced from. Records made before the choice existed are CarDekho. */
+  source?: VehicleDataSource;
+  /** The manufacturer's page for this model, kept even while CarDekho is the live source. */
+  oemUrl?: string;
   sourceUrl?: string;
   syncedAt?: number;
   syncStatus: 'ok' | 'partial' | 'needs-manual' | 'never';

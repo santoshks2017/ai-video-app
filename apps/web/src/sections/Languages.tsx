@@ -176,15 +176,13 @@ export function LanguagesSection() {
               </span>
             </div>
           )}
-          <div className="row2">
+          <div className="field-grid">
             <Field label="Name">
               <input value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder="Hindi" />
             </Field>
             <Field label="Code" hint="Matched against what a model says it can speak.">
               <input value={draft.code} onChange={(e) => set({ code: e.target.value })} placeholder="hi" />
             </Field>
-          </div>
-          <div className="row2">
             <Field label="Native name">
               <input
                 value={draft.nativeName ?? ''}
@@ -201,36 +199,32 @@ export function LanguagesSection() {
                 <option value="yes">Yes — send the line as written</option>
               </select>
             </Field>
-          </div>
-          <div className="check-row">
-            <input
-              type="checkbox"
-              checked={draft.enabled}
-              onChange={(e) => set({ enabled: e.target.checked })}
-            />
-            <span>Available on projects</span>
-          </div>
-          <div className="check-row">
-            <input
-              type="checkbox"
-              checked={Boolean(draft.isDefault)}
-              onChange={(e) => set({ isDefault: e.target.checked })}
-            />
-            <span>Default for new projects</span>
+            <div className="check-row">
+              <input
+                type="checkbox"
+                id="lang_on"
+                checked={draft.enabled}
+                onChange={(e) => set({ enabled: e.target.checked })}
+              />
+              <label htmlFor="lang_on">Available on projects</label>
+              <input
+                type="checkbox"
+                id="lang_def"
+                checked={Boolean(draft.isDefault)}
+                onChange={(e) => set({ isDefault: e.target.checked })}
+                style={{ marginLeft: 14 }}
+              />
+              <label htmlFor="lang_def">Default for new projects</label>
+            </div>
           </div>
 
-          <div className="toolbar" style={{ marginTop: 12, marginBottom: 8 }}>
+          <div className="seg" style={{ margin: '12px 0 10px' }}>
             {(['spoken', 'written', 'glossary'] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={`btn small${tab === t ? ' primary' : ''}`}
-                onClick={() => setTab(t)}
-              >
+              <button key={t} type="button" className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
                 {t === 'spoken'
                   ? 'Spoken rules'
                   : t === 'written'
-                    ? 'On-screen text rules'
+                    ? 'On-screen text'
                     : `Glossary (${draft.glossary?.length ?? 0})`}
               </button>
             ))}
@@ -253,7 +247,7 @@ export function LanguagesSection() {
           {tab === 'written' && (
             <Field
               label="On-screen text rules"
-              hint="The house standard for how cards, the footer and the end card are worded and set in this language. Read by whoever writes the text — the video model never sees it, because it no longer draws any text."
+              hint="How cards, the footer and the end card are worded in this language. Read by whoever writes the text — the video model no longer draws any."
             >
               <textarea
                 className="guide"

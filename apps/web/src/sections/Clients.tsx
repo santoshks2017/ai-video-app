@@ -6,7 +6,7 @@ import {
   type StoredImage,
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Panel, PickList, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
+import { Field, Panel, Section, PickList, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
 import { isApiError, post, abs } from '../lib/client.js';
 
 function blank(): ClientProfile {
@@ -120,8 +120,8 @@ export function ClientsSection() {
         }
       >
         <div className="section-desc">
-          Dealers you make videos for. Name, contact and showroom photos flow into every project tagged to this
-          client — the footer bar, end card and reference images are all derived from here.
+          Dealers you make videos for. The footer bar, end card and reference images of every project tagged to a
+          client come from here.
         </div>
         <PickList
           items={clients}
@@ -179,7 +179,7 @@ export function ClientsSection() {
 
           <div className="divider" />
 
-          <div className="row2">
+          <div className="field-grid">
             <Field label="Client / showroom name" hint="Full name, as on the Google listing.">
               <input
                 value={draft.name}
@@ -188,202 +188,214 @@ export function ClientsSection() {
               />
             </Field>
             <Field
-              label="Brands"
-              hint="What this dealer sells, from your vehicle library. Pick more than one for a multi-brand group — the first is the one films lead with."
+              label="Display name"
+              hint="The short name shown on screen. A full legal name won't fit."
             >
-              <div className="brandgrid">
-                {libraryBrands.map((b) => (
-                  <button
-                    key={b}
-                    type="button"
-                    className={`brandchip${brands.includes(b) ? ' on' : ''}`}
-                    onClick={() => toggleBrand(b)}
-                  >
-                    {b}
-                  </button>
-                ))}
-                {extraBrands.map((b) => (
-                  <button key={b} type="button" className="brandchip on" onClick={() => toggleBrand(b)}>
-                    {b}
-                  </button>
-                ))}
-              </div>
-              {libraryBrands.length === 0 && (
-                <div className="hint">
-                  No vehicles synced yet — sync a brand in Vehicles, or type one in below.
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
                 <input
-                  value={brandDraft}
-                  onChange={(e) => setBrandDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addBrand();
-                    }
-                  }}
-                  placeholder="A brand not in the library yet"
+                  value={draft.displayName ?? ''}
+                  onChange={(e) => set({ displayName: e.target.value })}
+                  placeholder={suggestDisplayName(draft.name) || 'e.g. Jasper Cars'}
                 />
-                <button className="btn small" type="button" disabled={!brandDraft.trim()} onClick={addBrand}>
-                  Add
-                </button>
+                {draft.name && suggestDisplayName(draft.name) !== draft.displayName && (
+                  <button
+                    className="btn small"
+                    type="button"
+                    onClick={() => set({ displayName: suggestDisplayName(draft.name) })}
+                  >
+                    Use “{suggestDisplayName(draft.name)}”
+                  </button>
+                )}
               </div>
             </Field>
-          </div>
-          <Field
-            label="Sells"
-            hint="Honda, Suzuki and Hero badge both — without this, a car showroom's generic film can come back full of motorcycles."
-          >
-            <select
-              value={draft.vehicleKind ?? 'car'}
-              onChange={(e) => set({ vehicleKind: e.target.value as 'car' | 'bike' })}
-            >
-              <option value="car">Cars</option>
-              <option value="bike">Bikes &amp; scooters</option>
-            </select>
-          </Field>
-          <Field
-            label="Display name"
-            hint="The short name shown on screen — footer, end card, spoken lines. A full legal name won't fit."
-          >
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                value={draft.displayName ?? ''}
-                onChange={(e) => set({ displayName: e.target.value })}
-                placeholder={suggestDisplayName(draft.name) || 'e.g. Jasper Cars'}
-              />
-              {draft.name && suggestDisplayName(draft.name) !== draft.displayName && (
-                <button
-                  className="btn small"
-                  type="button"
-                  onClick={() => set({ displayName: suggestDisplayName(draft.name) })}
-                >
-                  Use “{suggestDisplayName(draft.name)}”
-                </button>
-              )}
-            </div>
-          </Field>
-          <div className="row2">
+            <Field label="Sells" hint="Honda, Suzuki and Hero badge both — a car showroom set to bikes comes back full of motorcycles.">
+              <select
+                value={draft.vehicleKind ?? 'car'}
+                onChange={(e) => set({ vehicleKind: e.target.value as 'car' | 'bike' })}
+              >
+                <option value="car">Cars</option>
+                <option value="bike">Bikes &amp; scooters</option>
+              </select>
+            </Field>
             <Field label="City">
               <input value={draft.city ?? ''} onChange={(e) => set({ city: e.target.value })} placeholder="e.g. Jaipur" />
             </Field>
             <Field label="Phone">
               <input value={draft.phone ?? ''} onChange={(e) => set({ phone: e.target.value })} placeholder="98765 43210" />
             </Field>
+            <Field label="Address">
+              <input value={draft.address ?? ''} onChange={(e) => set({ address: e.target.value })} placeholder="MG Road" />
+            </Field>
+            <div className="span">
+              <Field
+                label="Brands"
+                hint="What this dealer sells, from your vehicle library. Pick more than one for a group — the first is what films lead with."
+              >
+                <div className="brandgrid">
+                  {libraryBrands.map((b) => (
+                    <button
+                      key={b}
+                      type="button"
+                      className={`brandchip${brands.includes(b) ? ' on' : ''}`}
+                      onClick={() => toggleBrand(b)}
+                    >
+                      {b}
+                    </button>
+                  ))}
+                  {extraBrands.map((b) => (
+                    <button key={b} type="button" className="brandchip on" onClick={() => toggleBrand(b)}>
+                      {b}
+                    </button>
+                  ))}
+                </div>
+                {libraryBrands.length === 0 && (
+                  <div className="hint">
+                    No vehicles synced yet — sync a brand in Vehicles, or type one in below.
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                  <input
+                    value={brandDraft}
+                    onChange={(e) => setBrandDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addBrand();
+                      }
+                    }}
+                    placeholder="A brand not in the library yet"
+                  />
+                  <button className="btn small" type="button" disabled={!brandDraft.trim()} onClick={addBrand}>
+                    Add
+                  </button>
+                </div>
+              </Field>
+            </div>
           </div>
-          <Field label="Address">
-            <input value={draft.address ?? ''} onChange={(e) => set({ address: e.target.value })} placeholder="MG Road" />
-          </Field>
-          <Field
-            label="Footer strip"
-            hint="Burned across the bottom of every video for this client. Overlaid after generation, so it is always legible — keep it short."
-          >
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                value={draft.footerText ?? ''}
-                onChange={(e) => set({ footerText: e.target.value })}
-                placeholder={defaultFooterText(draft)}
-              />
-              {defaultFooterText(draft) && defaultFooterText(draft) !== draft.footerText && (
-                <button
-                  className="btn small"
-                  type="button"
-                  onClick={() => set({ footerText: defaultFooterText(draft) })}
+          <div className="sec-stack">
+            <Section sub title="On-screen branding" step="Footer, tone, logos" defaultOpen>
+              <Field
+                label="Footer strip"
+                hint="Burned across the bottom of every video for this client. Overlaid after generation, so keep it short."
+              >
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    value={draft.footerText ?? ''}
+                    onChange={(e) => set({ footerText: e.target.value })}
+                    placeholder={defaultFooterText(draft)}
+                  />
+                  {defaultFooterText(draft) && defaultFooterText(draft) !== draft.footerText && (
+                    <button
+                      className="btn small"
+                      type="button"
+                      onClick={() => set({ footerText: defaultFooterText(draft) })}
+                    >
+                      Suggest
+                    </button>
+                  )}
+                </div>
+                <div className="footer-preview">{draft.footerText?.trim() || defaultFooterText(draft) || '—'}</div>
+              </Field>
+
+              <Field label="Dealer tier" hint="Sets the copy tone on generated cards.">
+                <select value={draft.tier} onChange={(e) => set({ tier: e.target.value as ClientProfile['tier'] })}>
+                  <option value="Metro Premium">Metro Premium (long, narrative)</option>
+                  <option value="Regional/Volume">Regional / Volume (offer-forward)</option>
+                  <option value="Hyperlocal">Hyperlocal (short, minimal)</option>
+                </select>
+              </Field>
+
+              <div className="field-grid">
+                <Field
+                  label="Dealership logo"
+                  hint="Overlaid top-right on every video. Use a transparent PNG."
                 >
-                  Suggest
-                </button>
-              )}
-            </div>
-            <div className="footer-preview">{draft.footerText?.trim() || defaultFooterText(draft) || '—'}</div>
-          </Field>
+                  <div className="thumbs">
+                    {draft.logo && <Thumb img={draft.logo} onRemove={() => set({ logo: undefined })} />}
+                    <ImageUpload
+                      label={`${draft.name || 'Client'} — dealership logo`}
+                      kind="logo"
+                      buttonText={draft.logo ? 'Replace' : 'Upload'}
+                      onUploaded={(img) => set({ logo: img })}
+                    />
+                  </div>
+                </Field>
+                <Field label="Brand logo" hint="Overlaid top-left. Transparent PNG.">
+                  <div className="thumbs">
+                    {draft.brandLogo && (
+                      <Thumb img={draft.brandLogo} onRemove={() => set({ brandLogo: undefined })} />
+                    )}
+                    <ImageUpload
+                      label={`${draft.brand || 'Brand'} — brand logo`}
+                      kind="brand-logo"
+                      buttonText={draft.brandLogo ? 'Replace' : 'Upload'}
+                      onUploaded={(img) => set({ brandLogo: img })}
+                    />
+                  </div>
+                </Field>
+              </div>
+            </Section>
 
-          <Field label="Dealer tier" hint="Sets the copy tone on generated cards.">
-            <select value={draft.tier} onChange={(e) => set({ tier: e.target.value as ClientProfile['tier'] })}>
-              <option value="Metro Premium">Metro Premium (long, narrative)</option>
-              <option value="Regional/Volume">Regional / Volume (offer-forward)</option>
-              <option value="Hyperlocal">Hyperlocal (short, minimal)</option>
-            </select>
-          </Field>
-
-          <div className="check-row">
-            <input
-              type="checkbox"
-              id="cl_fict"
-              checked={draft.fictionalize}
-              onChange={(e) => set({ fictionalize: e.target.checked })}
-            />
-            <label htmlFor="cl_fict">Fictionalise branding in generated videos (recommended)</label>
-          </div>
-          {draft.fictionalize && (
-            <div className="row2">
-              <Field label="Placeholder brand + model">
-                <input
-                  value={draft.fakeBrandModel ?? ''}
-                  onChange={(e) => set({ fakeBrandModel: e.target.value })}
-                  placeholder="e.g. AURA VX"
-                />
-              </Field>
-              <Field label="Placeholder dealership">
-                <input
-                  value={draft.fakeDealer ?? ''}
-                  onChange={(e) => set({ fakeDealer: e.target.value })}
-                  placeholder="e.g. Sterling Premier Motors"
-                />
-              </Field>
-            </div>
-          )}
-
-          <div className="row2">
-            <Field
-              label="Dealership logo"
-              hint="Overlaid top-right on every video. Use a transparent PNG."
+            <Section
+              sub
+              title="Showroom photos"
+              step={draft.photos.length ? `${draft.photos.length} in the library` : 'None yet'}
             >
               <div className="thumbs">
-                {draft.logo && <Thumb img={draft.logo} onRemove={() => set({ logo: undefined })} />}
+                {draft.photos.map((p) => (
+                  <Thumb
+                    key={p.refId}
+                    img={p}
+                    onRemove={() => set({ photos: draft.photos.filter((x) => x.refId !== p.refId) })}
+                  />
+                ))}
                 <ImageUpload
-                  label={`${draft.name || 'Client'} — dealership logo`}
-                  kind="logo"
-                  buttonText={draft.logo ? 'Replace' : 'Upload'}
-                  onUploaded={(img) => set({ logo: img })}
+                  label={`${draft.name || 'Client'} — showroom photo`}
+                  onUploaded={(img) => set({ photos: [...draft.photos, img] })}
+                  buttonText="Add photo"
                 />
               </div>
-            </Field>
-            <Field label="Brand logo" hint="Overlaid top-left. Transparent PNG.">
-              <div className="thumbs">
-                {draft.brandLogo && (
-                  <Thumb img={draft.brandLogo} onRemove={() => set({ brandLogo: undefined })} />
-                )}
-                <ImageUpload
-                  label={`${draft.brand || 'Brand'} — brand logo`}
-                  kind="brand-logo"
-                  buttonText={draft.brandLogo ? 'Replace' : 'Upload'}
-                  onUploaded={(img) => set({ brandLogo: img })}
+              <div className="hint">Visual references, so a generation matches the real showroom.</div>
+            </Section>
+
+            <Section
+              sub
+              title="Fictionalised names"
+              step={draft.fictionalize ? 'On — real names are replaced' : 'Off — the real names are used'}
+            >
+              <div className="check-row">
+                <input
+                  type="checkbox"
+                  id="cl_fict"
+                  checked={draft.fictionalize}
+                  onChange={(e) => set({ fictionalize: e.target.checked })}
                 />
+                <label htmlFor="cl_fict">Fictionalise branding in generated videos (recommended)</label>
               </div>
-            </Field>
+              {draft.fictionalize && (
+                <div className="field-grid">
+                  <Field label="Placeholder brand + model">
+                    <input
+                      value={draft.fakeBrandModel ?? ''}
+                      onChange={(e) => set({ fakeBrandModel: e.target.value })}
+                      placeholder="e.g. AURA VX"
+                    />
+                  </Field>
+                  <Field label="Placeholder dealership">
+                    <input
+                      value={draft.fakeDealer ?? ''}
+                      onChange={(e) => set({ fakeDealer: e.target.value })}
+                      placeholder="e.g. Sterling Premier Motors"
+                    />
+                  </Field>
+                </div>
+              )}
+            </Section>
+
+            <Section sub title="Notes" step={draft.notes?.trim() ? 'Has notes' : undefined}>
+              <textarea value={draft.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} />
+            </Section>
           </div>
-
-          <Field label="Showroom photos" hint="Used as visual references so generations match the real showroom.">
-            <div className="thumbs">
-              {draft.photos.map((p) => (
-                <Thumb
-                  key={p.refId}
-                  img={p}
-                  onRemove={() => set({ photos: draft.photos.filter((x) => x.refId !== p.refId) })}
-                />
-              ))}
-              <ImageUpload
-                label={`${draft.name || 'Client'} — showroom photo`}
-                onUploaded={(img) => set({ photos: [...draft.photos, img] })}
-                buttonText="Add photo"
-              />
-            </div>
-          </Field>
-
-          <Field label="Notes">
-            <textarea value={draft.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} />
-          </Field>
 
           <div className="toolbar">
             <button className="btn primary" type="button" onClick={save}>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ActorProfile } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Panel, PickList, ImageUpload, Thumb, Confirm, Empty } from '../components/ui.js';
+import { Field, Panel, Section, PickList, ImageUpload, Thumb, Confirm, Empty } from '../components/ui.js';
 import { isApiError } from '../lib/client.js';
 
 function blank(): ActorProfile {
@@ -53,8 +53,8 @@ export function ActorsSection() {
         }
       >
         <div className="section-desc">
-          Presenters and customers who appear on camera. The gender here locks the Hindi verb forms in the
-          pronunciation rulebook; the styling text is injected verbatim into every prompt.
+          Presenters and customers who appear on camera. Gender locks the Hindi verb forms; the styling text goes
+          into every prompt as written.
         </div>
         <PickList
           items={actors}
@@ -80,7 +80,7 @@ export function ActorsSection() {
           actions={draft.id ? <Confirm onConfirm={() => del(draft.id)}>Delete</Confirm> : undefined}
         >
           {err && <div className="hint" style={{ color: 'var(--bad)', marginBottom: 8 }}>{err}</div>}
-          <div className="row2">
+          <div className="field-grid">
             <Field label="Name / label">
               <input
                 value={draft.name}
@@ -88,7 +88,7 @@ export function ActorsSection() {
                 placeholder="e.g. Meera — Metro Premium promoter"
               />
             </Field>
-            <Field label="Gender" hint="Locks the Hindi verb forms in the rulebook.">
+            <Field label="Gender" hint="Locks the Hindi verb forms.">
               <select
                 value={draft.gender}
                 onChange={(e) => set({ gender: e.target.value as ActorProfile['gender'] })}
@@ -97,8 +97,6 @@ export function ActorsSection() {
                 <option value="male">Male</option>
               </select>
             </Field>
-          </div>
-          <div className="row2">
             <Field label="Age range">
               <input value={draft.age ?? ''} onChange={(e) => set({ age: e.target.value })} placeholder="e.g. late 20s" />
             </Field>
@@ -109,23 +107,18 @@ export function ActorsSection() {
                 placeholder="e.g. warm, energetic, confident ad pace"
               />
             </Field>
+            <div className="span">
+              <Field label="Styling / look" hint="Wardrobe, hair, jewellery — copied straight into the prompt.">
+                <textarea
+                  value={draft.style ?? ''}
+                  onChange={(e) => set({ style: e.target.value })}
+                  placeholder="e.g. fitted maroon polo dress, nude heels, subtle jewellery, hair tied back"
+                />
+              </Field>
+            </div>
           </div>
-          <Field label="Styling / look" hint="Wardrobe, hair, jewellery — copied straight into the prompt.">
-            <textarea
-              value={draft.style ?? ''}
-              onChange={(e) => set({ style: e.target.value })}
-              placeholder="e.g. fitted maroon polo dress, nude heels, subtle jewellery, hair tied back"
-            />
-          </Field>
-          <Field label="Full-res file location (optional)">
-            <input
-              value={draft.sourceNote ?? ''}
-              onChange={(e) => set({ sourceNote: e.target.value })}
-              placeholder="e.g. Drive: AI Video / Actors / Meera.jpg"
-            />
-          </Field>
 
-          <Field label="Reference photo" hint="Used as a visual reference when this actor is on camera.">
+          <Field label="Reference photo" hint="The visual reference used when this actor is on camera.">
             <div className="thumbs">
               {draft.photo && <Thumb img={draft.photo} onRemove={() => set({ photo: undefined })} />}
               <ImageUpload
@@ -137,9 +130,20 @@ export function ActorsSection() {
             </div>
           </Field>
 
-          <Field label="Notes">
-            <textarea value={draft.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} />
-          </Field>
+          <div className="sec-stack">
+            <Section sub title="Notes & file location" step={draft.notes?.trim() ? 'Has notes' : undefined}>
+              <Field label="Full-res file location">
+                <input
+                  value={draft.sourceNote ?? ''}
+                  onChange={(e) => set({ sourceNote: e.target.value })}
+                  placeholder="e.g. Drive: AI Video / Actors / Meera.jpg"
+                />
+              </Field>
+              <Field label="Notes">
+                <textarea value={draft.notes ?? ''} onChange={(e) => set({ notes: e.target.value })} />
+              </Field>
+            </Section>
+          </div>
 
           <div className="toolbar">
             <button className="btn primary" type="button" disabled={saving} onClick={save}>

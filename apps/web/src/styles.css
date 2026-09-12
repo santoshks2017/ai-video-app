@@ -7,21 +7,21 @@
    timings, money — are monospaced, because they are read in columns.
    ========================================================================= */
 :root {
-  --bg: #faf9f5;
+  --bg: #fbf8f7;
   --surface: #ffffff;
-  --surface-2: #f4f2ec;
-  --ink: #1c1b19;
-  --ink-muted: #6a665e;
-  --ink-faint: #98938a;
-  --line: #e9e6dd;
-  --line-strong: #dad5c9;
-  --accent: #c4633f;
+  --surface-2: #f7f0ef;
+  --ink: #1d1a1a;
+  --ink-muted: #6b625f;
+  --ink-faint: #9a918e;
+  --line: #ece2e0;
+  --line-strong: #ddd0cd;
+  --accent: #c2564f;
   --accent-ink: #ffffff;
-  --accent-wash: #f7ebe4;
+  --accent-wash: #fae9e7;
   --good: #3c7d58;
   --warn: #a2670f;
-  --bad: #b03a2e;
-  --bad-wash: #f9e6e3;
+  --bad: #9c2b1f;
+  --bad-wash: #f7e0dc;
   --good-wash: #e6f0e9;
   --warn-wash: #f8eddb;
   --shadow: 0 1px 2px rgba(28, 27, 25, 0.04);
@@ -34,21 +34,21 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #191816;
-    --surface: #21201d;
-    --surface-2: #282622;
-    --ink: #f2efe8;
-    --ink-muted: #b0aa9e;
-    --ink-faint: #7e786d;
-    --line: #34322c;
-    --line-strong: #45423a;
-    --accent: #e08768;
-    --accent-ink: #23120b;
-    --accent-wash: #3a271e;
+    --bg: #1a1717;
+    --surface: #221e1e;
+    --surface-2: #2a2424;
+    --ink: #f1ecea;
+    --ink-muted: #b0a5a2;
+    --ink-faint: #7e7370;
+    --line: #36302f;
+    --line-strong: #47403e;
+    --accent: #e08b83;
+    --accent-ink: #2a100d;
+    --accent-wash: #3b2624;
     --good: #6fbf92;
     --warn: #e0a758;
-    --bad: #e8877a;
-    --bad-wash: #3a211d;
+    --bad: #e87f70;
+    --bad-wash: #3b1f1b;
     --good-wash: #1e3228;
     --warn-wash: #382a17;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.32);
@@ -56,21 +56,21 @@
   }
 }
 :root[data-theme='dark'] {
-  --bg: #191816;
-  --surface: #21201d;
-  --surface-2: #282622;
-  --ink: #f2efe8;
-  --ink-muted: #b0aa9e;
-  --ink-faint: #7e786d;
-  --line: #34322c;
-  --line-strong: #45423a;
-  --accent: #e08768;
-  --accent-ink: #23120b;
-  --accent-wash: #3a271e;
+  --bg: #1a1717;
+  --surface: #221e1e;
+  --surface-2: #2a2424;
+  --ink: #f1ecea;
+  --ink-muted: #b0a5a2;
+  --ink-faint: #7e7370;
+  --line: #36302f;
+  --line-strong: #47403e;
+  --accent: #e08b83;
+  --accent-ink: #2a100d;
+  --accent-wash: #3b2624;
   --good: #6fbf92;
   --warn: #e0a758;
-  --bad: #e8877a;
-  --bad-wash: #3a211d;
+  --bad: #e87f70;
+  --bad-wash: #3b1f1b;
   --good-wash: #1e3228;
   --warn-wash: #382a17;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.32);
@@ -399,6 +399,16 @@ code {
 }
 .sec-body {
   padding: 14px;
+}
+/* A run of folded blocks inside a card — a use case's fields, the rest of the
+   video setup. They belong to the card above them, so they sit inside it. */
+.sec-stack {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+}
+.sec-stack > .sec {
+  margin-bottom: 0;
 }
 .sec.sub {
   border-radius: var(--radius-sm);
@@ -1117,7 +1127,7 @@ code {
   transition: background 0.12s ease, color 0.12s ease;
 }
 .rail-item:hover { background: var(--surface); color: var(--ink); }
-.rail-item.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: var(--shadow); }
+.rail-item.on { background: var(--accent-wash); color: var(--accent); font-weight: 600; }
 .rail-icon { width: 19px; text-align: center; flex: none; font-size: 14px; }
 .rail-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Collapsed (the default): an icon strip. Hovering it — or tabbing into it — opens the
@@ -1574,7 +1584,7 @@ textarea.guide {
 .seg button:hover { background: var(--surface-2); color: var(--ink); }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
-.seg.quiet button.on { background: var(--surface-2); color: var(--ink); }
+.seg.quiet button.on { background: var(--accent-wash); color: var(--accent); font-weight: 600; }
 .sb-length-result { margin-left: auto; display: grid; gap: 2px; text-align: right; font-size: 12.5px; }
 
 /* A shot with no photo of the part it frames: said, never force-fitted. */
@@ -1606,17 +1616,14 @@ textarea.guide {
 .sb-deleted-chip .btn { padding: 2px 8px; }
 
 /* Which site a vehicle's photos and numbers came from. */
-.source-pick {
-  margin: 10px 0 14px;
-  padding: 11px 13px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  display: grid;
+.source-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
   gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
-.source-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; justify-content: space-between; }
-.source-pick .hint { line-height: 1.45; }
 
 /* ============================================================================
    The board — open, in progress, in review, delivered.

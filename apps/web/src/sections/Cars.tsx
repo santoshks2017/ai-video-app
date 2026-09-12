@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CarModelProfile, CarAngle, StoredImage, BrandEntry, VehicleDataSource } from '@ava/shared';
 import { BRAND_CATALOGUE } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Panel, PickList, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
+import { Field, Panel, Section, PickList, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
 import { isApiError, post, get, abs } from '../lib/client.js';
 
 const ANGLES: CarAngle[] = ['front', 'side', 'rear', 'interior'];
@@ -176,114 +176,118 @@ export function CarsSection() {
         step={`${cars.length} model${cars.length === 1 ? '' : 's'}`}
       >
         <div className="section-desc">
-          Cars come from CarDekho, bikes and scooters from BikeDekho — real current images, every colour, the
-          full variant list and the specifications a script can quote. Pick a brand to pull its whole line-up, or
-          paste a manufacturer's own model page below to take the photos and the numbers from there instead.
+          Cars come from CarDekho, bikes and scooters from BikeDekho — current images, every colour, the full
+          variant list and the specifications a script can quote. A manufacturer's own model page works too.
         </div>
 
-        <div className="toolbar" style={{ marginTop: 0 }}>
-          {(['car', 'bike'] as const).map((k) => (
-            <button
-              key={k}
-              type="button"
-              className={`btn small${kind === k ? ' primary' : ''}`}
-              onClick={() => { setKind(k); setBrand(null); setPreview(null); setSyncLog([]); }}
-            >
-              {k === 'car' ? 'Cars' : 'Bikes & scooters'}
-            </button>
-          ))}
-        </div>
-
-        <div className="brandgrid">
-          {brands.map((b) => (
-            <button
-              key={b.slug}
-              type="button"
-              className={`brandchip${brand?.slug.toLowerCase() === b.slug.toLowerCase() ? ' on' : ''}`}
-              disabled={Boolean(brandBusy)}
-              onClick={() => listModels(b)}
-            >
-              {b.name}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <input
-            value={brandQuery}
-            onChange={(e) => setBrandQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && brandQuery.trim()) listModels({ name: brandQuery.trim(), slug: brandQuery.trim(), kind });
-            }}
-            placeholder={kind === 'bike' ? 'Any other brand — e.g. Suzuki, Yamaha, KTM' : 'Any other brand — e.g. Kia, Toyota, Skoda'}
-          />
-          <button
-            className="btn small"
-            type="button"
-            disabled={!brandQuery.trim() || Boolean(brandBusy)}
-            onClick={() => listModels({ name: brandQuery.trim(), slug: brandQuery.trim(), kind })}
-          >
-            Find models
-          </button>
-        </div>
-
-        {brandBusy && <div className="hint" style={{ marginTop: 8 }}>{brandBusy}</div>}
-        {brandErr && (
-          <div className="check bad" style={{ marginTop: 8 }}>
-            <span className="icon">✕</span>
-            <span>{brandErr}</span>
-          </div>
-        )}
-
-        {brand && preview && !brandBusy && (
-          <div className="brandpreview">
-            <div className="hint">
-              <b>{brand.name}</b> — {preview.length} current model{preview.length === 1 ? '' : 's'} on{' '}
-              {brand.kind === 'car' ? 'CarDekho' : 'BikeDekho'}. Discontinued and unlaunched models are left out.
+        <div className="sec-stack" style={{ marginTop: 0, marginBottom: 12 }}>
+          <Section sub title="Sync a brand" step="Its whole current line-up">
+            <div className="toolbar" style={{ marginTop: 0 }}>
+              {(['car', 'bike'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={`btn small${kind === k ? ' primary' : ''}`}
+                  onClick={() => { setKind(k); setBrand(null); setPreview(null); setSyncLog([]); }}
+                >
+                  {k === 'car' ? 'Cars' : 'Bikes & scooters'}
+                </button>
+              ))}
             </div>
-            <div className="modellist">{preview.map((m) => m.name).join(' · ')}</div>
-            <div className="toolbar">
-              <button className="btn small" type="button" onClick={() => syncBrand(brand, 3)}>
-                Try 3 models first
-              </button>
-              <button className="btn primary small" type="button" onClick={() => syncBrand(brand)}>
-                Sync all {preview.length}
+
+            <div className="brandgrid">
+              {brands.map((b) => (
+                <button
+                  key={b.slug}
+                  type="button"
+                  className={`brandchip${brand?.slug.toLowerCase() === b.slug.toLowerCase() ? ' on' : ''}`}
+                  disabled={Boolean(brandBusy)}
+                  onClick={() => listModels(b)}
+                >
+                  {b.name}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <input
+                value={brandQuery}
+                onChange={(e) => setBrandQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && brandQuery.trim()) listModels({ name: brandQuery.trim(), slug: brandQuery.trim(), kind });
+                }}
+                placeholder={kind === 'bike' ? 'Any other brand — e.g. Suzuki, Yamaha, KTM' : 'Any other brand — e.g. Kia, Toyota, Skoda'}
+              />
+              <button
+                className="btn small"
+                type="button"
+                disabled={!brandQuery.trim() || Boolean(brandBusy)}
+                onClick={() => listModels({ name: brandQuery.trim(), slug: brandQuery.trim(), kind })}
+              >
+                Find models
               </button>
             </div>
-          </div>
-        )}
 
-        {syncLog.length > 0 && (
-          <div className="synclog">
-            {syncLog.map((r, i) => (
-              <div className={`syncrow ${/^(ok|already)/.test(r.status) ? 'ok' : r.status === 'failed' ? 'bad' : 'warn'}`} key={i}>
-                <b>{r.name}</b>
-                <span>{r.status}{r.note ? ` · ${r.note}` : ''}</span>
+            {brandBusy && <div className="hint" style={{ marginTop: 8 }}>{brandBusy}</div>}
+            {brandErr && (
+              <div className="check bad" style={{ marginTop: 8 }}>
+                <span className="icon">✕</span>
+                <span>{brandErr}</span>
               </div>
-            ))}
-          </div>
-        )}
+            )}
 
-        <div className="divider" />
-        <Field
-          label="Or sync one model"
-          hint='e.g. "Hyundai Creta", "royal-enfield/classic-350" for a bike, or a manufacturer link like https://auto.mahindra.com/suv/xuv3xo/X3XO.html'
-        >
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sync()}
-              placeholder="Hyundai Creta — or a manufacturer page link"
-            />
-            <button className="btn small primary" type="button" disabled={busy || !query.trim()} onClick={sync}>
-              {busy ? 'Syncing…' : 'Sync'}
-            </button>
-          </div>
-        </Field>
-        {note && <div className="hint" style={{ marginTop: -4, marginBottom: 10 }}>{note}</div>}
+            {brand && preview && !brandBusy && (
+              <div className="brandpreview">
+                <div className="hint">
+                  <b>{brand.name}</b> — {preview.length} current model{preview.length === 1 ? '' : 's'} on{' '}
+                  {brand.kind === 'car' ? 'CarDekho' : 'BikeDekho'}. Discontinued and unlaunched models are left out.
+                </div>
+                <div className="modellist">{preview.map((m) => m.name).join(' · ')}</div>
+                <div className="toolbar">
+                  <button className="btn small" type="button" onClick={() => syncBrand(brand, 3)}>
+                    Try 3 models first
+                  </button>
+                  <button className="btn primary small" type="button" onClick={() => syncBrand(brand)}>
+                    Sync all {preview.length}
+                  </button>
+                </div>
+              </div>
+            )}
 
-        <div className="divider" />
+            {syncLog.length > 0 && (
+              <div className="synclog">
+                {syncLog.map((r, i) => (
+                  <div className={`syncrow ${/^(ok|already)/.test(r.status) ? 'ok' : r.status === 'failed' ? 'bad' : 'warn'}`} key={i}>
+                    <b>{r.name}</b>
+                    <span>{r.status}{r.note ? ` · ${r.note}` : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+          </Section>
+
+          <Section sub title="Sync one model" step="Or a manufacturer link">
+            <Field
+              label="The model"
+              hint='e.g. "Hyundai Creta", "royal-enfield/classic-350" for a bike, or a link like https://auto.mahindra.com/suv/xuv3xo/X3XO.html'
+            >
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && sync()}
+                  placeholder="Hyundai Creta — or a manufacturer page link"
+                />
+                <button className="btn small primary" type="button" disabled={busy || !query.trim()} onClick={sync}>
+                  {busy ? 'Syncing…' : 'Sync'}
+                </button>
+              </div>
+            </Field>
+            {note && <div className="hint">{note}</div>}
+          </Section>
+        </div>
+
         <Field label="Filter">
           <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search brand or model…" />
         </Field>
@@ -344,7 +348,12 @@ export function CarsSection() {
 
           {/* Which site this vehicle's photos and numbers come from. A client who asks
               "where did this car come from?" is answered by the manufacturer's own page. */}
-          <div className="source-pick">
+          <div className="sec-stack" style={{ marginTop: 0 }}>
+          <Section
+            sub
+            title="Where its photos come from"
+            step={active.source === 'oem' ? 'The manufacturer site' : 'CarDekho'}
+          >
             <div className="source-head">
               <b>Source: {active.source === 'oem' ? 'manufacturer website' : 'CarDekho'}</b>
               <span className="hint">
@@ -392,9 +401,11 @@ export function CarsSection() {
             </div>
             {sourceBusy && <div className="hint">{sourceBusy}</div>}
             {sourceNote && <div className="hint">{sourceNote}</div>}
+          </Section>
           </div>
 
-          <h3 style={{ marginBottom: 8 }}>Angles</h3>
+          <h3 style={{ margin: '14px 0 8px' }}>Angles</h3>
+          <div className="field-grid">
           {ANGLES.map((angle) => {
             const imgs = active.images?.[angle] ?? [];
             return (
@@ -423,9 +434,10 @@ export function CarsSection() {
               </Field>
             );
           })}
+          </div>
 
-          <div className="divider" />
-          <h3 style={{ marginBottom: 8 }}>Colours ({active.colours.length})</h3>
+          <div className="sec-stack">
+          <Section sub title="Colours" step={`${active.colours.length} on the source page`}>
           <div className="swatches">
             {active.colours.map((c) => (
               <div className="swatch" key={c.name} title={c.hex}>
@@ -439,9 +451,9 @@ export function CarsSection() {
             ))}
             {active.colours.length === 0 && <div className="hint">No colours found.</div>}
           </div>
+          </Section>
 
-          <div className="divider" />
-          <h3 style={{ marginBottom: 8 }}>Variants ({active.variants.length})</h3>
+          <Section sub title="Variants" step={`${active.variants.length} on the source page`}>
           <div className="variant-table">
             {active.variants.map((v) => (
               <div className="variant-row" key={v.name}>
@@ -451,6 +463,8 @@ export function CarsSection() {
               </div>
             ))}
             {active.variants.length === 0 && <div className="hint">No variants found on the source page.</div>}
+          </div>
+          </Section>
           </div>
         </Panel>
       ) : (

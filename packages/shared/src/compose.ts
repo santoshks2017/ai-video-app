@@ -22,7 +22,7 @@ import type {
   CarAngle,
   LanguageProfile,
 } from './library.js';
-import { CAR_VIEWS } from './library.js';
+import { DEALER_VIEWS, dealerViewLabel, type DealerView } from './library.js';
 import { emptyBrief } from './defaults.js';
 
 export function emptySpec(): ProjectVideoSpec {
@@ -235,8 +235,10 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   b.endCardOn = s.endCardOn;
   b.endCard = s.endCard;
   b.fieldValues = project.fieldValues;
+  // A scene is out of the film whether it was deleted or only skipped. The
+  // difference is where it is kept, not whether it is generated.
   b.omitScenes = Object.entries(project.sceneEdits ?? {})
-    .filter(([, e]) => e?.deleted)
+    .filter(([, e]) => e?.deleted || e?.skipped)
     .map(([key]) => key);
   b.pace = clampPace(s.pace);
 
@@ -292,6 +294,13 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   }
   // Cars are driven and bikes are ridden — decided once, from what the film shows.
   b.vehicleKind = car?.kind ?? client?.vehicleKind ?? b.lineup?.kind ?? 'car';
+  // What this film calls the vehicle, when the library's name for it is not the
+  // name to say. Only the words change — the photographs are still the library's.
+  const namedByHand = project.carModelOverride?.trim();
+  if (namedByHand) {
+    b.modelSpecific = true;
+    b.carModel = namedByHand;
+  }
 
   // The storyboard as the designer arranged it: their order, and any scene they
   // wrote themselves. Timing and the split into parts are worked out downstream,
@@ -327,12 +336,14 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
       });
     }
     /*
-     * Real photographs, never a sheet.
+     * The vehicle as one profile, a side at a time.
      *
-     * A sheet is a grid of photographs, and a video model given one draws it:
-     * a run on 13 September put the contact sheet itself on screen, tiles,
-     * captions and all. The sheets stay in the library for a person to look at;
-     * what the model is handed is photographs of the car.
+     * Four sheets carry every photograph the library holds of each side; four
+     * loose photographs carry four. So a side with a sheet sends the sheet and
+     * nothing else, and a side without one falls back to its photographs, so no
+     * side of the car goes missing either way. The captioned features sheet is
+     * never sent — a model given words draws words — and the prompt's legend
+     * says in as many words that a sheet is a record, not a thing to film.
      */
     const heroVariant = car!.variants.find((v) => v.name === project.carVariant);
     const angleOf = (img: StoredImage): CarAngle | undefined =>
@@ -342,28 +353,34 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
           (x) => x.storagePath === img.storagePath,
         ),
       );
+    const shotsByAngle = new Map<CarAngle | 'other', StoredImage[]>();
     for (const img of hero.shots) {
-      const photo = { ...toDealerPhoto(img, 'car-model'), angle: angleOf(img) };
-      // Said in the label because the label is what the prompt cites beside each
-      // file: the model must take shape, not paint, from these.
+      const a = angleOf(img) ?? 'other';
+      shotsByAngle.set(a, [...(shotsByAngle.get(a) ?? []), img]);
+    }
+    // Said in the label because the label is what the prompt cites beside each
+    // file: the model must take shape, not paint, from these.
+    const pushShot = (img: StoredImage, angle?: CarAngle): void => {
+      const photo = { ...toDealerPhoto(img, 'car-model'), angle };
       attachments.push(
         paint && hero.swatch ? { ...photo, label: `${photo.label} — shape reference; its paint may differ` } : photo,
       );
-    }
-    // Asked for: the per-view sheets, after the photographs. Never the features
-    // sheet — its captions are burned into the image, and a model given words
-    // draws words.
-    if (project.useSheets) {
-      for (const view of ['front', 'side', 'rear', 'interior'] as CarAngle[]) {
-        const sheet = car!.sheets?.[view];
-        if (!sheet?.storagePath) continue;
+    };
+    const noun = (car!.kind ?? 'car') === 'bike' ? 'bike' : 'car';
+    for (const view of ANGLE_ORDER) {
+      const sheet = project.useSheets === false ? undefined : car!.sheets?.[view];
+      if (sheet?.storagePath) {
         attachments.push({
           ...toDealerPhoto(sheet, 'car-model'),
           angle: view,
-          label: `${car!.brand} ${car!.model} — several photographs of the ${view} in one image, laid out side by side; a record of the car, never a thing to put on screen`,
+          sheet: true,
+          label: `${car!.brand} ${car!.model} — every photograph of the ${view} in one image, laid out side by side; a record of the ${noun}, never a thing to put on screen`,
         });
+        continue;
       }
+      for (const img of shotsByAngle.get(view) ?? []) pushShot(img, view);
     }
+    for (const img of shotsByAngle.get('other') ?? []) pushShot(img, undefined);
 
     for (const v of vehicles.slice(1)) {
       const first = carReferenceImages(v)[0];
@@ -390,12 +407,49 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   }
   if (client?.logo) attachments.push(toDealerPhoto(client.logo, 'logo'));
   if (client?.brandLogo) attachments.push(toDealerPhoto(client.brandLogo, 'brand-logo'));
-  for (const img of client?.photos ?? []) attachments.push(toDealerPhoto(img, 'dealer'));
-  for (const img of project.extraRefs) attachments.push(toDealerPhoto(img, 'dealer'));
+  /*
+   * The dealership as a profile, the same way as the vehicle: one sheet per part
+   * of the place where a sheet has been built, the loose photographs where it has
+   * not. A showroom is not one room — a handover belongs in the delivery bay and
+   * a sit-down belongs in the lounge — so the room each photograph shows travels
+   * with it and a scene is given the room it is set in.
+   */
+  const placeName = b.dealer.fictionalize ? b.dealer.fakeDealer || b.dealer.dealerName : b.dealer.dealerName;
+  const sheeted = new Set<DealerView>();
+  for (const { id: view, label } of DEALER_VIEWS) {
+    const sheet = client?.sheets?.[view];
+    if (!sheet?.storagePath) continue;
+    sheeted.add(view);
+    attachments.push({
+      ...toDealerPhoto(sheet, 'dealer'),
+      view,
+      sheet: true,
+      label: `${label}${placeName ? ` at ${placeName}` : ''} — several photographs in one image; a record of the place, never a thing to put on screen`,
+    });
+  }
+  for (const img of client?.photos ?? []) {
+    if (img.view && sheeted.has(img.view)) continue;
+    const photo = toDealerPhoto(img, 'dealer');
+    attachments.push(
+      img.view ? { ...photo, view: img.view, label: `${dealerViewLabel(img.view)} — ${photo.label}` } : photo,
+    );
+  }
+  // Added on this project alone. Filed apart from the dealership's own photographs
+  // so the list says which is which when a run comes back wrong.
+  for (const img of project.extraRefs) attachments.push(toDealerPhoto(img, 'extra'));
   for (const vid of project.videoRefs ?? []) {
     if (vid?.storagePath) attachments.push({ ...toDealerPhoto(vid, 'reference-video'), label: vid.label });
   }
-  b.attachments = attachments;
+  /*
+   * References held back by hand on this project.
+   *
+   * Not a deletion — the photograph is still in the library, still listed in the
+   * editor, struck through with a cross to bring it back. It is how a designer
+   * finds out which one photograph a run keeps copying, without unpicking the
+   * library for everyone else.
+   */
+  const heldBack = new Set(project.excludedRefs ?? []);
+  b.attachments = heldBack.size ? attachments.filter((a) => !heldBack.has(a.filename)) : attachments;
 
   // Global instructions + the project's own steer become extra prompt direction.
   const extra: string[] = [];

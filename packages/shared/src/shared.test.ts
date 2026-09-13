@@ -37,6 +37,9 @@ import {
   applyBriefPlan,
   projectStage,
   PROJECT_STAGES,
+  referencePlan,
+  type DealerPhoto,
+  type ClientProfile,
   ageBandOf,
   usualActorFor,
   inOrder,
@@ -881,4 +884,101 @@ test('moving a scene re-packs the parts to the model\u2019s clip cap', () => {
   for (const sc of after.scenes) lens.set(sc.part, (lens.get(sc.part) ?? 0) + sc.duration);
   for (const [, len] of lens) assert.ok(len <= 10.05, `a part ran ${len}s after the move`);
   assert.deepEqual(after.scenes.map((s) => s.beat.key), ['d', 'a', 'b', 'c', 'e', 'f']);
+});
+
+/* ---------------------------------------------------------------------------
+ * What the model is handed: the order, and what can be held back.
+ * ------------------------------------------------------------------------ */
+
+test('the vehicle, the presenter and the dealership each keep a slot', () => {
+  const photo = (filename: string, kind: DealerPhoto['kind']): DealerPhoto => ({
+    filename,
+    label: filename,
+    kind,
+  });
+  const brief = {
+    attachments: [
+      ...['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10'].map((f) => photo(f, 'car-model')),
+      photo('actor', 'actor'),
+      photo('place', 'dealer'),
+      photo('logo', 'logo'),
+      photo('clip', 'reference-video'),
+    ],
+  };
+
+  const plan = referencePlan(brief, { max: 5 });
+  const sentImages = plan.sent.filter((e) => e.role !== 'video').map((e) => e.photo.filename);
+  assert.equal(sentImages.length, 5, 'the image budget is spent exactly');
+  assert.ok(sentImages.includes('actor'), 'the presenter is never squeezed out by the car');
+  assert.ok(sentImages.includes('place'), 'nor is the dealership');
+  assert.deepEqual(sentImages, ['c1', 'c2', 'c3', 'actor', 'place'], 'the car fills what is left, best first');
+
+  // Videos ride on their own allowance, and logos never reach the model at all.
+  assert.deepEqual(plan.sent.filter((e) => e.role === 'video').map((e) => e.photo.filename), ['clip']);
+  assert.deepEqual(plan.overlays.map((e) => e.photo.filename), ['logo']);
+  assert.ok(
+    plan.spare.some((e) => e.photo.filename === 'c4'),
+    'what did not fit is listed rather than silently dropped',
+  );
+});
+
+test('a reference held back is listed, not deleted', () => {
+  const photo = (filename: string, kind: DealerPhoto['kind']): DealerPhoto => ({
+    filename,
+    label: filename,
+    kind,
+  });
+  const brief = { attachments: [photo('front', 'car-model'), photo('rear', 'car-model')] };
+
+  const plan = referencePlan(brief, { max: 10, held: ['front'] });
+  assert.deepEqual(plan.sent.map((e) => e.photo.filename), ['rear'], 'the held one is not sent');
+  const held = plan.spare.find((e) => e.photo.filename === 'front');
+  assert.ok(held?.held, 'it is still on the list, marked held');
+  assert.equal(held?.slot, null, 'and it has no slot');
+});
+
+test('a project holds a reference back without touching the library', () => {
+  const client: ClientProfile = {
+    id: 'cl1',
+    name: 'Sahyadri Motors',
+    brand: 'Mahindra',
+    tier: 'Regional/Volume',
+    photos: [
+      { refId: 'r1', storagePath: 'p/1', filename: 'showroom-1.jpg', label: 'the forecourt', view: 'exterior' },
+      { refId: 'r2', storagePath: 'p/2', filename: 'showroom-2.jpg', label: 'the lounge', view: 'lounge' },
+    ],
+    fictionalize: false,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+  const project = { ...emptyProject(), id: 'p1', clientId: 'cl1', excludedRefs: ['showroom-2.jpg'] };
+
+  const brief = composeBrief(project, { client });
+  const names = brief.attachments.map((a) => a.filename);
+  assert.ok(names.includes('showroom-1.jpg'));
+  assert.ok(!names.includes('showroom-2.jpg'), 'held back, so it never reaches the model');
+  assert.equal(client.photos.length, 2, 'and the client record is untouched');
+
+  // Take the hold off and it comes back.
+  const back = composeBrief({ ...project, excludedRefs: [] }, { client });
+  assert.ok(back.attachments.map((a) => a.filename).includes('showroom-2.jpg'));
+});
+
+test('a skipped scene is out of the film, and what was written in it is kept', () => {
+  const project = {
+    ...emptyProject(),
+    useCases: ['walkaround' as CategoryId],
+    sceneEdits: {
+      'walkaround:1': { dialogue: 'a line worth keeping', skipped: true },
+      'walkaround:2': { dialogue: 'another' },
+    },
+  };
+  const brief = composeBrief(project);
+  assert.ok(brief.omitScenes?.includes('walkaround:1'), 'skipping takes the scene out of the film');
+  assert.ok(!brief.omitScenes?.includes('walkaround:2'));
+  assert.equal(
+    project.sceneEdits['walkaround:1']?.dialogue,
+    'a line worth keeping',
+    'and leaves the writing alone',
+  );
 });

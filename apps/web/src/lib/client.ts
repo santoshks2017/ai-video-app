@@ -110,6 +110,21 @@ export async function recheckCarPhotos(id: string) {
   );
 }
 
+/**
+ * File a dealership's photos by the part of the place they show, and build one
+ * sheet per part. Photos already filed by hand keep what they were given.
+ */
+export async function buildClientSheets(id: string, relabel = false) {
+  return await post<{
+    ok: true;
+    counts: Record<string, number>;
+    sheets: string[];
+    unfiled: number;
+    looked: number;
+    note?: string;
+  }>(`/api/clients/${id}/sheets`, { relabel });
+}
+
 /* ---------------- reference-image upload ---------------- */
 
 export async function uploadRef(file: File, label: string, kind = 'dealer') {

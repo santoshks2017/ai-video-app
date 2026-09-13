@@ -170,9 +170,16 @@ export interface DealerPhoto {
   refId?: string;
   /** Cloud Storage path of the uploaded bytes; read at generate time to ground the model. */
   storagePath?: string;
-  kind: 'dealer' | 'car-model' | 'logo' | 'brand-logo' | 'actor' | 'reference-video';
+  kind: 'dealer' | 'car-model' | 'logo' | 'brand-logo' | 'actor' | 'reference-video' | 'extra';
   /** For a car photo, the part of the car it shows — what a scene about that part is matched to. */
   angle?: 'front' | 'side' | 'rear' | 'interior';
+  /** For a dealership photo, the part of the place it shows. */
+  view?: 'exterior' | 'interior' | 'lounge' | 'delivery' | 'team';
+  /**
+   * Several photographs laid out in one image. Worth saying, because a video model
+   * will happily film a contact sheet if it is not told the thing is a record.
+   */
+  sheet?: boolean;
 }
 
 export interface Dealer {

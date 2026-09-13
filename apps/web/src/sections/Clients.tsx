@@ -7,12 +7,15 @@ import {
   formatInr,
   PROJECT_STAGES,
   projectStage,
+  DEALER_VIEWS,
+  dealerViewLabel,
+  type DealerView,
   type ClientProfile,
   type StoredImage,
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
-import { isApiError, post, abs } from '../lib/client.js';
+import { isApiError, post, get, abs, buildClientSheets } from '../lib/client.js';
 
 function blank(): ClientProfile {
   const now = Date.now();
@@ -56,6 +59,8 @@ export function ClientsSection() {
   const [gmbBusy, setGmbBusy] = useState(false);
   const [gmbNote, setGmbNote] = useState('');
   const [brandDraft, setBrandDraft] = useState('');
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [sheetNote, setSheetNote] = useState('');
   const [q, setQ] = useState('');
   const [fBrand, setFBrand] = useState('');
   const [fKind, setFKind] = useState('');
@@ -135,6 +140,47 @@ export function ClientsSection() {
     }
     await refresh();
     setDraft(r);
+  };
+
+  /**
+   * File the photos by the part of the place they show, then build one sheet per
+   * part. The draft is saved first — the server reads the record, not the form —
+   * and what comes back replaces the draft, so the new sheets are on screen.
+   */
+  const buildSheets = async (relabel: boolean) => {
+    if (!draft?.id) return;
+    setSheetBusy(true);
+    setSheetNote('');
+    const saved = await api.clients.save(draft);
+    if (isApiError(saved)) {
+      setSheetBusy(false);
+      setSheetNote(saved.message);
+      return;
+    }
+    const r = await buildClientSheets(draft.id, relabel);
+    setSheetBusy(false);
+    if (isApiError(r)) {
+      setSheetNote(r.message);
+      return;
+    }
+    await refresh();
+    const fresh = await get<ClientProfile>(`/api/clients/${draft.id}`);
+    if (!isApiError(fresh)) setDraft(fresh);
+    const filed = Object.entries(r.counts)
+      .map(([view, n]) => `${n} ${dealerViewLabel(view as DealerView).toLowerCase()}`)
+      .join(', ');
+    setSheetNote(
+      r.note ??
+        [
+          r.sheets.length
+            ? `Built ${r.sheets.length} sheet${r.sheets.length === 1 ? '' : 's'}`
+            : 'No sheet built — a part needs at least two photographs',
+          filed ? `from ${filed}` : '',
+          r.unfiled ? `· ${r.unfiled} could not be placed — file ${r.unfiled === 1 ? 'it' : 'them'} by hand` : '',
+        ]
+          .filter(Boolean)
+          .join(' ') + '.',
+    );
   };
 
   const importGmb = async () => {
@@ -477,18 +523,51 @@ export function ClientsSection() {
               </div>
             </Section>
 
+            {/* A showroom is not one room. A film about a handover wants the delivery
+                bay and a sit-down wants the lounge, so each photograph is filed under
+                where it was taken — and every photograph of one room goes to the model
+                as a single sheet, which spends one of its ten slots instead of six. */}
             <Section
               sub
               title="Showroom photos"
-              step={draft.photos.length ? `${draft.photos.length} in the library` : 'None yet'}
+              step={
+                draft.photos.length
+                  ? `${draft.photos.length} photo${draft.photos.length === 1 ? '' : 's'}${
+                      Object.keys(draft.sheets ?? {}).length
+                        ? ` · ${Object.keys(draft.sheets ?? {}).length} sheets`
+                        : ''
+                    }`
+                  : 'None yet'
+              }
             >
               <div className="thumbs">
                 {draft.photos.map((p) => (
-                  <Thumb
-                    key={p.refId}
-                    img={p}
-                    onRemove={() => set({ photos: draft.photos.filter((x) => x.refId !== p.refId) })}
-                  />
+                  <div className="veh-photo" key={p.refId}>
+                    <Thumb
+                      img={p}
+                      onRemove={() => set({ photos: draft.photos.filter((x) => x.refId !== p.refId) })}
+                    />
+                    <select
+                      aria-label={`Where ${p.label} was taken`}
+                      value={p.view ?? ''}
+                      onChange={(e) =>
+                        set({
+                          photos: draft.photos.map((x) =>
+                            x.refId === p.refId
+                              ? { ...x, view: (e.target.value || undefined) as DealerView | undefined }
+                              : x,
+                          ),
+                        })
+                      }
+                    >
+                      <option value="">Which part?</option>
+                      {DEALER_VIEWS.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 ))}
                 <ImageUpload
                   label={`${draft.name || 'Client'} — showroom photo`}
@@ -496,7 +575,52 @@ export function ClientsSection() {
                   buttonText="Add photo"
                 />
               </div>
-              <div className="hint">Visual references, so a generation matches the real showroom.</div>
+              <div className="hint">
+                Visual references, so a generation matches the real showroom. File each one under the part of the
+                place it shows — the ones left blank are looked at when the sheets are built.
+              </div>
+
+              <div className="toolbar">
+                <button
+                  type="button"
+                  className="btn small"
+                  disabled={sheetBusy || !draft.id || !draft.photos.length}
+                  title={
+                    draft.id
+                      ? 'Look at the unfiled photos, then build one sheet per part of the place'
+                      : 'Save the client first'
+                  }
+                  onClick={() => void buildSheets(false)}
+                >
+                  {sheetBusy ? 'Working…' : 'Sort photos and build sheets'}
+                </button>
+                {Object.keys(draft.sheets ?? {}).length > 0 && (
+                  <button
+                    type="button"
+                    className="btn ghost small"
+                    disabled={sheetBusy || !draft.id}
+                    title="Ignore what is filed and look at every photo again"
+                    onClick={() => void buildSheets(true)}
+                  >
+                    Look at all of them again
+                  </button>
+                )}
+                {sheetNote && <span className="hint" style={{ marginTop: 0 }}>{sheetNote}</span>}
+              </div>
+
+              {Object.keys(draft.sheets ?? {}).length > 0 && (
+                <>
+                  <div className="hint" style={{ marginTop: 10 }}>
+                    What the model is given for this dealership — one image per part of the place. A part with a
+                    sheet does not also send its loose photographs.
+                  </div>
+                  <div className="thumbs">
+                    {DEALER_VIEWS.filter((v) => draft.sheets?.[v.id]).map((v) => (
+                      <Thumb key={v.id} img={draft.sheets![v.id]!} />
+                    ))}
+                  </div>
+                </>
+              )}
             </Section>
 
             <Section

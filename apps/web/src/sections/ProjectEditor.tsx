@@ -32,6 +32,10 @@ import {
   PROJECT_STAGES,
   projectStage,
   type ProjectStage,
+  referencePlan,
+  ROLE_LABEL,
+  dealerViewLabel,
+  type PlannedRef,
 } from '@ava/shared';
 import { useApp, api, projectTabId } from '../state/appStore.js';
 import { Field, Panel, Section, Dropdown, ImageUpload, Thumb, Confirm, Banner } from '../components/ui.js';
@@ -42,6 +46,66 @@ import { api as genApi } from '../lib/api.js';
 import { Storyboard } from '../components/Storyboard.js';
 import { OutputPanel } from '../components/OutputPanel.js';
 import { GenerationPanel } from '../components/GenerationPanel.js';
+
+/**
+ * One line of the reference list: where it sits, what it is a picture of, and a
+ * cross to hold it back.
+ *
+ * Holding one back is not deleting it — the photograph stays in the library and
+ * stays on this list, struck through, until the cross is clicked again. It is how
+ * you find out which one photograph a run keeps copying without unpicking the
+ * library for every other film.
+ */
+function RefRow({
+  entry,
+  onHold,
+}: {
+  entry: PlannedRef;
+  onHold?: (filename: string, hold: boolean) => void;
+}) {
+  const { photo, role, slot, held } = entry;
+  const src = abs(photo.src ?? null) ?? photo.src;
+  // The label is a sentence, because the model reads it beside the image. The
+  // list shows the front of it and keeps the whole thing on hover.
+  const short = photo.label.split(' — ')[0] ?? photo.label;
+  const tags = [
+    photo.sheet ? 'a sheet of several photographs' : '',
+    photo.angle ?? '',
+    photo.view ? dealerViewLabel(photo.view) : '',
+  ].filter(Boolean);
+  return (
+    <div className={`ref-row${held ? ' held' : slot === null ? ' spare' : ''}`} title={photo.label}>
+      <span className="ref-slot">{held || slot === null ? '—' : slot + 1}</span>
+      <span className="ref-shot">
+        {photo.kind === 'reference-video' ? (
+          src ? <video src={src} muted playsInline preload="metadata" /> : <span aria-hidden>▶</span>
+        ) : src ? (
+          <img src={src} alt="" loading="lazy" />
+        ) : (
+          <span aria-hidden>·</span>
+        )}
+      </span>
+      <span className="ref-name">
+        {short}
+        <em>{[photo.filename, ...tags].join(' · ')}</em>
+      </span>
+      <span className={`ref-role ${role}`}>{ROLE_LABEL[role]}</span>
+      {onHold ? (
+        <button
+          type="button"
+          className="ref-x"
+          title={held ? 'Send this again' : 'Hold this back from the next run'}
+          aria-label={held ? `Send ${short} again` : `Hold back ${short}`}
+          onClick={() => onHold(photo.filename, !held)}
+        >
+          {held ? '\u21ba' : '\u00d7'}
+        </button>
+      ) : (
+        <span />
+      )}
+    </div>
+  );
+}
 
 export function ProjectEditor({ projectId }: { projectId: string }) {
   const { projects, clients, actors, cars, instructions, languages, models, refresh, go, closeTab } =
@@ -152,6 +216,34 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         : null,
     [brief, project?.sceneEdits, activeModel, models],
   );
+
+  /**
+   * Every reference in scope, in the order the model is handed them.
+   *
+   * Composed a second time with nothing held back, so a photograph crossed out
+   * here is still listed — struck through, with a cross to put it back — rather
+   * than quietly gone. The ordering is orderReferences, the same function the
+   * renderer calls, so this list is the list that is sent.
+   */
+  const refPlan = useMemo(() => {
+    if (!project) return null;
+    const full = composeBrief(
+      { ...project, excludedRefs: [] },
+      { client, actor, vehicles, instructions, language, library: cars },
+    );
+    return referencePlan(full, {
+      max: activeModel?.maxReferenceImages ?? 10,
+      maxVideos: 3,
+      held: project.excludedRefs ?? [],
+    });
+  }, [project, client, actor, vehicles, instructions, language, cars, activeModel]);
+
+  /** Hold one reference back from the next run, or send it again. */
+  const holdRef = (filename: string, hold: boolean): void => {
+    if (!project) return;
+    const held = project.excludedRefs ?? [];
+    set({ excludedRefs: hold ? [...new Set([...held, filename])] : held.filter((f) => f !== filename) });
+  };
 
   // Clip length is a capability of the model, not a taste decision, so switching
   // model snaps it to that model's cap. This is what makes picking Seedance 2.5
@@ -306,6 +398,51 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
       ],
       sceneOrder: [...keys.slice(0, at), key, ...keys.slice(at)],
     });
+  };
+
+  /**
+   * Scenes held out of this cut, and the scene each one sits after.
+   *
+   * A skipped scene is out of the film, so the plan no longer holds it — but its
+   * row has to stay where it was or there is nothing to switch back on. So the
+   * running order is worked out a second time with the skipped scenes still in
+   * it, and each one remembers the last surviving scene before it.
+   */
+  const skippedScenes = useMemo(() => {
+    if (!brief || !project) return [];
+    const edits = project.sceneEdits ?? {};
+    const skipped = new Set(
+      Object.entries(edits)
+        .filter(([, e]) => e?.skipped && !e?.deleted)
+        .map(([k]) => k),
+    );
+    if (!skipped.size) return [];
+    const deleted = Object.entries(edits)
+      .filter(([, e]) => e?.deleted)
+      .map(([k]) => k);
+    const inPlan = new Set(
+      (built?.scenePlan.scenes ?? []).map((sc) => sc.beat.key).filter((k): k is string => Boolean(k)),
+    );
+    const out: { key: string; title: string; cat: string; afterKey?: string }[] = [];
+    let prev: string | undefined;
+    for (const b of buildBeats(buildContext({ ...brief, omitScenes: deleted }))) {
+      if (!b.key) continue;
+      if (skipped.has(b.key)) out.push({ key: b.key, title: b.title, cat: b.cat ?? '', afterKey: prev });
+      else if (inPlan.has(b.key)) prev = b.key;
+    }
+    return out;
+  }, [brief, project, built]);
+
+  /** Hold a scene out of this cut, or put it back. Nothing written in it is lost. */
+  const skipScene = (key: string, skip: boolean) => {
+    if (!project) return;
+    const next = { ...keyedEdits(project.sceneEdits) };
+    const rest = { ...next[key] };
+    if (skip) rest.skipped = true;
+    else delete rest.skipped;
+    if (Object.values(rest).some((v) => v !== undefined)) next[key] = rest;
+    else delete next[key];
+    set({ sceneEdits: next });
   };
 
   const restoreScene = (key: string) => {
@@ -982,188 +1119,285 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             </div>
           </Panel>
 
-          <Panel num="04" title="Reference images" step="Pulled in from the client and vehicle">
+          <Panel num="04" title="References" step="What the model is handed">
             <div className="section-desc">
-              The client's photos and the vehicle's image set come in automatically. Add anything extra this video
-              needs.
+              The vehicle, the presenter and the dealership come in on their own — there is nothing to pick. Below is
+              the whole list, in the order {activeModel?.name ?? 'the model'} is given it, numbered the way the
+              prompt numbers it. Cross one out to leave it out of the next run: it stays on the list, struck through,
+              until you put it back.
             </div>
 
-            {/* Photos attached here ARE the vehicle: the library is not consulted at all.
-                Which side each one shows travels with it, so a scene about the cabin is
-                built on the cabin photo — and a side nobody attached is a side the model
-                has to invent, which is how an XUV300 ended up in a film about the 3XO. */}
-            <Field
-              label="Photos of this exact vehicle"
-              hint="Attach the car or bike this film shows — several at once. The library is then ignored completely and every shot is built on these."
-            >
-              <div className="thumbs">
-                {(project.carRefs ?? []).map((r) => (
-                  <div className="veh-photo" key={r.refId}>
-                    <Thumb
-                      img={r}
-                      onRemove={() => set({ carRefs: (project.carRefs ?? []).filter((x) => x.refId !== r.refId) })}
-                    />
-                    <select
-                      aria-label={`What ${r.label} shows`}
-                      value={r.angle ?? ''}
-                      onChange={(e) =>
-                        set({
-                          carRefs: (project.carRefs ?? []).map((x) =>
-                            x.refId === r.refId
-                              ? { ...x, angle: (e.target.value || undefined) as CarAngle | undefined }
-                              : x,
-                          ),
-                        })
-                      }
-                    >
-                      <option value="">Which side?</option>
-                      <option value="front">Front</option>
-                      <option value="side">Side</option>
-                      <option value="rear">Rear</option>
-                      <option value="interior">Interior</option>
-                    </select>
-                  </div>
-                ))}
-                <ImageUpload
-                  label={`${[car?.brand, car?.model].filter(Boolean).join(' ') || project.name || 'Vehicle'} — exact photo`}
-                  kind="car-model"
-                  buttonText="Attach vehicle photos"
-                  multiple
-                  onUploaded={(img) => set({ carRefs: [...(project.carRefs ?? []), img] })}
-                />
-              </div>
-              {(project.carRefs?.length ?? 0) > 0 &&
-                (() => {
-                  const have = new Set((project.carRefs ?? []).map((r) => r.angle).filter(Boolean));
-                  const missing = (['front', 'side', 'rear', 'interior'] as CarAngle[]).filter((a) => !have.has(a));
-                  return (
-                    <Banner kind={missing.length > 1 ? 'warn' : 'ok'}>
-                      {project.carRefs!.length} attached photo{project.carRefs!.length === 1 ? '' : 's'} —{' '}
-                      {[car?.brand, car?.model].filter(Boolean).join(' ') || 'this vehicle'} is built from{' '}
-                      {project.carRefs!.length === 1 ? 'this' : 'these'} alone, and the library is ignored.
-                      {missing.length
-                        ? ` Nothing shows the ${missing.join(', ')} — the model invents those, and for a model name it has
-                            seen on an older car, what it invents is that older car. Attach them.`
-                        : ' All four sides are covered.'}
-                    </Banner>
-                  );
-                })()}
-            </Field>
-            <div className="divider" />
-            <div className="thumbs">
-              {project.extraRefs.map((r) => (
-                <Thumb
-                  key={r.refId}
-                  img={r}
-                  onRemove={() => set({ extraRefs: project.extraRefs.filter((x) => x.refId !== r.refId) })}
-                />
-              ))}
-              <ImageUpload
-                label={`${project.name || 'Project'} — reference`}
-                onUploaded={(img) => set({ extraRefs: [...project.extraRefs, img] })}
-                buttonText="Add reference"
-              />
-            </div>
-            {/* The sheets: more of the car in one slot, and a thing the model has
-                been seen to draw. Off by default, and here to be tried. */}
-            {car?.sheets && Object.keys(car.sheets).length > 0 && (
-              <div className="check-row">
-                <input
-                  type="checkbox"
-                  id="pe_sheets"
-                  checked={project.useSheets === true}
-                  onChange={(e) => set({ useSheets: e.target.checked })}
-                />
-                <label htmlFor="pe_sheets">
-                  Also send the vehicle's reference sheets —{' '}
-                  <span className="hint" style={{ display: 'inline', marginTop: 0 }}>
-                    every photograph of each side in one image. They carry far more of the car, but on 13 September a
-                    run given only sheets drew one on screen. The photographs go first, and the captioned features
-                    sheet is never sent.
-                  </span>
-                </label>
-              </div>
-            )}
+            {refPlan &&
+              (() => {
+                const heldBack = refPlan.spare.filter((e) => e.held);
+                const overflow = refPlan.spare.filter((e) => !e.held);
+                const images = refPlan.sent.filter((e) => e.role !== 'video');
+                const videos = refPlan.sent.filter((e) => e.role === 'video');
+                return (
+                  <>
+                    <div className="ref-group">
+                      Sent — {images.length} of {refPlan.max} images
+                      {videos.length ? `, ${videos.length} of ${refPlan.maxVideos} videos` : ''}
+                    </div>
+                    {refPlan.sent.length ? (
+                      <div className="ref-plan">
+                        {refPlan.sent.map((e) => (
+                          <RefRow key={e.photo.filename} entry={e} onHold={holdRef} />
+                        ))}
+                      </div>
+                    ) : (
+                      <Banner kind="warn">
+                        Nothing is being sent. Pick a vehicle and a client, or attach photos below — a film built on
+                        no references is a film about whatever the model remembers.
+                      </Banner>
+                    )}
+
+                    {overflow.length > 0 && (
+                      <>
+                        <div className="ref-group">Past the limit — not sent</div>
+                        <div className="hint">
+                          {activeModel?.name ?? 'This model'} takes {refPlan.max} images. Cross something out above
+                          to make room for these.
+                        </div>
+                        <div className="ref-plan">
+                          {overflow.map((e) => (
+                            <RefRow key={e.photo.filename} entry={e} onHold={holdRef} />
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {heldBack.length > 0 && (
+                      <>
+                        <div className="ref-group">Held back by you</div>
+                        <div className="ref-plan">
+                          {heldBack.map((e) => (
+                            <RefRow key={e.photo.filename} entry={e} onHold={holdRef} />
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {refPlan.overlays.length > 0 && (
+                      <>
+                        <div className="ref-group">Composited in post — never sent to the model</div>
+                        <div className="ref-plan">
+                          {refPlan.overlays.map((e) => (
+                            <RefRow key={e.photo.filename} entry={e} />
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
 
             <div className="divider" />
 
-            {/* A model that takes video references learns motion and light from them
-                in a way no still can teach it. Omni takes three. */}
-            <Field
-              label="Reference videos"
-              hint="Up to three — the real showroom, the real vehicle moving. Sent to the models that accept video; ignored by those that do not."
+            <Section
+              sub
+              title="The vehicle"
+              step={
+                (project.carRefs?.length ?? 0) > 0
+                  ? `${project.carRefs!.length} attached — the library is ignored`
+                  : car
+                    ? `${project.useSheets === false ? 'Photographs' : 'Sheets'} from ${car.brand} ${car.model}`
+                    : 'No vehicle picked'
+              }
             >
-              <div className="thumbs">
-                {(project.videoRefs ?? []).map((v) => (
-                  <div className="veh-photo" key={v.refId}>
-                    <div className="thumb">
-                      {v.url ? (
-                        <video src={v.url} muted playsInline preload="metadata" />
-                      ) : (
-                        <div className="thumb-ph">▶</div>
-                      )}
-                      <span title={v.label}>{v.label}</span>
-                      <button
-                        className="thumb-x"
-                        type="button"
-                        aria-label={`Remove ${v.label}`}
-                        onClick={() =>
-                          set({ videoRefs: (project.videoRefs ?? []).filter((x) => x.refId !== v.refId) })
+              {/* The wrong car is this app's oldest bug, and it is nearly always the
+                  wrong record rather than the wrong prompt. Both handles are here,
+                  beside the list that shows what the record actually sends. */}
+              <div className="row2">
+                <Field label="Pulled from" hint="Which library record the photographs come from.">
+                  <select
+                    value={vehicleIds[0] ?? ''}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      const rest = vehicleIds.filter((x) => x !== id).slice(0, 3);
+                      set({
+                        carIds: id ? [id, ...rest] : rest,
+                        carId: id || rest[0],
+                        // Variant and colour belong to the hero, so they stop
+                        // meaning anything the moment it changes.
+                        carVariant: undefined,
+                        carColour: undefined,
+                      });
+                    }}
+                  >
+                    <option value="">— no specific model —</option>
+                    {cars.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.brand} {c.model}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label="Called, in this film"
+                  hint="Only the words change — the photographs are still the ones listed above."
+                >
+                  <input
+                    value={project.carModelOverride ?? ''}
+                    placeholder={brief?.carModel || 'Mahindra XUV 3XO'}
+                    onChange={(e) => set({ carModelOverride: e.target.value || undefined })}
+                  />
+                </Field>
+              </div>
+
+              {car?.sheets && Object.keys(car.sheets).length > 0 && (
+                <div className="check-row">
+                  <input
+                    type="checkbox"
+                    id="pe_sheets"
+                    checked={project.useSheets !== false}
+                    onChange={(e) => set({ useSheets: e.target.checked })}
+                  />
+                  <label htmlFor="pe_sheets">
+                    Send the vehicle&rsquo;s reference sheets —{' '}
+                    <span className="hint" style={{ display: 'inline', marginTop: 0 }}>
+                      every photograph of one side in a single image, so four slots carry the whole car instead of
+                      four angles of it. Turn this off to send the loose photographs instead. The captioned features
+                      sheet is never sent either way.
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              {/* Photos attached here ARE the vehicle: the library is not consulted at all.
+                  Which side each one shows travels with it, so a scene about the cabin is
+                  built on the cabin photo — and a side nobody attached is a side the model
+                  has to invent, which is how an XUV300 ended up in a film about the 3XO. */}
+              <Field
+                label="Photos of this exact vehicle"
+                hint="Attach the car or bike this film shows — several at once. The library is then ignored completely and every shot is built on these."
+              >
+                <div className="thumbs">
+                  {(project.carRefs ?? []).map((r) => (
+                    <div className="veh-photo" key={r.refId}>
+                      <Thumb
+                        img={r}
+                        onRemove={() => set({ carRefs: (project.carRefs ?? []).filter((x) => x.refId !== r.refId) })}
+                      />
+                      <select
+                        aria-label={`What ${r.label} shows`}
+                        value={r.angle ?? ''}
+                        onChange={(e) =>
+                          set({
+                            carRefs: (project.carRefs ?? []).map((x) =>
+                              x.refId === r.refId
+                                ? { ...x, angle: (e.target.value || undefined) as CarAngle | undefined }
+                                : x,
+                            ),
+                          })
                         }
                       >
-                        ×
-                      </button>
+                        <option value="">Which side?</option>
+                        <option value="front">Front</option>
+                        <option value="side">Side</option>
+                        <option value="rear">Rear</option>
+                        <option value="interior">Interior</option>
+                      </select>
                     </div>
-                  </div>
-                ))}
-                {(project.videoRefs?.length ?? 0) < 3 && (
+                  ))}
                   <ImageUpload
-                    label={`${project.name || 'Project'} — reference video`}
-                    kind="reference-video"
-                    accept="video/*"
-                    buttonText="Add reference video"
-                    onUploaded={(v) => set({ videoRefs: [...(project.videoRefs ?? []), v] })}
+                    label={`${[car?.brand, car?.model].filter(Boolean).join(' ') || project.name || 'Vehicle'} — exact photo`}
+                    kind="car-model"
+                    buttonText="Attach vehicle photos"
+                    multiple
+                    onUploaded={(img) => set({ carRefs: [...(project.carRefs ?? []), img] })}
                   />
-                )}
-              </div>
-              {(project.videoRefs?.length ?? 0) >= 3 && (
-                <div className="hint">Three is the most any model here takes.</div>
-              )}
-            </Field>
-
-            {brief && brief.attachments.length > 0 && (
-              <div className="hint" style={{ marginTop: 8 }}>
-                {brief.attachments.length} reference image{brief.attachments.length === 1 ? '' : 's'} in scope
-                (car + client + extras).
-              </div>
-            )}
-
-            {/* The vehicle photos the model will actually be given. Worth a look before
-                paying for a run: the wrong generation here is the wrong car on screen. */}
-            {brief && brief.attachments.some((a) => a.kind === 'car-model') && (
-              <>
-                <div className="hint" style={{ marginTop: 8 }}>
-                  What the model is given for the vehicle — if this is not the car you mean, attach the right photos
-                  above or fix it in Vehicles.
                 </div>
+                {(project.carRefs?.length ?? 0) > 0 &&
+                  (() => {
+                    const have = new Set((project.carRefs ?? []).map((r) => r.angle).filter(Boolean));
+                    const missing = (['front', 'side', 'rear', 'interior'] as CarAngle[]).filter((a) => !have.has(a));
+                    return (
+                      <Banner kind={missing.length > 1 ? 'warn' : 'ok'}>
+                        {project.carRefs!.length} attached photo{project.carRefs!.length === 1 ? '' : 's'} —{' '}
+                        {[car?.brand, car?.model].filter(Boolean).join(' ') || 'this vehicle'} is built from{' '}
+                        {project.carRefs!.length === 1 ? 'this' : 'these'} alone, and the library is ignored.
+                        {missing.length
+                          ? ` Nothing shows the ${missing.join(', ')} — the model invents those, and for a model name it has
+                              seen on an older car, what it invents is that older car. Attach them.`
+                          : ' All four sides are covered.'}
+                      </Banner>
+                    );
+                  })()}
+              </Field>
+            </Section>
+
+            <Section
+              sub
+              title="Add more"
+              step={`${project.extraRefs.length} image${project.extraRefs.length === 1 ? '' : 's'} · ${
+                project.videoRefs?.length ?? 0
+              } video${(project.videoRefs?.length ?? 0) === 1 ? '' : 's'}`}
+            >
+              <Field
+                label="Extra images"
+                hint="Anything this film needs that the client and vehicle records do not already carry."
+              >
                 <div className="thumbs">
-                  {brief.attachments
-                    .filter((a) => a.kind === 'car-model')
-                    .map((a, i) => (
-                      <Thumb
-                        key={`${a.filename}-${i}`}
-                        img={{
-                          refId: a.refId ?? `${a.filename}-${i}`,
-                          storagePath: a.storagePath ?? '',
-                          label: a.label,
-                          filename: a.filename,
-                          url: abs(a.src ?? null) ?? a.src,
-                        }}
-                      />
-                    ))}
+                  {project.extraRefs.map((r) => (
+                    <Thumb
+                      key={r.refId}
+                      img={r}
+                      onRemove={() => set({ extraRefs: project.extraRefs.filter((x) => x.refId !== r.refId) })}
+                    />
+                  ))}
+                  <ImageUpload
+                    label={`${project.name || 'Project'} — reference`}
+                    onUploaded={(img) => set({ extraRefs: [...project.extraRefs, img] })}
+                    buttonText="Add reference"
+                  />
                 </div>
-              </>
-            )}
+              </Field>
+
+              {/* A model that takes video references learns motion and light from them
+                  in a way no still can teach it. Omni takes three. */}
+              <Field
+                label="Reference videos"
+                hint="Up to three — the real showroom, the real vehicle moving. Sent to the models that accept video; ignored by those that do not."
+              >
+                <div className="thumbs">
+                  {(project.videoRefs ?? []).map((v) => (
+                    <div className="veh-photo" key={v.refId}>
+                      <div className="thumb">
+                        {v.url ? (
+                          <video src={v.url} muted playsInline preload="metadata" />
+                        ) : (
+                          <div className="thumb-ph">▶</div>
+                        )}
+                        <span title={v.label}>{v.label}</span>
+                        <button
+                          className="thumb-x"
+                          type="button"
+                          aria-label={`Remove ${v.label}`}
+                          onClick={() =>
+                            set({ videoRefs: (project.videoRefs ?? []).filter((x) => x.refId !== v.refId) })
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {(project.videoRefs?.length ?? 0) < 3 && (
+                    <ImageUpload
+                      label={`${project.name || 'Project'} — reference video`}
+                      kind="reference-video"
+                      accept="video/*"
+                      buttonText="Add reference video"
+                      onUploaded={(v) => set({ videoRefs: [...(project.videoRefs ?? []), v] })}
+                    />
+                  )}
+                </div>
+                {(project.videoRefs?.length ?? 0) >= 3 && (
+                  <div className="hint">Three is the most any model here takes.</div>
+                )}
+              </Field>
+            </Section>
           </Panel>
 
           {built?.scenePlan && built.scenePlan.scenes.length > 0 && (
@@ -1203,6 +1437,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 deletedScenes={deletedScenes}
                 onDeleteScene={deleteScene}
                 onRestoreScene={restoreScene}
+                skippedScenes={skippedScenes}
+                onSkipScene={skipScene}
                 onMoveScene={moveScene}
                 onAddScene={addScene}
               />

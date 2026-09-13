@@ -21,7 +21,32 @@ export interface StoredImage {
    * is sent the photo of what it frames — see visuals.ts.
    */
   angle?: CarAngle;
+  /**
+   * For a dealership photo, which part of the place it shows. The showroom is
+   * several rooms, not one: a delivery scene wants the delivery bay, a sit-down
+   * scene wants the lounge, and an establishing shot wants the forecourt.
+   */
+  view?: DealerView;
 }
+
+/**
+ * The parts of a dealership a film is set in.
+ *
+ * A showroom is not one room. Sending a film about a handover the same forecourt
+ * photograph as an establishing shot is how a delivery scene ends up on the
+ * kerb — so the photographs are filed by where they were taken, and each scene
+ * is handed the room it is set in.
+ */
+export type DealerView = 'exterior' | 'interior' | 'lounge' | 'delivery' | 'team';
+export const DEALER_VIEWS: { id: DealerView; label: string; hint: string }[] = [
+  { id: 'exterior', label: 'Exterior', hint: 'The building, the forecourt, the signage' },
+  { id: 'interior', label: 'Showroom floor', hint: 'Where the cars stand inside' },
+  { id: 'lounge', label: 'Customer lounge', hint: 'Seating, reception, the waiting area' },
+  { id: 'delivery', label: 'Delivery bay', hint: 'Where a handover happens' },
+  { id: 'team', label: 'The team', hint: 'Staff, sales desks, service' },
+];
+export const dealerViewLabel = (v: DealerView | undefined): string =>
+  DEALER_VIEWS.find((x) => x.id === v)?.label ?? 'The dealership';
 
 /** Coarse age bands, so a library of actors can be narrowed to the right one. */
 export const AGE_BANDS = ['18–25', '26–35', '36–45', '46+'] as const;
@@ -228,8 +253,17 @@ export interface ClientProfile {
   logo?: StoredImage;
   /** Manufacturer logo — overlaid top-left. Transparent PNG works best. */
   brandLogo?: StoredImage;
-  /** Showroom / delivery / team photos. */
+  /** Showroom / delivery / team photos, each filed under the part of the place it shows. */
   photos: StoredImage[];
+  /**
+   * One sheet per part of the dealership: every photograph of the forecourt in a
+   * single image, every photograph of the lounge in another.
+   *
+   * The same reasoning as the vehicle's sheets — a model gets ten reference
+   * slots, and spending one per photograph meant most of the showroom never
+   * reached it. Built by "Sort photos and build sheets".
+   */
+  sheets?: Partial<Record<DealerView, StoredImage>>;
   /** Default fictionalised branding for this client. */
   fictionalize: boolean;
   fakeBrandModel?: string;
@@ -343,6 +377,14 @@ export interface Project {
       card?: string;
       cardSub?: string;
       deleted?: boolean;
+      /**
+       * Held out of this cut, but still written.
+       *
+       * Deleting a scene files it away at the foot of the storyboard; skipping
+       * leaves it where it is, greyed out, with everything typed into it intact.
+       * It is the switch you flick twice while deciding, which is most of them.
+       */
+      skipped?: boolean;
     }
   >;
   /** The order the designer put the storyboard in, by scene key. */
@@ -363,14 +405,28 @@ export interface Project {
    */
   carRefs?: StoredImage[];
   /**
-   * Send the vehicle's per-view sheets to the model as well as its photographs.
+   * Which form the vehicle reaches the model in: its sheets, or its loose photographs.
    *
-   * Off by default, and deliberately: on 13 September a run that was given only
-   * sheets drew one on screen — tiles, gutters and captions. The sheets carry far
-   * more of the car than four photographs do, so the switch is here to be tried,
-   * but the photographs go first and the captioned features sheet is never sent.
+   * A sheet is every photograph of one side in a single image, so four slots carry
+   * the whole car instead of four angles of it — which is why sheets are what a
+   * project sends unless this is turned off. The captioned features sheet is never
+   * sent (a model given words draws words), and the legend tells the model in as
+   * many words that these are records, not things to film.
    */
   useSheets?: boolean;
+  /**
+   * References held back from this project's next run, by filename.
+   *
+   * Not a deletion: the photograph stays in the library and in the list, struck
+   * through, and comes back when the cross is clicked again. It is how you find
+   * out whether one bad photograph is what a run keeps copying.
+   */
+  excludedRefs?: string[];
+  /**
+   * What this film calls the vehicle, when the library's name for it is not the
+   * name to say. The references are unchanged — only the words are.
+   */
+  carModelOverride?: string;
   /** Extra reference images added on this project only. */
   extraRefs: StoredImage[];
   /**

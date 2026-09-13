@@ -23,7 +23,11 @@ type SceneEdit = {
   card?: string;
   cardSub?: string;
   deleted?: boolean;
+  skipped?: boolean;
 };
+
+/** A scene held out of this cut, and where in the running order it sits. */
+export type SkippedScene = { key: string; title: string; cat: string; afterKey?: string };
 
 /**
  * A textarea that is always exactly as tall as its contents.
@@ -239,6 +243,8 @@ export function Storyboard({
   onMoveScene,
   onAddScene,
   onRestoreScene,
+  skippedScenes = [],
+  onSkipScene,
 }: {
   scenePlan: ScenePlan | null;
   sceneEdits: Record<string, SceneEdit>;
@@ -263,6 +269,13 @@ export function Storyboard({
   deletedScenes?: { key: string; title: string; cat: string }[];
   onDeleteScene?: (key: string) => void;
   onRestoreScene?: (key: string) => void;
+  /**
+   * Scenes held out of this cut but left where they are. Shown in place, greyed,
+   * with everything typed into them intact — the switch you flick twice while
+   * deciding, which is most of them.
+   */
+  skippedScenes?: SkippedScene[];
+  onSkipScene?: (key: string, skip: boolean) => void;
   /** Move a scene one place earlier or later in the film. */
   onMoveScene?: (key: string, by: -1 | 1) => void;
   /** Write a scene of your own, straight after this one. */
@@ -278,10 +291,14 @@ export function Storyboard({
     return null;
   }
 
-  // Logos are overlay furniture, never something a shot is framed on.
-  // Logos are composited, and the presenter is not a shot — neither is a scene's visual.
+  // What a shot can be framed on. Logos are composited furniture, the presenter is
+  // a person rather than a shot, and a reference video is not a still to build on.
   const refOptions = attachments.filter(
-    (a) => a.kind !== 'logo' && a.kind !== 'brand-logo' && a.kind !== 'actor',
+    (a) =>
+      a.kind !== 'logo' &&
+      a.kind !== 'brand-logo' &&
+      a.kind !== 'actor' &&
+      a.kind !== 'reference-video',
   );
 
   // Every scene's photo, worked out once: the table shows it per row, and the scenes
@@ -314,6 +331,28 @@ export function Storyboard({
   };
 
   let lastPart = -1;
+  // Where each skipped scene sits: after the last scene that is still in the film,
+  // or at the top when nothing precedes it.
+  const skippedAfter = new Map<string, SkippedScene[]>();
+  for (const sk of skippedScenes) {
+    const at = sk.afterKey ?? '';
+    skippedAfter.set(at, [...(skippedAfter.get(at) ?? []), sk]);
+  }
+  const skippedRow = (sk: SkippedScene): ReactElement => (
+    <tr className="sb-skipped-row" key={`skip-${sk.key}`}>
+      <td colSpan={5}>
+        <span className="sb-skipped-tag">Skipped</span>
+        <b>{sk.title}</b>
+        {sk.cat ? <span className="hint"> · {sk.cat}</span> : null}
+        <span className="hint"> — not generated, not timed, and everything written in it is kept.</span>
+        {onSkipScene && (
+          <button type="button" className="btn small" onClick={() => onSkipScene(sk.key, false)}>
+            Put it back
+          </button>
+        )}
+      </td>
+    </tr>
+  );
 
   return (
     <div className="card">
@@ -498,6 +537,7 @@ export function Storyboard({
               </tr>
             </thead>
             <tbody>
+              {(skippedAfter.get('') ?? []).map(skippedRow)}
               {scenePlan.scenes.map((sc, gi) => {
                 const rows: ReactElement[] = [];
                 if (sc.part !== lastPart && scenePlan.parts > 1) {
@@ -551,6 +591,12 @@ export function Storyboard({
                             ↓
                           </button>
                         </div>
+                      )}
+                      {onSkipScene && (
+                        <label className="sb-skip" title="Leave this scene out of the film without losing it">
+                          <input type="checkbox" checked={false} onChange={() => onSkipScene(key, true)} />
+                          Skip
+                        </label>
                       )}
                       {onDeleteScene && (
                         <button
@@ -619,6 +665,7 @@ export function Storyboard({
                     </td>
                   </tr>,
                 );
+                for (const sk of skippedAfter.get(key) ?? []) rows.push(skippedRow(sk));
                 return rows;
               })}
             </tbody>

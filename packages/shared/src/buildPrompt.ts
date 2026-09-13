@@ -182,6 +182,8 @@ export interface SceneOverride {
   cardSub?: string;
   /** The designer took this scene out of the film. */
   deleted?: boolean;
+  /** Held out of this cut, but still written and still on the storyboard. */
+  skipped?: boolean;
 }
 
 /**

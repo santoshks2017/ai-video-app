@@ -110,9 +110,13 @@ import {
   storyTheme,
   themeDirection,
   plainSpoken,
+  orderReferences,
+  type ClientProfile,
+  DEALER_VIEWS,
+  type DealerView,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
-import { seePhotos } from './vision.js';
+import { seePhotos, seeDealerPhotos } from './vision.js';
 import { syncOemModel, OemSyncError } from './oemSync.js';
 import { syncGoogleModel } from './googleSync.js';
 import { planFromBrief, PlanError, type PlanContext } from './planBrief.js';
@@ -1136,23 +1140,27 @@ async function renderSegment(
    * Three things are guaranteed a slot on every part, because a film missing any
    * of them is unusable: the vehicle, the presenter, the dealership.
    */
-  const car = req.carRefs ?? [];
-  const room = () => Math.max(0, model.maxReferenceImages - shown.length);
-
-  shown.push(...car.slice(0, Math.max(1, model.maxReferenceImages - shown.length - 2)));
-  if (req.actorRef && room() > 0) shown.push(req.actorRef);
-  if (req.placeRef && room() > 0) shown.push(req.placeRef);
-  if (!car.length && req.anchorFrame && room() > 0) {
-    shown.push({
-      ref: { data: req.anchorFrame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' },
-      label: 'a frame of the vehicle from the opening part — it must keep looking like this',
-      filename: 'anchor-frame.jpg',
-    });
-  }
-  shown.push(...req.references.filter((r) => r !== req.placeRef && r !== req.actorRef).slice(0, room()));
-  // Videos are counted against their own allowance, not the image budget.
-  const videos = (req.videoRefs ?? []).slice(0, 3);
-  shown.push(...videos);
+  const anchor: LabelledRef | undefined = req.anchorFrame
+    ? {
+        ref: { data: req.anchorFrame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' },
+        label: 'a frame of the vehicle from the opening part — it must keep looking like this',
+        filename: 'anchor-frame.jpg',
+      }
+    : undefined;
+  // orderReferences is the one rule, and the editor calls it too — so the list a
+  // designer checks before paying is the list that is actually sent.
+  shown.push(
+    ...orderReferences<LabelledRef>({
+      seed: shown[0],
+      car: req.carRefs ?? [],
+      actor: req.actorRef,
+      place: req.placeRef,
+      anchor,
+      rest: req.references,
+      videos: req.videoRefs ?? [],
+      max: model.maxReferenceImages,
+    }).filter((r) => r !== shown[0]),
+  );
   const refs = shown.map((r) => r.ref);
 
   /*
@@ -1313,8 +1321,10 @@ async function loadBriefAssets(brief: Brief): Promise<{
       kind: 'image',
     };
     if (a.kind === 'car-model') {
-      const side = a.angle ? `${noun}, ${a.angle}` : `${noun} — ${a.label}`;
-      carRefs.push({ ref, filename: a.filename, label: side, angle: a.angle });
+      // A sheet carries its own warning in the label the brief wrote for it; a
+      // single photograph just needs naming by the side it shows.
+      const side = a.sheet ? a.label : a.angle ? `${noun}, ${a.angle}` : `${noun} — ${a.label}`;
+      carRefs.push({ ref, filename: a.filename, label: side, angle: a.angle, sheet: a.sheet });
     } else if (a.kind === 'actor') {
       // First of the rest: the same face, hair and clothes in every part.
       actorRef = {
@@ -1323,7 +1333,12 @@ async function loadBriefAssets(brief: Brief): Promise<{
         label: `${a.label} — the same face, hair and clothes in every shot`,
       };
     } else {
-      references.push({ ref, filename: a.filename, label: `the dealership — ${a.label}` });
+      references.push({
+        ref,
+        filename: a.filename,
+        label: a.sheet ? a.label : `${a.kind === 'extra' ? 'a reference for this film' : 'the dealership'} — ${a.label}`,
+        sheet: a.sheet,
+      });
     }
   }
 
@@ -2599,6 +2614,95 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/recheck', async (req, reply)
   });
   return { ok: true, moved, dropped, angles };
 });
+
+/**
+ * File a dealership's photographs by the room they were taken in, and build one
+ * sheet per room.
+ *
+ * The same problem the vehicle had: ten reference slots, a showroom with thirty
+ * photographs, and no way for the model to know which of them is the delivery bay.
+ * A sheet spends one slot on every photograph of one room, and the room each
+ * photograph shows is worked out by looking at it — nobody labels an upload, and a
+ * Google Business import labels nothing at all.
+ *
+ * Photographs already filed by hand keep their room; only the unfiled ones are
+ * looked at, so a correction made in the editor is never undone here.
+ */
+app.post<{ Params: { id: string }; Body?: { relabel?: boolean } }>(
+  '/api/clients/:id/sheets',
+  async (req, reply) => {
+    const client = await getOne<ClientProfile>('clients', req.params.id);
+    if (!client) return reply.code(404).send({ code: 'not-found', message: 'No such client' });
+
+    const loaded: { img: StoredImage; bytes: Buffer }[] = [];
+    for (const img of client.photos ?? []) {
+      const obj = img.storagePath ? await readObject(img.storagePath).catch(() => null) : null;
+      if (obj) loaded.push({ img, bytes: obj.bytes });
+    }
+    if (!loaded.length) {
+      return reply.code(400).send({ code: 'no-photos', message: 'No showroom photos to sort.' });
+    }
+
+    // Only what has not been filed by hand — unless a relabel was asked for.
+    const relabel = req.body?.relabel === true;
+    const toLook = loaded.filter((l) => relabel || !l.img.view);
+    let looked: string[] = [];
+    if (toLook.length && config.googleApiKey) {
+      looked = await seeDealerPhotos(
+        toLook.map((l) => ({ bytes: l.bytes })),
+        client.displayName || client.name,
+        config.googleApiKey,
+      );
+    }
+    const guessed = new Map<string, DealerView | 'other'>();
+    toLook.forEach((l, i) => {
+      const v = looked[i];
+      if (v) guessed.set(l.img.refId, v as DealerView | 'other');
+    });
+
+    const photos: StoredImage[] = [];
+    const byView = new Map<DealerView, { bytes: Buffer; label: string }[]>();
+    const counts: Record<string, number> = {};
+    for (const l of loaded) {
+      const view = (relabel ? undefined : l.img.view) ?? (guessed.get(l.img.refId) as DealerView | undefined);
+      const filed = view && view !== ('other' as DealerView) ? view : undefined;
+      photos.push(filed ? { ...l.img, view: filed } : { ...l.img, view: undefined });
+      if (!filed) continue;
+      counts[filed] = (counts[filed] ?? 0) + 1;
+      byView.set(filed, [...(byView.get(filed) ?? []), { bytes: l.bytes, label: l.img.label }]);
+    }
+
+    const sheets: Partial<Record<DealerView, StoredImage>> = {};
+    for (const { id: view, label } of DEALER_VIEWS) {
+      const shots = byView.get(view) ?? [];
+      if (shots.length < 2) continue;
+      const bytes = await contactSheet(shots.slice(0, 9), { labels: false, max: 9, cell: 480 }).catch(() => null);
+      if (!bytes) continue;
+      const filename = `${client.id}-place-${view}.jpg`;
+      const { refId, storagePath } = await putRef(filename, 'image/jpeg', bytes);
+      sheets[view] = {
+        refId,
+        storagePath,
+        filename,
+        url: `/api/refs/${refId}/${filename}`,
+        label: `${label} — ${Math.min(shots.length, 9)} photographs`,
+        view,
+      };
+    }
+
+    await patch('clients', client.id, { photos, sheets, updatedAt: Date.now() });
+    return {
+      ok: true,
+      counts,
+      sheets: Object.keys(sheets),
+      unfiled: photos.filter((p) => !p.view).length,
+      looked: toLook.length,
+      note: config.googleApiKey
+        ? undefined
+        : 'No Google key, so nothing could be looked at — file the photos by hand and build the sheets again.',
+    };
+  },
+);
 
 /** Every generation ever made for a project — nothing is overwritten. */
 /**

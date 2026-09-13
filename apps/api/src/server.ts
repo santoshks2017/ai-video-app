@@ -114,7 +114,9 @@ import { importPlace, PlacesError } from './places.js';
 import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './credentials.js';
 
 const config = loadConfig();
-const app = Fastify({ logger: true, bodyLimit: 15 * 1024 * 1024 });
+// Reference videos arrive base64 in JSON, so the ceiling is a reference video's
+// worth of it rather than an image's.
+const app = Fastify({ logger: true, bodyLimit: 70 * 1024 * 1024 });
 
 // A request can say it carries JSON and still have no body — every DELETE from the web
 // app did, and Fastify turned each one away with a 400 before it reached its route, so
@@ -1000,6 +1002,8 @@ async function renderSegment(
     carRefs?: LabelledRef[];
     /** Everything else in scope — the showroom, the team, project extras. */
     references: LabelledRef[];
+    /** Reference videos. Only Omni is sent these; the others ignore them. */
+    videoRefs?: LabelledRef[];
   },
 ): Promise<{ bytes: Buffer; interactionId: string; renderResolution: Resolution }> {
   const seeded = Boolean(req.seedFrame) && model.supportsImageToVideo;
@@ -1090,6 +1094,9 @@ async function renderSegment(
     });
   }
   shown.push(...req.references.slice(0, room()));
+  // Videos are counted against their own allowance, not the image budget.
+  const videos = (req.videoRefs ?? []).slice(0, 3);
+  shown.push(...videos);
   const refs = shown.map((r) => r.ref);
 
   /*
@@ -1207,11 +1214,14 @@ async function loadBriefAssets(brief: Brief): Promise<{
   vehicleSheet?: LabelledRef;
   /** The showroom in one sheet, for the same reason. */
   placeSheet?: LabelledRef;
+  /** Reference videos, for the models that take them. Omni accepts three. */
+  videoRefs: LabelledRef[];
   dealerLogo?: Buffer;
   brandLogo?: Buffer;
 }> {
   const references: LabelledRef[] = [];
   const carRefs: CarRef[] = [];
+  const videoRefs: LabelledRef[] = [];
   let actorRef: LabelledRef | undefined;
   const carTiles: { bytes: Buffer; label: string }[] = [];
   const placeTiles: { bytes: Buffer; label: string }[] = [];
@@ -1229,6 +1239,18 @@ async function loadBriefAssets(brief: Brief): Promise<{
     }
     if (a.kind === 'brand-logo') {
       brandLogo = obj.bytes;
+      continue;
+    }
+    if (a.kind === 'reference-video') {
+      videoRefs.push({
+        ref: {
+          data: obj.bytes.toString('base64'),
+          mimeType: obj.contentType || 'video/mp4',
+          kind: 'video',
+        },
+        filename: a.filename,
+        label: `a reference video — ${a.label}`,
+      });
       continue;
     }
     const ref: OmniRef = {
@@ -1282,6 +1304,8 @@ async function loadBriefAssets(brief: Brief): Promise<{
     carRefs,
     vehicleSheet,
     placeSheet,
+    // Three is Omni's limit, and the first three are the ones the designer chose first.
+    videoRefs: videoRefs.slice(0, 3),
     dealerLogo,
     brandLogo,
   };
@@ -1551,7 +1575,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
 
   // The music is made while the segments render, and waited for only at the stitch.
   const musicBed = makeMusicBed(brief, jobId, cost.totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0));
-  const { references: otherRefs, carRefs, vehicleSheet, placeSheet, dealerLogo, brandLogo } =
+  const { references: otherRefs, carRefs, vehicleSheet, placeSheet, videoRefs, dealerLogo, brandLogo } =
     await loadBriefAssets(brief);
   // The presenter leads what is left, then the showroom as one sheet, then its
   // photos individually.
@@ -1561,6 +1585,8 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   const sentRefs: { part: number; files: string[] }[] = [];
   /** What the checker made of the vehicle in each part. */
   const vehicleChecks: { part: number; same: boolean; why: string; remade?: boolean }[] = [];
+  /** What each join measured once the dead air was taken out of it. */
+  let joins: { part: number; headTrim: number; tailTrim: number; echo?: number }[] = [];
   /** Retakes cost money, so a run buys at most this many of them. */
   let retakesLeft = 2;
 
@@ -1608,6 +1634,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
           anchorFrame,
           carRefs: partCars,
           references,
+          videoRefs,
         });
       let { bytes, interactionId } = await ask();
 
@@ -1675,10 +1702,12 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     // them, append a real end card, and overlay the footer bar + logos.
     // Everything that must be legible is drawn here rather than generated.
     const bed = await musicBed;
-    const finalBytes = await composeFinal(
-      segmentBytes,
-      buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes),
-    );
+    const finalBytes = await composeFinal(segmentBytes, {
+      ...buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes),
+      onJoins: (n) => {
+        joins = n;
+      },
+    });
     const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 
     // Thumbnail for the project's generation history.
@@ -1707,6 +1736,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       clips,
       referenceFiles: sentRefs,
       vehicleChecks,
+      joins,
       finalStoragePath,
       posterPath,
       musicStoragePath: bed?.storagePath,
@@ -1972,7 +2002,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       : redo.length === parts.length
         ? makeMusicBed(brief, jobId, totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0))
         : Promise.resolve(null);
-    const { references: otherRefs, carRefs, vehicleSheet, placeSheet, dealerLogo, brandLogo } =
+    const { references: otherRefs, carRefs, vehicleSheet, placeSheet, videoRefs, dealerLogo, brandLogo } =
       await loadBriefAssets(brief);
     const references: LabelledRef[] = placeSheet
       ? [...otherRefs.slice(0, 1), placeSheet, ...otherRefs.slice(1)]
@@ -2045,6 +2075,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
                   ...carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs),
                 ],
             references: attached.length ? [...attached, ...references] : references,
+            videoRefs,
           });
           bytes = rendered.bytes;
           clips[i] = {
@@ -2357,7 +2388,10 @@ app.post<{ Params: { jobId: string }; Body: { modelId?: string } }>(
  * The editor's export: the same film with stretches taken out, and optionally
  * silent. Nothing is generated, so it costs nothing and cannot drift.
  */
-app.post<{ Params: { jobId: string }; Body: { keep?: { from: number; to: number }[]; mute?: boolean; note?: string } }>(
+app.post<{
+  Params: { jobId: string };
+  Body: { keep?: { from: number; to: number }[]; mute?: boolean; note?: string; append?: string[] };
+}>(
   '/api/generations/:jobId/edit',
   async (req, reply) => {
     const job = await getJob(req.params.jobId);
@@ -2369,13 +2403,25 @@ app.post<{ Params: { jobId: string }; Body: { keep?: { from: number; to: number 
     const obj = await readObject(job.finalStoragePath);
     if (!obj) return reply.code(404).send({ code: 'not-found', message: 'That video is gone from storage.' });
     try {
-      const bytes = await keepRanges(obj.bytes, keep, { mute: req.body?.mute === true });
+      let bytes = await keepRanges(obj.bytes, keep, { mute: req.body?.mute === true });
+      // Other finished films from this project, joined on the end in the order given.
+      const appended: string[] = [];
+      for (const id of req.body?.append ?? []) {
+        const other = await getJob(id);
+        if (!other?.finalStoragePath) continue;
+        const bits = await readObject(other.finalStoragePath);
+        if (!bits) continue;
+        bytes = await joinVideos([bytes, bits.bytes]);
+        appended.push(other.label ?? id.slice(0, 8));
+      }
       const saved = await saveDerived(job, bytes, {
         kind: 'edit',
         label: req.body?.note?.trim() || 'Edited cut',
         note:
           `Kept ${keep.map((r) => `${r.from.toFixed(1)}–${r.to.toFixed(1)}s`).join(', ')}` +
-          (req.body?.mute ? ', silent.' : '.'),
+          (req.body?.mute ? ', silent' : '') +
+          (appended.length ? `, then ${appended.join(', then ')}` : '') +
+          '.',
         caller: req.caller,
         resolution: job.resolution,
       });
@@ -2398,6 +2444,7 @@ app.get<{ Params: { jobId: string } }>('/api/generations/:jobId', async (req, re
     status: job.status,
     vehicle: job.vehicle,
     vehicleChecks: job.vehicleChecks ?? [],
+    joins: job.joins ?? [],
     referenceFiles: job.referenceFiles ?? [],
     prompts: job.prompts ?? [],
     brief: job.brief ?? null,
@@ -2572,8 +2619,15 @@ app.post<{
     return reply.code(400).send({ code: 'bad-request', message: 'dataBase64 and label are required' });
   }
   const bytes = Buffer.from(b.dataBase64.replace(/^data:[^,]+,/, ''), 'base64');
-  if (bytes.length > 8 * 1024 * 1024) {
-    return reply.code(413).send({ code: 'too-large', message: 'Reference image exceeds 8MB.' });
+  const isVideo = (b.contentType ?? '').startsWith('video/');
+  const cap = isVideo ? 45 * 1024 * 1024 : 8 * 1024 * 1024;
+  if (bytes.length > cap) {
+    return reply.code(413).send({
+      code: 'too-large',
+      message: isVideo
+        ? 'Reference video exceeds 45MB — trim it, or export it smaller.'
+        : 'Reference image exceeds 8MB.',
+    });
   }
   const { refId, storagePath } = await putRef(
     b.filename || 'ref.jpg',

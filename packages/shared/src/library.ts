@@ -343,6 +343,12 @@ export interface Project {
   carRefs?: StoredImage[];
   /** Extra reference images added on this project only. */
   extraRefs: StoredImage[];
+  /**
+   * Reference videos for this project — the real showroom, the real car moving.
+   * A model that takes video references learns motion and light from these in a
+   * way no still can teach it; models that do not simply never see them.
+   */
+  videoRefs?: StoredImage[];
   status: ProjectStatus;
   /** The board column this project sits in. Unset means it has never been moved. */
   stage?: ProjectStage;

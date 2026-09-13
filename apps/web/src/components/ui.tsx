@@ -171,6 +171,7 @@ export function ImageUpload({
   onUploaded,
   buttonText = 'Upload image',
   multiple = false,
+  accept = 'image/*',
 }: {
   label: string;
   kind?: string;
@@ -178,6 +179,8 @@ export function ImageUpload({
   buttonText?: string;
   /** Take a whole set in one go — the four angles of a car, say. */
   multiple?: boolean;
+  /** What the picker offers. Reference videos pass `video/*`. */
+  accept?: string;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState('');
@@ -208,7 +211,7 @@ export function ImageUpload({
       <input
         ref={ref}
         type="file"
-        accept="image/*"
+        accept={accept}
         multiple={multiple}
         hidden
         onChange={(e) => pick(e.target.files)}

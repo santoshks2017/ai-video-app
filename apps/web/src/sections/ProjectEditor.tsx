@@ -1026,6 +1026,52 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 buttonText="Add reference"
               />
             </div>
+            <div className="divider" />
+
+            {/* A model that takes video references learns motion and light from them
+                in a way no still can teach it. Omni takes three. */}
+            <Field
+              label="Reference videos"
+              hint="Up to three — the real showroom, the real vehicle moving. Sent to the models that accept video; ignored by those that do not."
+            >
+              <div className="thumbs">
+                {(project.videoRefs ?? []).map((v) => (
+                  <div className="veh-photo" key={v.refId}>
+                    <div className="thumb">
+                      {v.url ? (
+                        <video src={v.url} muted playsInline preload="metadata" />
+                      ) : (
+                        <div className="thumb-ph">▶</div>
+                      )}
+                      <span title={v.label}>{v.label}</span>
+                      <button
+                        className="thumb-x"
+                        type="button"
+                        aria-label={`Remove ${v.label}`}
+                        onClick={() =>
+                          set({ videoRefs: (project.videoRefs ?? []).filter((x) => x.refId !== v.refId) })
+                        }
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {(project.videoRefs?.length ?? 0) < 3 && (
+                  <ImageUpload
+                    label={`${project.name || 'Project'} — reference video`}
+                    kind="reference-video"
+                    accept="video/*"
+                    buttonText="Add reference video"
+                    onUploaded={(v) => set({ videoRefs: [...(project.videoRefs ?? []), v] })}
+                  />
+                )}
+              </div>
+              {(project.videoRefs?.length ?? 0) >= 3 && (
+                <div className="hint">Three is the most any model here takes.</div>
+              )}
+            </Field>
+
             {brief && brief.attachments.length > 0 && (
               <div className="hint" style={{ marginTop: 8 }}>
                 {brief.attachments.length} reference image{brief.attachments.length === 1 ? '' : 's'} in scope

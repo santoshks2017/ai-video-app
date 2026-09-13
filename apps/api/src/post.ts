@@ -59,6 +59,8 @@ export interface BrandOverlay {
   endCard?: EndCardSpec;
   /** Timed captions, drawn here rather than by the video model. */
   cards?: TextCard[];
+  /** Handed what each join measured, for the run's receipt. */
+  onJoins?: (notes: JoinNote[]) => void;
   /**
    * Final short side in pixels — 1080 for a 1080p deliverable. A model that
    * cannot render that natively is upscaled here, once, before any overlay is
@@ -782,6 +784,133 @@ export async function contactSheet(
     .toBuffer();
 }
 
+/** Where speech actually starts and stops in one clip, measured in 100ms windows. */
+async function speechEdges(file: string): Promise<{ start: number; end: number; duration: number }> {
+  const meta = await probe(file);
+  const out = await run('ffmpeg', [
+    '-v', 'error', '-i', file,
+    '-af', 'aresample=8000,asetnsamples=800,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-',
+    '-f', 'null', '-',
+  ]).catch(() => '');
+  const levels = [...out.matchAll(/RMS_level=(-?\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
+  if (levels.length < 3) return { start: 0, end: meta.duration, duration: meta.duration };
+  // The same rule the music bed ducks by: loud relative to this clip's own loudest,
+  // so a quiet recording is not read as silence throughout.
+  const sorted = [...levels].sort((a, b) => a - b);
+  const p90 = sorted[Math.floor(sorted.length * 0.9)] ?? -20;
+  const floor = Math.max(-60, p90 - 18);
+  const first = levels.findIndex((l) => l > floor);
+  let last = -1;
+  for (let i = levels.length - 1; i >= 0; i--) {
+    if (levels[i]! > floor) {
+      last = i;
+      break;
+    }
+  }
+  if (first < 0 || last < 0) return { start: 0, end: meta.duration, duration: meta.duration };
+  return { start: first * 0.1, end: Math.min(meta.duration, (last + 1) * 0.1), duration: meta.duration };
+}
+
+/** What a join looked like before and after it was tightened — kept on the run. */
+export interface JoinNote {
+  part: number;
+  headTrim: number;
+  tailTrim: number;
+  /** How alike the end of the previous part and the start of this one sound, 0–1. */
+  echo?: number;
+}
+
+const LEAD_IN = 0.15;
+const TAIL_OUT = 0.3;
+const MAX_TRIM = 1.2;
+
+/** A crude loudness envelope, for telling whether two stretches sound alike. */
+async function envelope(file: string, from: number, seconds: number): Promise<number[]> {
+  const out = await run('ffmpeg', [
+    '-v', 'error', '-ss', from.toFixed(3), '-t', seconds.toFixed(3), '-i', file,
+    '-af', 'aresample=8000,asetnsamples=160,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-',
+    '-f', 'null', '-',
+  ]).catch(() => '');
+  return [...out.matchAll(/RMS_level=(-?\d+(?:\.\d+)?)/g)].map((m) => Math.max(-70, Number(m[1])));
+}
+
+function correlation(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  if (n < 8) return 0;
+  const x = a.slice(a.length - n);
+  const y = b.slice(0, n);
+  const mx = x.reduce((s, v) => s + v, 0) / n;
+  const my = y.reduce((s, v) => s + v, 0) / n;
+  let num = 0;
+  let dx = 0;
+  let dy = 0;
+  for (let i = 0; i < n; i++) {
+    const a1 = x[i]! - mx;
+    const b1 = y[i]! - my;
+    num += a1 * b1;
+    dx += a1 * a1;
+    dy += b1 * b1;
+  }
+  return dx && dy ? num / Math.sqrt(dx * dy) : 0;
+}
+
+/**
+ * Make every join sound deliberate.
+ *
+ * A part is asked to stop speaking before its end and to wait a beat before it
+ * starts, and the model does neither reliably: measured on real runs, one part
+ * ended with a second of dead air while the next began speaking inside its first
+ * 200ms. Joined whole, that reads as the film stalling, or as two phrases
+ * colliding. So the silence at each join is cut back to a fixed beat — measured,
+ * not asked for — leaving a breath at the end of one part and a moment before the
+ * next speaks. The trims are capped, so a part that simply is quiet keeps its
+ * pauses.
+ *
+ * It also measures how alike the end of one part sounds to the start of the next
+ * and records it, which is the signature a repeated word across a join would
+ * leave. Nothing is cut on that number yet — it is there to be read first.
+ */
+async function tightenJoins(files: string[], dir: string): Promise<{ files: string[]; notes: JoinNote[] }> {
+  if (files.length < 2) return { files, notes: [] };
+  const edges = await Promise.all(files.map(speechEdges));
+  const notes: JoinNote[] = [];
+  const out: string[] = [];
+
+  for (const [i, file] of files.entries()) {
+    const e = edges[i]!;
+    const silent = e.start === 0 && e.end >= e.duration - 0.05;
+    const head = i > 0 && !silent ? Math.min(MAX_TRIM, Math.max(0, e.start - LEAD_IN)) : 0;
+    const tail = i < files.length - 1 && !silent ? Math.min(MAX_TRIM, Math.max(0, e.duration - e.end - TAIL_OUT)) : 0;
+
+    let echo: number | undefined;
+    if (i > 0) {
+      const prev = out[i - 1]!;
+      const prevMeta = await probe(prev);
+      const window = 0.8;
+      const a = await envelope(prev, Math.max(0, prevMeta.duration - window), window);
+      const b = await envelope(file, head, window);
+      const r = correlation(a, b);
+      echo = Math.round(r * 100) / 100;
+    }
+
+    if (head <= 0.05 && tail <= 0.05) {
+      out.push(file);
+      notes.push({ part: i + 1, headTrim: 0, tailTrim: 0, echo });
+      continue;
+    }
+    const trimmed = join(dir, `tight-${i}.mp4`);
+    await run('ffmpeg', [
+      '-v', 'error', '-y', '-threads', FF_THREADS,
+      '-ss', head.toFixed(3), '-i', file, '-t', Math.max(0.5, e.duration - head - tail).toFixed(3),
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-movflags', '+faststart', trimmed,
+    ]);
+    out.push(trimmed);
+    notes.push({ part: i + 1, headTrim: Math.round(head * 100) / 100, tailTrim: Math.round(tail * 100) / 100, echo });
+  }
+  return { files: out, notes };
+}
+
 /**
  * Build the finished video. Returns an MP4 buffer.
  * A single segment with no overlays short-circuits to the input untouched.
@@ -806,12 +935,19 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
 
   const dir = await mkdtemp(join(tmpdir(), 'ava-post-'));
   try {
-    const files: string[] = [];
+    const raw: string[] = [];
     for (let i = 0; i < segments.length; i++) {
       const f = join(dir, `seg-${i}.mp4`);
       await writeFile(f, segments[i]!);
-      files.push(f);
+      raw.push(f);
     }
+    // The dead air and the collisions at the joins go first, so everything below
+    // — durations, caption timings, the music bed — is measured on the real cut.
+    const tightened = await tightenJoins(raw, dir).catch(() => ({ files: raw, notes: [] as JoinNote[] }));
+    const files = tightened.files;
+    const headTrims = tightened.notes.map((n) => n.headTrim);
+    const cutBefore = tightened.notes.map((n) => n.headTrim + n.tailTrim);
+    overlay.onJoins?.(tightened.notes);
     const metas = await Promise.all(files.map(probe));
     // Every clip is scaled to one frame size before the chain. concat refuses to
     // join two sizes, and a 1080p deliverable from a model that renders 720p is
@@ -999,9 +1135,13 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       if (!text || ci < 0 || ci >= bodyClips) continue;
       // A segment that came back shorter than it was asked for pulls its own
       // captions in with it, rather than leaving them stranded past the cut.
-      const k = card.partSeconds > 0 ? metas[ci]!.duration / card.partSeconds : 1;
-      const from = clipStart[ci]! + Math.max(0, card.start) * k;
-      const to = Math.min(bodyEnd, clipStart[ci]! + card.end * k);
+      // The part may have had its silence trimmed at both ends, so a card's place
+      // in it is measured against what is left, and shifted by what went from the front.
+      const head = headTrims[ci] ?? 0;
+      const planned = Math.max(0.1, card.partSeconds - (cutBefore[ci] ?? 0));
+      const k = card.partSeconds > 0 ? metas[ci]!.duration / planned : 1;
+      const from = clipStart[ci]! + Math.max(0, card.start - head) * k;
+      const to = Math.min(bodyEnd, clipStart[ci]! + Math.max(0, card.end - head) * k);
       if (to - from < 0.8) continue; // too brief to read
 
       const png = await cardPng(text, card.sub, W, H, accent, ink, headSize);
@@ -1126,27 +1266,63 @@ export async function splitVideo(clip: Buffer, maxSeconds: number): Promise<Buff
   }
 }
 
-/** Put pieces back together, cut to cut. */
+/** Whether a file carries a sound track at all. */
+async function hasAudio(file: string): Promise<boolean> {
+  const out = await run('ffprobe', [
+    '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file,
+  ]).catch(() => '');
+  return out.trim().length > 0;
+}
+
+/**
+ * Put pieces back together, cut to cut.
+ *
+ * The pieces need not match: films joined here can come from different runs, at
+ * different sizes, and one of them may be silent. Everything is scaled into the
+ * first piece's frame — letterboxed rather than cropped, since cropping a film
+ * someone approved is not a joining decision — and a piece with no sound gets
+ * silence of its own length so the join does not lose the track.
+ */
 export async function joinVideos(pieces: Buffer[]): Promise<Buffer> {
   if (pieces.length === 0) throw new Error('nothing to join');
   if (pieces.length === 1) return pieces[0]!;
   const dir = await mkdtemp(join(tmpdir(), 'ava-join-'));
   try {
     const files: string[] = [];
+    const metas: { duration: number; width: number; height: number; audio: boolean }[] = [];
     for (const [i, bytes] of pieces.entries()) {
       const f = join(dir, `p-${i}.mp4`);
       await writeFile(f, bytes);
       files.push(f);
+      const m = await probe(f);
+      metas.push({ ...m, audio: await hasAudio(f) });
     }
+    const W = metas[0]!.width;
+    const H = metas[0]!.height;
     const outF = join(dir, 'out.mp4');
+
     const args = ['-v', 'error', '-y', '-threads', FF_THREADS];
     for (const f of files) args.push('-i', f);
-    const chain = files
-      .map((_, i) => `[${i}:v]setsar=1,format=yuv420p[v${i}];[${i}:a]aresample=44100:async=1,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`)
-      .join(';');
+    // Silence for the pieces that have none, as extra inputs after the files.
+    const silence = new Map<number, number>();
+    let nextInput = files.length;
+    for (const [i, m] of metas.entries()) {
+      if (m.audio) continue;
+      args.push('-f', 'lavfi', '-t', Math.max(0.1, m.duration).toFixed(3), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+      silence.set(i, nextInput++);
+    }
+
+    const chains: string[] = [];
+    for (const [i, m] of metas.entries()) {
+      chains.push(
+        `[${i}:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=24,format=yuv420p[v${i}]`,
+      );
+      const a = m.audio ? `${i}:a` : `${silence.get(i)}:a`;
+      chains.push(`[${a}]aresample=44100:async=1,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`);
+    }
     const streams = files.map((_, i) => `[v${i}][a${i}]`).join('');
     args.push(
-      '-filter_complex', `${chain};${streams}concat=n=${files.length}:v=1:a=1[v][a]`,
+      '-filter_complex', `${chains.join(';')};${streams}concat=n=${files.length}:v=1:a=1[v][a]`,
       '-map', '[v]', '-map', '[a]',
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', outF,

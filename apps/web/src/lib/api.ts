@@ -69,6 +69,8 @@ export interface GenerationDetail {
   vehicle?: GenerationHistoryItem['vehicle'];
   /** What the vehicle checker made of each part, and whether it had to be made again. */
   vehicleChecks: { part: number; same: boolean; why: string; remade?: boolean }[];
+  /** Dead air taken out of each join, and how alike the two sides sound. */
+  joins?: { part: number; headTrim: number; tailTrim: number; echo?: number }[];
   referenceFiles: { part: number; files: string[] }[];
   prompts: { part: number; text: string }[];
   brief: Record<string, unknown> | null;
@@ -195,7 +197,10 @@ export const api = {
   },
 
   /** Export a trimmed version of a finished film. */
-  async editVideo(jobId: string, body: { keep: { from: number; to: number }[]; mute?: boolean; note?: string }) {
+  async editVideo(
+    jobId: string,
+    body: { keep: { from: number; to: number }[]; mute?: boolean; note?: string; append?: string[] },
+  ) {
     return await req<{ jobId: string; finalUrl: string }>(`/api/generations/${jobId}/edit`, {
       method: 'POST',
       body: JSON.stringify(body),

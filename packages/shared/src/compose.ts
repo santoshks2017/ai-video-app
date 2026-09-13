@@ -359,6 +359,9 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   if (client?.brandLogo) attachments.push(toDealerPhoto(client.brandLogo, 'brand-logo'));
   for (const img of client?.photos ?? []) attachments.push(toDealerPhoto(img, 'dealer'));
   for (const img of project.extraRefs) attachments.push(toDealerPhoto(img, 'dealer'));
+  for (const vid of project.videoRefs ?? []) {
+    if (vid?.storagePath) attachments.push({ ...toDealerPhoto(vid, 'reference-video'), label: vid.label });
+  }
   b.attachments = attachments;
 
   // Global instructions + the project's own steer become extra prompt direction.

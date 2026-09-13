@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { fmtTime, formatInr, type Brief, type PromptPart, type ScenePlan, type StoredImage, clampPace } from '@ava/shared';
 import { useApp } from '../state/appStore.js';
 import { ImageUpload, Thumb } from './ui.js';
+import { CutRoom } from './CutRoom.js';
 import {
   api,
   isApiError,
@@ -317,7 +318,22 @@ export function GenerationPanel({
     void loadHistory();
   };
 
+  const editing = history.find((h) => h.jobId === editingRun);
+
   return (
+    <>
+    {editing?.finalUrl && (
+      <CutRoom
+        run={editing}
+        others={history.filter((h) => h.jobId !== editing.jobId && h.finalUrl)}
+        onClose={() => setEditingRun(null)}
+        onExported={(jobId) => {
+          setEditingRun(null);
+          setViewing(jobId);
+          void loadHistory();
+        }}
+      />
+    )}
     <div className="card">
       <div className="head">
         <h2>Generate &amp; preview</h2>
@@ -659,6 +675,7 @@ export function GenerationPanel({
                 {/* The receipt for this run: what it was made from, and what the
                     model was actually shown. It is also how an older version is
                     put back — the video is kept, so nothing is ever overwritten. */}
+                {on && (
                 <div className="hist-more">
                   <button type="button" className="btn ghost small" onClick={() => void showRun(h.jobId)}>
                     {openRun === h.jobId ? 'Hide details' : 'Details'}
@@ -735,120 +752,6 @@ export function GenerationPanel({
                     </span>
                   )}
                 </div>
-
-                {editingRun === h.jobId && h.finalUrl && (
-                  <div className="cutroom">
-                    <video
-                      ref={cutVideo}
-                      className="clip-video"
-                      src={h.finalUrl}
-                      controls
-                      playsInline
-                      onLoadedMetadata={(e) => setCutLength(e.currentTarget.duration || 0)}
-                    />
-                    <div className="cut-help">
-                      Play to the start of what you want gone, press <b>Cut from here</b>, play to its end, press{' '}
-                      <b>to here</b>. Nothing is generated, so this costs nothing and cannot change the film.
-                    </div>
-
-                    {cuts.map((c, i) => (
-                      <div className="cut-row" key={i}>
-                        <span className="cut-no">{i + 1}</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min={0}
-                          max={cutLength || undefined}
-                          value={c.from}
-                          aria-label={`Cut ${i + 1} starts at`}
-                          onChange={(e) =>
-                            setCuts((cur) =>
-                              cur.map((x, j) => (j === i ? { ...x, from: Number(e.target.value) } : x)),
-                            )
-                          }
-                        />
-                        <span>to</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min={0}
-                          max={cutLength || undefined}
-                          value={c.to}
-                          aria-label={`Cut ${i + 1} ends at`}
-                          onChange={(e) =>
-                            setCuts((cur) => cur.map((x, j) => (j === i ? { ...x, to: Number(e.target.value) } : x)))
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="btn ghost small"
-                          onClick={() =>
-                            setCuts((cur) =>
-                              cur.map((x, j) =>
-                                j === i ? { ...x, to: Number((cutVideo.current?.currentTime ?? x.to).toFixed(2)) } : x,
-                              ),
-                            )
-                          }
-                        >
-                          to here
-                        </button>
-                        <button
-                          type="button"
-                          className="btn ghost small"
-                          aria-label={`Remove cut ${i + 1}`}
-                          onClick={() => setCuts((cur) => cur.filter((_, j) => j !== i))}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-
-                    <div className="toolbar" style={{ marginTop: 0 }}>
-                      <button
-                        type="button"
-                        className="btn small"
-                        onClick={() => {
-                          const at = Number((cutVideo.current?.currentTime ?? 0).toFixed(2));
-                          setCuts((cur) => [...cur, { from: at, to: Math.min(cutLength || at + 1, at + 1) }]);
-                        }}
-                      >
-                        Cut from here
-                      </button>
-                      <label className="check-row" style={{ margin: 0 }}>
-                        <input type="checkbox" checked={silent} onChange={(e) => setSilent(e.target.checked)} />
-                        <span>Drop the sound</span>
-                      </label>
-                      <span className="hint" style={{ marginTop: 0 }}>
-                        {cutLength
-                          ? `${fmtDur(keepFromCuts(cutLength).reduce((n, k) => n + (k.to - k.from), 0))} of ${fmtDur(
-                              cutLength,
-                            )} kept`
-                          : 'Reading the film…'}
-                      </span>
-                      <button
-                        type="button"
-                        className="btn primary small"
-                        disabled={Boolean(versionBusy) || !cutLength || (!cuts.length && !silent)}
-                        onClick={() =>
-                          void runVersion(h.jobId, 'edit', () =>
-                            api.editVideo(h.jobId, {
-                              keep: keepFromCuts(cutLength),
-                              mute: silent,
-                              note: `Edited cut${cuts.length ? ` · ${cuts.length} removed` : ''}`,
-                            }),
-                          ).then((r) => {
-                            if (r) {
-                              setEditingRun(null);
-                              setCuts([]);
-                              setSilent(false);
-                            }
-                          })
-                        }
-                      >
-                        {versionBusy === `${h.jobId}:edit` ? 'Exporting…' : 'Export this cut'}
-                      </button>
-                    </div>
-                  </div>
                 )}
 
                 {openRun === h.jobId && (
@@ -892,6 +795,26 @@ export function GenerationPanel({
                                   <div key={v.part} className={v.same ? undefined : 'hist-err'}>
                                     Part {v.part}: {v.same ? 'the right vehicle' : `wrong vehicle — ${v.why}`}
                                     {v.remade ? ' · made again' : ''}
+                                  </div>
+                                ))}
+                              </dd>
+                            </>
+                          )}
+                          {detail.joins && detail.joins.length > 1 && (
+                            <>
+                              <dt>Joins</dt>
+                              <dd>
+                                {detail.joins.slice(1).map((j) => (
+                                  <div key={j.part}>
+                                    Part {j.part - 1}→{j.part}:{' '}
+                                    {j.headTrim + (detail.joins?.[j.part - 2]?.tailTrim ?? 0) > 0.05
+                                      ? `${(j.headTrim + (detail.joins?.[j.part - 2]?.tailTrim ?? 0)).toFixed(
+                                          2,
+                                        )}s of dead air removed`
+                                      : 'nothing to trim'}
+                                    {typeof j.echo === 'number'
+                                      ? ` · sounds ${j.echo > 0.85 ? 'the same either side — a word may be repeated' : 'different either side'} (${j.echo.toFixed(2)})`
+                                      : ''}
                                   </div>
                                 ))}
                               </dd>
@@ -945,5 +868,6 @@ export function GenerationPanel({
         )}
       </div>
     </div>
+    </>
   );
 }

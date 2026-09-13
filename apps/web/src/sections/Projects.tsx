@@ -10,7 +10,7 @@ import {
   type ProjectStage,
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Panel, Empty } from '../components/ui.js';
+import { Field, Empty } from '../components/ui.js';
 import { isApiError } from '../lib/client.js';
 
 const STATUS_LABEL: Record<Project['status'], string> = {
@@ -292,43 +292,53 @@ export function ProjectsSection() {
     </div>
   );
 
+  // The search and the columns' headings stay put; only the cards move under them.
   return (
-    <Panel
-      title="Projects"
-      step={`${filtered.length} of ${projects.length}${totalSpend ? ` · ${formatInr(totalSpend)} spent` : ''}`}
-      actions={
-        <>
-          <div className="seg quiet">
-            <button type="button" className={view === 'board' ? 'on' : ''} onClick={() => pickView('board')}>
-              Board
-            </button>
-            <button type="button" className={view === 'list' ? 'on' : ''} onClick={() => pickView('list')}>
-              List
+    <div className="browse">
+      <div className="card">
+        <div className="head">
+          <div className="head-left">
+            <h2>Projects</h2>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="step">
+              {filtered.length} of {projects.length}
+              {totalSpend ? ` · ${formatInr(totalSpend)} spent` : ''}
+            </span>
+            <div className="seg quiet">
+              <button type="button" className={view === 'board' ? 'on' : ''} onClick={() => pickView('board')}>
+                Board
+              </button>
+              <button type="button" className={view === 'list' ? 'on' : ''} onClick={() => pickView('list')}>
+                List
+              </button>
+            </div>
+            <button className="btn small primary" type="button" disabled={creating} onClick={create}>
+              {creating ? 'Creating…' : 'New project'}
             </button>
           </div>
-          <button className="btn small primary" type="button" disabled={creating} onClick={create}>
-            {creating ? 'Creating…' : 'New project'}
-          </button>
-        </>
-      }
-    >
-      <div className="section-desc">
-        One project = one video. Drag a card to say where it stands — open, in progress, in review, delivered.
+        </div>
+        <div className="body tight">
+          <div className="section-desc">
+            One project = one video. Drag a card to say where it stands — open, in progress, in review, delivered.
+          </div>
+          {filters}
+        </div>
       </div>
 
-      {filters}
-
       {filtered.length === 0 ? (
-        <Empty icon="🎬">
-          {projects.length === 0
-            ? 'No projects yet — create one to get started.'
-            : 'Nothing matches those filters.'}
-        </Empty>
+        <div className="browse-scroll">
+          <Empty icon="🎬">
+            {projects.length === 0
+              ? 'No projects yet — create one to get started.'
+              : 'Nothing matches those filters.'}
+          </Empty>
+        </div>
       ) : view === 'board' ? (
         board
       ) : (
-        list
+        <div className="browse-scroll">{list}</div>
       )}
-    </Panel>
+    </div>
   );
 }

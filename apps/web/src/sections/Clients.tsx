@@ -245,7 +245,7 @@ export function ClientsSection() {
         </div>
       </div>
 
-      <div className="browse-cols two">
+      <div className={`browse-cols${draft?.id ? ' three' : ' two'}`}>
         <div className="browse-col">
           <div className="browse-col-head">
             <span>Dealers</span>
@@ -414,51 +414,6 @@ export function ClientsSection() {
             </div>
           </div>
           <div className="sec-stack">
-            {draft.id && (
-              <Section
-                sub
-                title="Campaigns"
-                step={campaigns.length ? `${campaigns.length} film${campaigns.length === 1 ? '' : 's'}` : 'None yet'}
-                defaultOpen={campaigns.length > 0}
-              >
-                {usual && (
-                  <div className="usual-actor">
-                    <span>
-                      <b>{actorName(usual.actorId) || 'One presenter'}</b> fronts {usual.count} of {usual.total} films
-                      for this dealer. Keeping the same face is what makes a dealership recognisable — change it only
-                      on purpose.
-                    </span>
-                  </div>
-                )}
-                {campaigns.length === 0 ? (
-                  <div className="hint">No films for this client yet.</div>
-                ) : (
-                  <div className="campaigns">
-                    {campaigns.map((p) => (
-                      <button key={p.id} type="button" className="campaign" onClick={() => go('projects', p.id)}>
-                        <b>{p.name || 'Untitled project'}</b>
-                        <span className="campaign-tags">
-                          {p.useCases.map((u) => (
-                            <span className="chip accent" key={u}>
-                              {CATEGORIES.find((c) => c.id === u)?.label ?? u}
-                            </span>
-                          ))}
-                          {actorName(p.actorId) && <span className="chip">{actorName(p.actorId)}</span>}
-                        </span>
-                        <span className="campaign-meta">
-                          {PROJECT_STAGES.find((st) => st.id === projectStage(p))?.label}
-                          {' · '}
-                          {new Date(p.updatedAt).toLocaleDateString()}
-                          {p.generationCount ? ` · ${p.generationCount} run${p.generationCount === 1 ? '' : 's'}` : ''}
-                          {p.totalCostInr ? ` · ${formatInr(p.totalCostInr)}` : ''}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </Section>
-            )}
-
             <Section sub title="On-screen branding" step="Footer, tone, logos" defaultOpen>
               <Field
                 label="Footer strip"
@@ -598,6 +553,53 @@ export function ClientsSection() {
         </Panel>
       )}
       </div>
+
+      {/* What this dealership has already had made, beside the dealership rather
+          than buried in the middle of its details. */}
+      {draft?.id && (
+        <div className="browse-side">
+          <Panel
+            title="Campaigns"
+            step={campaigns.length ? `${campaigns.length} film${campaigns.length === 1 ? '' : 's'}` : 'None yet'}
+          >
+            {usual && (
+              <div className="usual-actor">
+                <span>
+                  <b>{actorName(usual.actorId) || 'One presenter'}</b> fronts {usual.count} of {usual.total} films for
+                  this dealer. Keeping the same face is what makes a dealership recognisable — change it only on
+                  purpose.
+                </span>
+              </div>
+            )}
+            {campaigns.length === 0 ? (
+              <div className="hint">No films for this client yet.</div>
+            ) : (
+              <div className="campaigns">
+                {campaigns.map((p) => (
+                  <button key={p.id} type="button" className="campaign" onClick={() => go('projects', p.id)}>
+                    <b>{p.name || 'Untitled project'}</b>
+                    <span className="campaign-tags">
+                      {p.useCases.map((u) => (
+                        <span className="chip accent" key={u}>
+                          {CATEGORIES.find((c) => c.id === u)?.label ?? u}
+                        </span>
+                      ))}
+                      {actorName(p.actorId) && <span className="chip">{actorName(p.actorId)}</span>}
+                    </span>
+                    <span className="campaign-meta">
+                      {PROJECT_STAGES.find((st) => st.id === projectStage(p))?.label}
+                      {' · '}
+                      {new Date(p.updatedAt).toLocaleDateString()}
+                      {p.generationCount ? ` · ${p.generationCount} run${p.generationCount === 1 ? '' : 's'}` : ''}
+                      {p.totalCostInr ? ` · ${formatInr(p.totalCostInr)}` : ''}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
+      )}
       </div>
     </div>
   );

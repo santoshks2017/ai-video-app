@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { fmtTime } from '@ava/shared';
 import { api, isApiError, type GenerationHistoryItem } from '../lib/api.js';
 
@@ -6,9 +7,12 @@ import { api, isApiError, type GenerationHistoryItem } from '../lib/api.js';
  * The cutting room.
  *
  * Trimming a film is a full-screen job — you need to see what you are cutting —
- * so it takes the whole window rather than a strip inside a panel. Nothing here
- * involves a model: the cuts, the silence and the joins are ffmpeg, so an edit
- * costs nothing, takes seconds, and cannot change what the film shows.
+ * so it takes the whole window rather than a strip inside a panel. It is drawn
+ * into the body rather than where it sits in the tree: nested, the rail painted
+ * over its left edge whatever its z-index, and the window clipped its foot.
+ *
+ * Nothing here involves a model: the cuts, the silence and the joins are ffmpeg,
+ * so an edit costs nothing, takes seconds, and cannot change what the film shows.
  */
 export function CutRoom({
   run,
@@ -30,6 +34,9 @@ export function CutRoom({
   const [append, setAppend] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [playing, setPlaying] = useState(false);
+  const track = useRef<HTMLDivElement>(null);
+  const scrubbing = useRef(false);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -40,6 +47,15 @@ export function CutRoom({
   }, [onClose]);
 
   const now = () => Number((video.current?.currentTime ?? 0).toFixed(2));
+
+  /** Seek from a point on the track — click anywhere, or drag along it. */
+  const seekFrom = (clientX: number) => {
+    const box = track.current?.getBoundingClientRect();
+    if (!box || !length || !video.current) return;
+    const at = Math.max(0, Math.min(1, (clientX - box.left) / box.width)) * length;
+    video.current.currentTime = at;
+    setAt(at);
+  };
 
   /** Everything the cuts do not take out, in order. */
   const keep = (): { from: number; to: number }[] => {
@@ -76,7 +92,7 @@ export function CutRoom({
     onExported(r.jobId);
   };
 
-  return (
+  return createPortal(
     <div className="cutroom-wrap" role="dialog" aria-label="Cutting room">
       <header className="cutroom-head">
         <div className="head-left">
@@ -95,6 +111,10 @@ export function CutRoom({
 
       <div className="cutroom-body">
         <div className="cutroom-stage">
+          {/* A screen of fixed size that the film fits inside. The other way round —
+              the frame sizing itself to the film — moved every control on the page
+              the moment a 9:16 film loaded. */}
+          <div className="cut-screen">
           {run.finalUrl && (
             <video
               ref={video}
@@ -103,10 +123,39 @@ export function CutRoom({
               playsInline
               onLoadedMetadata={(e) => setLength(e.currentTarget.duration || 0)}
               onTimeUpdate={(e) => setAt(e.currentTarget.currentTime)}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
             />
           )}
-          {/* What survives the cuts, drawn along the film's own length. */}
-          <div className="cut-track" aria-hidden>
+          </div>
+          {/* The film's length: what survives the cuts, and where the playhead is.
+              It is the scrubber too — click anywhere on it, or drag along it. */}
+          <div
+            className="cut-track"
+            ref={track}
+            role="slider"
+            tabIndex={0}
+            aria-label="Position in the film"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(length)}
+            aria-valuenow={Math.round(at)}
+            onPointerDown={(e) => {
+              scrubbing.current = true;
+              e.currentTarget.setPointerCapture(e.pointerId);
+              seekFrom(e.clientX);
+            }}
+            onPointerMove={(e) => scrubbing.current && seekFrom(e.clientX)}
+            onPointerUp={(e) => {
+              scrubbing.current = false;
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            }}
+            onKeyDown={(e) => {
+              if (!video.current) return;
+              const step = e.shiftKey ? 1 : 0.1;
+              if (e.key === 'ArrowLeft') video.current.currentTime = Math.max(0, at - step);
+              if (e.key === 'ArrowRight') video.current.currentTime = Math.min(length, at + step);
+            }}
+          >
             {keep().map((k, i) => (
               <span
                 className="cut-keep"
@@ -117,8 +166,22 @@ export function CutRoom({
             <span className="cut-head" style={{ left: `${(at / (length || 1)) * 100}%` }} />
           </div>
           <div className="cut-clock">
-            {fmtTime(at)} / {fmtTime(length)} · keeping {fmtTime(kept)}
-            {append.length ? ` + ${append.length} joined on the end` : ''}
+            <button
+              type="button"
+              className="btn ghost small"
+              onClick={() => {
+                const v = video.current;
+                if (!v) return;
+                if (v.paused) void v.play();
+                else v.pause();
+              }}
+            >
+              {playing ? '❙❙ Pause' : '▶ Play'}
+            </button>
+            <span>
+              {fmtTime(at)} / {fmtTime(length)} · keeping {fmtTime(kept)}
+              {append.length ? ` + ${append.length} joined on the end` : ''}
+            </span>
           </div>
         </div>
 
@@ -238,6 +301,7 @@ export function CutRoom({
           <div className="hint">Saved as a new version. The film you started from is untouched.</div>
         </aside>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

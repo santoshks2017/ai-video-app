@@ -327,49 +327,44 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
       });
     }
     /*
-     * One sheet per view, when the vehicle has them.
+     * Real photographs, never a sheet.
      *
-     * A sheet holds every photograph of that side of the car in a single image,
-     * so the whole car reaches the model in five slots instead of one slot per
-     * photograph — which is how three-quarters of what the source publishes used
-     * to be left behind, and a side nobody showed it is a side it invents.
+     * A sheet is a grid of photographs, and a video model given one draws it:
+     * a run on 13 September put the contact sheet itself on screen, tiles,
+     * captions and all. The sheets stay in the library for a person to look at;
+     * what the model is handed is photographs of the car.
      */
-    const sheets = car!.sheets ?? {};
-    const sheeted = CAR_VIEWS.filter((v) => sheets[v]?.storagePath);
-    if (sheeted.length) {
-      for (const view of sheeted) {
-        const img = sheets[view]!;
+    const heroVariant = car!.variants.find((v) => v.name === project.carVariant);
+    const angleOf = (img: StoredImage): CarAngle | undefined =>
+      img.angle ??
+      ANGLE_ORDER.find((a) =>
+        [...(heroVariant?.images?.[a] ?? []), ...(car!.images?.[a] ?? [])].some(
+          (x) => x.storagePath === img.storagePath,
+        ),
+      );
+    for (const img of hero.shots) {
+      const photo = { ...toDealerPhoto(img, 'car-model'), angle: angleOf(img) };
+      // Said in the label because the label is what the prompt cites beside each
+      // file: the model must take shape, not paint, from these.
+      attachments.push(
+        paint && hero.swatch ? { ...photo, label: `${photo.label} — shape reference; its paint may differ` } : photo,
+      );
+    }
+    // Asked for: the per-view sheets, after the photographs. Never the features
+    // sheet — its captions are burned into the image, and a model given words
+    // draws words.
+    if (project.useSheets) {
+      for (const view of ['front', 'side', 'rear', 'interior'] as CarAngle[]) {
+        const sheet = car!.sheets?.[view];
+        if (!sheet?.storagePath) continue;
         attachments.push({
-          ...toDealerPhoto(img, 'car-model'),
-          angle: view === 'features' ? undefined : (view as CarAngle),
-          label:
-            view === 'features'
-              ? `${car!.brand} ${car!.model} — its details, close up and named`
-              : `${car!.brand} ${car!.model} — every photograph of the ${view}${
-                  paint ? '; shape only, the paint may differ' : ''
-                }`,
+          ...toDealerPhoto(sheet, 'car-model'),
+          angle: view,
+          label: `${car!.brand} ${car!.model} — several photographs of the ${view} in one image, laid out side by side; a record of the car, never a thing to put on screen`,
         });
       }
-    } else {
-      // Nothing has been gathered into sheets yet: the individual shots, as before.
-      // Each keeps the part of the car it shows, so a scene about the cabin is
-      // matched to a cabin photo — or flagged when there is none.
-      const heroVariant = car!.variants.find((v) => v.name === project.carVariant);
-      const angleOf = (img: StoredImage): CarAngle | undefined =>
-        ANGLE_ORDER.find((a) =>
-          [...(heroVariant?.images?.[a] ?? []), ...(car!.images?.[a] ?? [])].some(
-            (x) => x.storagePath === img.storagePath,
-          ),
-        );
-      for (const img of hero.shots) {
-        const photo = { ...toDealerPhoto(img, 'car-model'), angle: angleOf(img) };
-        // Said in the label because the label is what the prompt cites beside each
-        // file: the model must take shape, not paint, from these.
-        attachments.push(
-          paint && hero.swatch ? { ...photo, label: `${photo.label} — shape reference; its paint may differ` } : photo,
-        );
-      }
     }
+
     for (const v of vehicles.slice(1)) {
       const first = carReferenceImages(v)[0];
       if (first) attachments.push(toDealerPhoto(first, 'car-model'));

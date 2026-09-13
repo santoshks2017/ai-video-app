@@ -1064,6 +1064,27 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 buttonText="Add reference"
               />
             </div>
+            {/* The sheets: more of the car in one slot, and a thing the model has
+                been seen to draw. Off by default, and here to be tried. */}
+            {car?.sheets && Object.keys(car.sheets).length > 0 && (
+              <div className="check-row">
+                <input
+                  type="checkbox"
+                  id="pe_sheets"
+                  checked={project.useSheets === true}
+                  onChange={(e) => set({ useSheets: e.target.checked })}
+                />
+                <label htmlFor="pe_sheets">
+                  Also send the vehicle's reference sheets —{' '}
+                  <span className="hint" style={{ display: 'inline', marginTop: 0 }}>
+                    every photograph of each side in one image. They carry far more of the car, but on 13 September a
+                    run given only sheets drew one on screen. The photographs go first, and the captioned features
+                    sheet is never sent.
+                  </span>
+                </label>
+              </div>
+            )}
+
             <div className="divider" />
 
             {/* A model that takes video references learns motion and light from them

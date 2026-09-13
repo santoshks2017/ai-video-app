@@ -362,6 +362,15 @@ export interface Project {
    * fix has to be in the hands of whoever is making the film.
    */
   carRefs?: StoredImage[];
+  /**
+   * Send the vehicle's per-view sheets to the model as well as its photographs.
+   *
+   * Off by default, and deliberately: on 13 September a run that was given only
+   * sheets drew one on screen — tiles, gutters and captions. The sheets carry far
+   * more of the car than four photographs do, so the switch is here to be tried,
+   * but the photographs go first and the captioned features sheet is never sent.
+   */
+  useSheets?: boolean;
   /** Extra reference images added on this project only. */
   extraRefs: StoredImage[];
   /**

@@ -322,10 +322,10 @@ export function LanguagesSection() {
         <Panel title="How these are used">
           <div className="section-desc" style={{ marginTop: 0 }}>
             <p>
-              <b>Spoken rules</b> drive the second pass of <i>Write the script</i>. The first pass writes the ad
-              copy for meaning; the second converts it to the spelling the video model performs, using this guide
-              as its instruction. Tuning the guide and re-running <i>Redo pronunciation</i> costs one cheap text
-              call and leaves approved copy untouched.
+              <b>Spoken rules</b> shape how <i>Write the script</i> writes the lines: how numbers and prices are
+              said, which English words stay in English, how the language is spelled when it is spoken aloud. There
+              is one line per scene now and the video model says it exactly as written, so what this guide changes
+              is the copy itself rather than a second respelling of it.
             </p>
             <p>
               <b>On-screen text rules</b> are the written standard for this language. Every word the viewer reads —

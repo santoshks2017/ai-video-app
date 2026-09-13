@@ -312,20 +312,22 @@ test('language rules drive the prompt, not hard-coded Hindi', () => {
   assert.doesNotMatch(hi, /Hindi on-screen text rules/);
   assert.doesNotMatch(en, /English on-screen text rules/);
 
-  // A language written the way it is said gets no respelling explainer, and
-  // pre-flight never nags it for a pronunciation spelling it does not need.
+  // A language written the way it is said gets no respelling explainer.
   assert.match(hi, /HOW TO READ THE BRACES/);
   assert.ok(!en.includes('HOW TO READ THE BRACES'));
-  // Every scene scripted but none respelled — the state that looks finished and
-  // is not. It only surfaces once nothing is entirely unwritten.
+
+  // There is one line now, and the model says it as written — so a scripted scene
+  // is a finished scene in either language, and neither is nagged for a spelling.
   const sceneCount = buildPrompt(brief(hindi))!.scenePlan.scenes.length;
   const written = Object.fromEntries(
-    Array.from({ length: sceneCount }, (_, i) => [String(i), { dialogue: 'a line, no respelling' }]),
+    Array.from({ length: sceneCount }, (_, i) => [String(i), { dialogue: 'a line, plainly written' }]),
   );
   const codes = (l: typeof hindi) =>
     runChecks(brief(l), { sceneOverrides: written }).checks.map((c) => c.code);
-  assert.ok(codes(hindi).includes('no-pronunciation-spelling'));
-  assert.ok(!codes(english).includes('no-pronunciation-spelling'));
+  for (const l of [hindi, english]) {
+    assert.ok(!codes(l).includes('no-pronunciation-spelling'), 'the respelling nag is gone');
+    assert.ok(codes(l).includes('script-written'));
+  }
 
   // The model-language warning follows the brief's language, not a fixed code.
   const speech = (l: typeof hindi, speechLanguages: string[]) =>

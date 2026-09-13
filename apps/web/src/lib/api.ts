@@ -287,12 +287,22 @@ export const api = {
     });
   },
 
-  /** Re-run only the pronunciation pass over copy that is already approved. */
-  async phonetics(lines: { index: number; line: string }[], languageId?: string) {
-    return await req<{ language: string; lines: ScriptLineView[] }>('/api/script/phonetics', {
-      method: 'POST',
-      body: JSON.stringify({ lines, languageId }),
-    });
+  /**
+   * Draw the storyboard's frames — one still per scene, from the same photographs
+   * the video is built on. Batched: the references are read once for the lot.
+   */
+  async sceneImages(
+    brief: Brief,
+    scenes: { key: string; shot: string; title?: string; line?: string; ref?: string }[],
+  ) {
+    return await req<{
+      made: number;
+      scenes: {
+        key: string;
+        frame?: { refId: string; storagePath: string; url?: string; filename: string; label: string };
+        error?: string;
+      }[];
+    }>('/api/scene-images', { method: 'POST', body: JSON.stringify({ brief, scenes }) });
   },
 
   /**

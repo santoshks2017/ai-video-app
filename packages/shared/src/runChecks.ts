@@ -235,14 +235,6 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
       const o = sceneEditFor(overrides, plan, sc);
       return !(o?.phonetic ?? o?.dialogue ?? '').trim() && sc.beat.dialogue;
     }).length;
-    // English needs no respelling, so only ask for one where the language says so.
-    const needsPhonetics = brief.language?.needsPhonetics !== false;
-    const unspelled = needsPhonetics
-      ? plan.scenes.filter((sc) => {
-          const o = sceneEditFor(overrides, plan, sc);
-          return (o?.dialogue ?? '').trim() && !(o?.phonetic ?? '').trim() && sc.beat.dialogue;
-        }).length
-      : 0;
     const langName = brief.language?.name ?? 'Hindi';
     // A line too long for the time left before its part's cut is where repeats come
     // from: the model runs out of clip, carries the rest into the next part, and
@@ -275,19 +267,13 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
           unscripted >= spoken
             ? 'No scene has a written line'
             : `${unscripted} of ${spoken} scenes have no written line`
-        }, so the model has to invent the ${langName} wording itself — the usual cause of mangled pronunciation. Open the storyboard below and press "Write the script": it fills every line and its pronunciation, costs a fraction of a rupee, and you can edit both before generating.`,
-      });
-    } else if (unspelled) {
-      checks.push({
-        level: 'warn',
-        code: 'no-pronunciation-spelling',
-        text: `${unspelled} scene${unspelled > 1 ? 's have' : ' has'} a written line but no pronunciation spelling. Plain ${langName} tells the model which words to say, not where the stress falls or how long the vowels are — which is what makes the delivery sound wrong. Press "Redo pronunciation" in the storyboard to fill them in without rewriting the copy.`,
+        }, so the model has to invent the ${langName} wording itself — the usual cause of mangled pronunciation. Open the storyboard below and press "Write the script": it fills every line, costs a fraction of a rupee, and you can edit them before generating.`,
       });
     } else {
       checks.push({
         level: 'ok',
         code: 'script-written',
-        text: 'Every spoken scene has a line and a pronunciation spelling, so the model performs a fixed reading rather than improvising one.',
+        text: 'Every spoken scene has a written line, so the model performs a fixed reading rather than improvising one.',
       });
     }
 
@@ -297,7 +283,7 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
       checks.push({
         level: 'warn',
         code: 'speech-language-unsupported',
-        text: `${opts.model?.name ?? 'This model'} does not list ${langName} among the languages it can speak (${langs.join(', ')}). A pronunciation spelling helps, but the delivery may still be wrong — judge it on a short run before committing to a long one.`,
+        text: `${opts.model?.name ?? 'This model'} does not list ${langName} among the languages it can speak (${langs.join(', ')}). The delivery may still be wrong — judge it on a short run before committing to a long one.`,
       });
     }
   }

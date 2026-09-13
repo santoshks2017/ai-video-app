@@ -432,61 +432,6 @@ function editInstruction(req: ScriptRequest, angle: ScriptAngle | null, draft: {
   ].join('\n');
 }
 
-/* ---------------------------- pass 2: pronounce ---------------------------- */
-
-function phoneticInstruction(
-  lines: { index: number; line: string }[],
-  language: ScriptLanguage,
-): string {
-  const usable = language.glossary.filter((g) => g.term?.trim() && g.say?.trim());
-  const respell = usable.filter((g) => g.mode !== 'english');
-  const asEnglish = usable.filter((g) => g.mode === 'english');
-
-  return [
-    `You repair the pronunciation of ${language.name} ad copy for an AI video model. You are given the finished line; you return the same line with a FEW words respelled where the model would otherwise say them wrong.`,
-    '',
-    'This is a light touch, not a conversion. Most of the line — usually all of it — comes back unchanged. Respelling a word that was already fine makes it worse, and respelling everything makes the whole line sound like a phrasebook being read aloud.',
-    '',
-    'NEVER respell a number, price, quantity or unit. Those are already in English and must stay exactly as they are: "fifteen lakh four thousand" stays "fifteen lakh four thousand", not "pandrah LAAKH chaar ha-ZAAR".',
-    '',
-    'PLAIN WORDS — this outranks anything below that says otherwise. Never write an ordinary word in capital letters: the video model spells capitals out letter by letter, so "AAJ" comes out as A-A-J. Capitals only for acronyms said as letters (ABS, EMI, SUV) and names already written in capitals. Never split a word with hyphens or mark stress. A respelled word is one plain lowercase word — shuru, aaj, kijiye — and everyday words like these need no respelling at all.',
-    '',
-    language.spokenGuide.trim(),
-    '',
-    ...(respell.length
-      ? [
-          '## LOCKED SPELLINGS — always use these exact forms',
-          ...respell.map((g) => `  ${g.term} → ${g.say}${g.note ? `  (${g.note})` : ''}`),
-          '',
-        ]
-      : []),
-    ...(asEnglish.length
-      ? [
-          '## LEAVE THESE IN ENGLISH — never respell them',
-          'The model already says these correctly. Write them exactly as shown.',
-          ...asEnglish.map((g) => `  ${g.term} → ${g.say}${g.note ? `  (${g.note})` : ''}`),
-          '',
-        ]
-      : []),
-    '## WORKED EXAMPLE',
-    'Line:  नई दिल्ली के Jasper Cars showroom का glass facade देखिए!',
-    'Right: नई दिल्ली के Jasper Cars showroom का glass facade देखिए!',
-    '       — nothing needed fixing. A place name, a dealership name and two English words all stay as they are.',
-    'Wrong: NYOO DEL-ee ke JAS-par KAARZ SHO-room ka GLAAS fa-SAAD DE-khi-ye!',
-    '       — every word mangled, including four that were already correct.',
-    '',
-    'Line:  यह automatic variant fifteen lakh four thousand का है।',
-    'Right: यह automatic variant fifteen lakh four thousand का है।',
-    '       — nothing changed. The price is already English and must stay that way.',
-    '',
-    '## THE LINES',
-    'Return each line with the meaning and word order identical. Do not add, drop, reorder or translate words — only change the spelling of the few that need it.',
-    ...lines.map((l) => `${l.index}: ${l.line}`),
-    '',
-    'Return JSON only: an array of {"index": <the same index>, "say": "<the line, mostly unchanged>"}. One object per line, in order. No commentary.',
-  ].join('\n');
-}
-
 /* --------------------------------- driver --------------------------------- */
 
 export async function writeScript(
@@ -509,7 +454,16 @@ export async function writeScript(
   // hot model here rewrites lines that were already good.
   const copy = await polish(req, angle, draft, apiKey);
 
-  const lines = await addPhonetics(copy, req.language, apiKey);
+  /*
+   * One line, and the model performs it as written.
+   *
+   * There used to be a third call here that respelled every line for pronunciation,
+   * and a second field in the storyboard holding the respelling. Omni says the copy
+   * correctly on its own now, so both are gone: one call less per script, and one
+   * box to read instead of two saying almost the same thing. `say` stays on the
+   * wire as a copy of the line so nothing downstream has to care.
+   */
+  const lines = copy.map((c) => ({ ...c, say: c.line }));
   return { model: await resolveTextModel(apiKey, 'write'), lines, angle: angle ?? undefined };
 }
 
@@ -554,34 +508,6 @@ async function polish(
   } catch {
     return draft;
   }
-}
-
-/**
- * Pass 2 on its own. Exposed so a tuned pronunciation guide can be re-applied to
- * copy that is already approved, without paying to rewrite it.
- */
-export async function addPhonetics(
-  lines: { index: number; line: string }[],
-  language: ScriptLanguage,
-  apiKey: string,
-): Promise<ScriptLine[]> {
-  const usable = lines.filter((l) => Number.isFinite(l.index) && l.line?.trim());
-  if (!usable.length) return [];
-  // A language written the way it is said needs no transform.
-  if (!language.needsPhonetics || !language.spokenGuide.trim()) {
-    return usable.map((l) => ({ index: l.index, line: l.line, say: l.line }));
-  }
-
-  // Temperature 0: this is a transform against a rulebook, not a creative step.
-  const said = new Map(
-    parseRows(await ask(phoneticInstruction(usable, language), apiKey, 0, 'transform'), 'say').map((r) => [
-      r.index,
-      r.text,
-    ]),
-  );
-  // A line the pass missed keeps its readable form — still better than nothing.
-  // Plain words, whatever came back: no stress capitals, no syllable hyphens, no doubled word.
-  return usable.map((l) => ({ index: l.index, line: l.line, say: plainSpoken(said.get(l.index) || l.line, l.line) }));
 }
 
 /** JSON mode is not guaranteed, so pull the array out of whatever came back. */

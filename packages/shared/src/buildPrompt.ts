@@ -160,12 +160,25 @@ export interface SceneOverride {
   /** The line in plain readable Hindi/Hinglish — for the designer to check the meaning. */
   dialogue?: string;
   /**
-   * The line as the video model says it: the readable line, with the few words that
-   * come out wrong respelled as plain words. It never carries stress capitals or
-   * syllable hyphens — the model spelled capitals out letter by letter — and
-   * plainSpoken() takes out any that an older script still has.
+   * The spoken respelling, on projects written before Omni was pronouncing the copy
+   * correctly on its own.
+   *
+   * There is one line now, and it is `dialogue`. This is still read first, because
+   * on a project that has one it is what the model has been performing — changing
+   * that silently would change a film nobody asked to change. Editing the line in
+   * the storyboard clears it, and nothing writes a new one.
    */
   phonetic?: string;
+  /**
+   * A still of this scene, drawn by an image model from the same photographs the
+   * video is built on: the composition, the framing and where everything sits.
+   *
+   * A shot direction is a sentence, and a sentence leaves the camera, the distance
+   * and the light to the model — which is why two parts of one film could be shot
+   * from nowhere near each other. A frame settles all of it before a rupee is spent,
+   * and it is sent as the first reference for the part the scene falls in.
+   */
+  frame?: { refId: string; storagePath: string; url?: string; filename: string; label: string };
   shot?: string;
   /**
    * Filename of the reference image this shot is built on. The prompt cites

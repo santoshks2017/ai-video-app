@@ -26,6 +26,7 @@ import {
   colourName,
   categoryValues,
   storyGuidance,
+  narrationMode,
   storyTheme,
   listRows,
   usualActorFor,
@@ -64,7 +65,9 @@ function RefRow({
   onHold?: (filename: string, hold: boolean) => void;
 }) {
   const { photo, role, slot, held } = entry;
-  const src = abs(photo.src ?? null) ?? photo.src;
+  const src =
+    abs(photo.src ?? (photo.refId && photo.filename ? `/api/refs/${photo.refId}/${photo.filename}` : null)) ??
+    undefined;
   // The label is a sentence, because the model reads it beside the image. The
   // list shows the front of it and keeps the whole thing on hover.
   const short = photo.label.split(' — ')[0] ?? photo.label;
@@ -263,9 +266,36 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   // collapsed storyboard — so a project that is missing one opens it. Latched:
   // once open it stays open, rather than snapping shut as the script lands.
   const scriptMissing = Boolean(
-    preflight?.checks.some((c) => c.code === 'no-spoken-script' || c.code === 'no-pronunciation-spelling'),
+    preflight?.checks.some((c) => c.code === 'no-spoken-script'),
   );
   const [storyboardOpen, setStoryboardOpen] = useState(false);
+  /**
+   * Which of the numbered panels are folded open, remembered on this device.
+   *
+   * A brief is filled once and then read a hundred times while the film is made;
+   * after the first pass most of these are settled, and the useful screen is the
+   * storyboard. They open by default so nothing is hidden from someone seeing the
+   * project for the first time, and stay however they were left after that.
+   */
+  const [openPanels, setOpenPanels] = useState<Record<string, boolean>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('ava.panels') ?? '{}') as Record<string, boolean>;
+    } catch {
+      return {};
+    }
+  });
+  const panelOpen = (id: string): boolean => openPanels[id] ?? true;
+  const setPanelOpen = (id: string, open: boolean): void =>
+    setOpenPanels((was) => {
+      const next = { ...was, [id]: open };
+      try {
+        localStorage.setItem('ava.panels', JSON.stringify(next));
+      } catch {
+        /* storage unavailable — the choice lasts this session */
+      }
+      return next;
+    });
+  const fold = (id: string) => ({ open: panelOpen(id), onOpenChange: (o: boolean) => setPanelOpen(id, o) });
   /** Use-case details are folded away; picking a use case opens its own block. */
   const [openCats, setOpenCats] = useState<CategoryId[]>([]);
   const [planning, setPlanning] = useState(false);
@@ -318,9 +348,10 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     if (isApiError(r)) return `${r.code}: ${r.message}`;
     if (!r.lines.length) return 'No spoken scenes to write for.';
     const next = { ...keyedEdits(project.sceneEdits) };
-    for (const { index, key, line, say } of r.lines) {
+    for (const { index, key, line } of r.lines) {
       const k = key ?? built?.scenePlan.scenes[index]?.beat.key ?? String(index);
-      next[k] = { ...next[k], dialogue: line, phonetic: say };
+      // One line, said as written. Any respelling an older script left behind goes.
+      next[k] = { ...next[k], dialogue: line, phonetic: undefined };
     }
     // The angle is saved with the copy: it is what the lines are arguing, and
     // judging a line without it is judging half the work.
@@ -328,23 +359,47 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     return `Wrote ${r.lines.length} line${r.lines.length > 1 ? 's' : ''} with ${r.model} — angle, draft, then an edit pass. Read them through and fix anything that sounds off.`;
   };
 
-  /** Re-apply the current pronunciation guide without rewriting the copy. */
-  const redoPhonetics = async (): Promise<string> => {
-    if (!project) return 'Open a project first.';
-    // Sent by position in this list, and filed back under each scene's key.
+  /**
+   * Draw a still for these scenes, from the same photographs the film is built on.
+   *
+   * Sent in one request so the reference set is read once rather than per scene,
+   * and each frame is filed under its own scene as it lands — a scene the model
+   * refused does not cost the ones it drew.
+   */
+  const drawScenes = async (keys: string[]): Promise<string> => {
+    if (!brief || !project || !built) return 'Fill in the brief first.';
+    const mode = narrationMode(project.spec.narration);
     const edits = keyedEdits(project.sceneEdits);
-    const entries = Object.entries(edits).filter(([, v]) => !v.deleted && (v.dialogue ?? '').trim());
-    const lines = entries.map(([, v], index) => ({ index, line: (v.dialogue ?? '').trim() }));
-    if (!lines.length) return 'No written lines yet — write the script first.';
-    const r = await genApi.phonetics(lines, language?.id);
+    const wanted = built.scenePlan.scenes
+      .filter((sc) => sc.beat.key && keys.includes(sc.beat.key))
+      .map((sc) => {
+        const ov = edits[sc.beat.key!] ?? {};
+        const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
+        return {
+          key: sc.beat.key!,
+          shot: (ov.shot ?? baseShot ?? '').trim(),
+          title: sc.beat.title,
+          line: (ov.phonetic ?? ov.dialogue ?? sc.beat.dialogue ?? '').trim() || undefined,
+          ref: ov.ref,
+        };
+      })
+      .filter((sc) => sc.shot);
+    if (!wanted.length) return 'Those scenes have no shot direction to draw from.';
+
+    const r = await genApi.sceneImages(brief, wanted);
     if (isApiError(r)) return `${r.code}: ${r.message}`;
     const next = { ...edits };
-    for (const { index, say } of r.lines) {
-      const key = entries[index]?.[0];
-      if (key) next[key] = { ...next[key], phonetic: say };
+    for (const row of r.scenes) {
+      if (row.frame) next[row.key] = { ...next[row.key], frame: row.frame };
     }
     set({ sceneEdits: next });
-    return `Re-applied the ${r.language} guide to ${r.lines.length} line${r.lines.length > 1 ? 's' : ''}. The copy is unchanged.`;
+    const failed = r.scenes.filter((row) => row.error);
+    return [
+      `Drew ${r.made} scene${r.made === 1 ? '' : 's'}.`,
+      failed.length ? `${failed.length} did not come back — ${failed[0]!.error}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
   };
 
   /** Take a scene out of the film. A length set by hand gives up that scene's seconds. */
@@ -581,7 +636,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
       <div className="grid">
         <div className="left-col">
-          <Panel num="01" title="Project" step="Name, brief and tags">
+          <Section num="01" title="Project" step="Name, brief and tags" {...fold('project')}>
             <Field label="Project name">
               <input
                 value={project.name}
@@ -783,12 +838,13 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 </Field>
               </div>
             )}
-          </Panel>
+          </Section>
 
-          <Panel
+          <Section
             num="02"
             title="Use case"
             step={promptOnly ? 'Prompt-only — no video generation' : 'Composable — pick 1 or more'}
+            {...fold('usecase')}
           >
             {project.useCases.length > 1 && brief && (
               <div className="section-desc">
@@ -911,9 +967,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 );
               })}
             </div>
-          </Panel>
+          </Section>
 
-          <Panel num="03" title="Video" step="Length, shape, language, model">
+          <Section num="03" title="Video" step="Length, shape, language, model" {...fold('video')}>
             <div className="field-grid">
               <Field label="Length">
                 <div className="length-pick">
@@ -1117,9 +1173,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 </div>
               </Section>
             </div>
-          </Panel>
+          </Section>
 
-          <Panel num="04" title="References" step="What the model is handed">
+          <Section num="04" title="References" step="What the model is handed" {...fold('refs')}>
             <div className="section-desc">
               The vehicle, the presenter and the dealership come in on their own — there is nothing to pick. Below is
               the whole list, in the order {activeModel?.name ?? 'the model'} is given it, numbered the way the
@@ -1134,11 +1190,13 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 const images = refPlan.sent.filter((e) => e.role !== 'video');
                 const videos = refPlan.sent.filter((e) => e.role === 'video');
                 return (
-                  <>
-                    <div className="ref-group">
-                      Sent — {images.length} of {refPlan.max} images
-                      {videos.length ? `, ${videos.length} of ${refPlan.maxVideos} videos` : ''}
-                    </div>
+                  <Section
+                    sub
+                    title="What the model is handed"
+                    step={`${images.length} of ${refPlan.max} images${
+                      videos.length ? ` · ${videos.length} of ${refPlan.maxVideos} videos` : ''
+                    }${heldBack.length ? ` · ${heldBack.length} held back` : ''}`}
+                  >
                     {refPlan.sent.length ? (
                       <div className="ref-plan">
                         {refPlan.sent.map((e) => (
@@ -1188,11 +1246,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                         </div>
                       </>
                     )}
-                  </>
+                  </Section>
                 );
               })()}
-
-            <div className="divider" />
 
             <Section
               sub
@@ -1398,7 +1454,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 )}
               </Field>
             </Section>
-          </Panel>
+          </Section>
 
           {built?.scenePlan && built.scenePlan.scenes.length > 0 && (
             <Section
@@ -1423,8 +1479,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 attachments={brief?.attachments ?? []}
                 angle={project.scriptAngle}
                 onWriteScript={writeScript}
-                onRedoPhonetics={language?.needsPhonetics === false ? undefined : redoPhonetics}
                 languageName={language?.name}
+                onDrawScenes={drawScenes}
                 vehicle={brief?.vehicleKind ?? 'car'}
                 length={{
                   auto: project.spec.durationAuto === true,

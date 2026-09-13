@@ -15,9 +15,20 @@ import {
 } from '@ava/shared';
 import type { NarrationKey } from '@ava/shared';
 
+/** The still a scene is framed on, drawn by the image model. */
+export type SceneFrame = {
+  refId: string;
+  storagePath: string;
+  url?: string;
+  filename: string;
+  label: string;
+};
+
 type SceneEdit = {
   dialogue?: string;
+  /** Legacy: the pronunciation respelling, on projects written before Omni said the copy correctly. */
   phonetic?: string;
+  frame?: SceneFrame;
   shot?: string;
   ref?: string;
   card?: string;
@@ -163,6 +174,62 @@ function CaptionEditor({
 }
 
 /**
+ * The scene, drawn before it is filmed.
+ *
+ * A shot direction is a sentence, and a sentence leaves the camera, the distance,
+ * the light and where everyone stands to the video model — which is most of what
+ * drifts between one part of a film and the next. A still settles all of it for a
+ * fraction of a paisa, is there to be looked at and rejected before any video is
+ * paid for, and then travels to the renderer as the first reference for its part.
+ */
+function SceneFrameCell({
+  frame,
+  busy,
+  title,
+  onDraw,
+  onClear,
+}: {
+  frame?: SceneFrame;
+  busy: boolean;
+  title: string;
+  onDraw?: () => void;
+  onClear: () => void;
+}) {
+  if (!onDraw && !frame) return null;
+  return (
+    <div className="sb-frame">
+      {frame?.url ? (
+        <a
+          className="sb-frame-shot"
+          href={frame.url}
+          target="_blank"
+          rel="noreferrer"
+          title="Open the full-size frame"
+        >
+          <img src={frame.url} alt={`How ${title} is framed`} loading="lazy" />
+        </a>
+      ) : (
+        <div className={`sb-frame-shot empty${busy ? ' busy' : ''}`}>
+          {busy ? 'Drawing…' : 'Not drawn'}
+        </div>
+      )}
+      <div className="sb-frame-actions">
+        {onDraw && (
+          <button type="button" className="btn ghost small" disabled={busy} onClick={onDraw}>
+            {busy ? 'Drawing…' : frame ? 'Draw again' : 'Draw it'}
+          </button>
+        )}
+        {frame && !busy && (
+          <button type="button" className="btn ghost small" onClick={onClear} title="Film this scene without a frame">
+            Clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
  * The photo a shot is built on, with the option to change it. When the shot frames a
  * part of the vehicle that no supplied photo shows, it says so: the model will make a
  * generic one, and the designer decides whether that will do.
@@ -233,8 +300,8 @@ export function Storyboard({
   onEditScene,
   onClearEdits,
   onWriteScript,
-  onRedoPhonetics,
   languageName,
+  onDrawScenes,
   vehicle = 'car',
   length,
   onLength,
@@ -257,9 +324,12 @@ export function Storyboard({
   onClearEdits: () => void;
   /** Fills every spoken scene with a real line. Resolves to a status message. */
   onWriteScript?: () => Promise<string>;
-  /** Re-applies the language's pronunciation guide to the existing copy. */
-  onRedoPhonetics?: () => Promise<string>;
   languageName?: string;
+  /**
+   * Draw a still for these scenes. Resolves to a status message. Batched, because
+   * the references are read once for the whole storyboard rather than per scene.
+   */
+  onDrawScenes?: (keys: string[]) => Promise<string>;
   /** Cars and bikes name their parts differently. */
   vehicle?: 'car' | 'bike';
   /** The film's length — auto, or set by hand at 1x — and the pace it is played at. */
@@ -283,6 +353,9 @@ export function Storyboard({
 }) {
   const [writing, setWriting] = useState(false);
   const [scriptNote, setScriptNote] = useState('');
+  /** Scenes the image model is drawing right now, by key. */
+  const [drawing, setDrawing] = useState<string[]>([]);
+  const [drawNote, setDrawNote] = useState('');
   const mode = narrationMode(narration);
   const editScene = onEditScene;
   const clearSceneEdits = onClearEdits;
@@ -322,6 +395,21 @@ export function Storyboard({
         return (o?.phonetic ?? o?.dialogue ?? '').trim();
       }).length
     : 0;
+
+  /** Scenes whose frame has been drawn, and the ones still waiting. */
+  const framed = scenePlan.scenes.filter((sc) => sceneEditFor(sceneEdits, scenePlan, sc)?.frame);
+  const unframed = scenePlan.scenes
+    .filter((sc) => !sceneEditFor(sceneEdits, scenePlan, sc)?.frame)
+    .map((sc, i) => sc.beat.key ?? String(i));
+
+  const draw = async (keys: string[]): Promise<void> => {
+    if (!onDrawScenes || !keys.length) return;
+    setDrawing((d) => [...new Set([...d, ...keys])]);
+    setDrawNote('');
+    const note = await onDrawScenes(keys);
+    setDrawing((d) => d.filter((k) => !keys.includes(k)));
+    setDrawNote(note);
+  };
 
   const runScriptAction = async (fn: () => Promise<string>) => {
     setWriting(true);
@@ -371,23 +459,12 @@ export function Storyboard({
               </b>
               <span>
                 {scripted >= spokenScenes && spokenScenes > 0
-                  ? `The model performs the pronunciation line, not the ${languageName ?? 'plain'} one above it. Most of it should look untouched — respelling is only for words that come out wrong.`
-                  : `Written in three passes: the angle, the draft, then an edit that cuts anything generic. Each line then gets a pronunciation pass.`}
+                  ? `The model says each line exactly as it is written here, in ${languageName ?? 'the chosen language'}. Edit any of them.`
+                  : 'Written in three passes: the angle, the draft, then an edit that cuts anything generic.'}
               </span>
               {scriptNote && <span className="script-note">{scriptNote}</span>}
             </div>
             <div className="script-bar-actions">
-              {onRedoPhonetics && scripted > 0 && (
-                <button
-                  className="btn small"
-                  type="button"
-                  disabled={writing}
-                  onClick={() => runScriptAction(onRedoPhonetics)}
-                  title="Re-applies the language guide to the copy you already have"
-                >
-                  Redo pronunciation
-                </button>
-              )}
               <button
                 className="btn primary small"
                 type="button"
@@ -395,6 +472,39 @@ export function Storyboard({
                 onClick={() => runScriptAction(onWriteScript)}
               >
                 {writing ? 'Working…' : scripted ? 'Rewrite script' : 'Write the script'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {onDrawScenes && (
+          <div className={`script-bar${framed.length >= scenePlan.scenes.length ? ' done' : ''}`}>
+            <div>
+              <b>
+                {framed.length}/{scenePlan.scenes.length} scenes have been drawn
+              </b>
+              <span>
+                A still of each scene, drawn from the same photographs the film is built on. It settles the camera,
+                the framing and where everyone stands before any video is paid for — and it is sent as the first
+                reference for the part its scene falls in.
+              </span>
+              {drawNote && <span className="script-note">{drawNote}</span>}
+            </div>
+            <div className="script-bar-actions">
+              <button
+                className="btn small"
+                type="button"
+                disabled={drawing.length > 0 || !unframed.length}
+                onClick={() => void draw(unframed)}
+                title={unframed.length ? 'Draw the scenes that have no frame yet' : 'Every scene has a frame'}
+              >
+                {drawing.length
+                  ? `Drawing ${drawing.length}…`
+                  : !unframed.length
+                    ? 'All drawn'
+                    : framed.length
+                      ? `Draw the remaining ${unframed.length}`
+                      : `Draw all ${unframed.length}`}
               </button>
             </div>
           </div>
@@ -522,18 +632,18 @@ export function Storyboard({
           <table className="sb-table">
             <colgroup>
               <col className="c-scene" />
-              <col className="c-ref" />
               <col className="c-shot" />
               <col className="c-vo" />
               <col className="c-card" />
+              <col className="c-frame" />
             </colgroup>
             <thead>
               <tr>
                 <th>Scene</th>
-                <th>Visual reference</th>
                 <th>Shot direction</th>
-                <th>{mode.speaks ? 'Voiceover / script' : 'Story beat (no speech)'}</th>
+                <th>{mode.speaks ? 'Voiceover' : 'Story beat (no speech)'}</th>
                 <th>On-screen text</th>
+                <th>Scene image</th>
               </tr>
             </thead>
             <tbody>
@@ -625,43 +735,42 @@ export function Storyboard({
                       )}
                     </td>
                     <td>
-                      <RefPicker
-                        chosen={ov.ref}
-                        options={refOptions}
-                        visual={visuals[gi]!}
-                        onPick={(ref) => editScene(key, { ref })}
-                      />
-                    </td>
-                    <td>
                       <AutoTextarea
                         value={ov.shot ?? baseShot ?? ''}
                         onChange={(v) => editScene(key, { shot: v })}
                       />
                     </td>
                     <td>
+                      {/* One line, and the model says it as written. A project from
+                          before that was true carries a respelling; it is shown here
+                          because it is what has been performed, and editing replaces it. */}
                       <AutoTextarea
-                        value={ov.dialogue ?? sc.beat.dialogue ?? ''}
-                        onChange={(v) => editScene(key, { dialogue: v })}
+                        value={ov.phonetic ?? ov.dialogue ?? sc.beat.dialogue ?? ''}
+                        onChange={(v) => editScene(key, { dialogue: v, phonetic: undefined })}
                       />
                       {mode.speaks && (
-                        <>
-                          <div className="hint">~{wordBudget(speakingSeconds(scenePlan, sc))} words max</div>
-                          {/* The respelling is what the video model performs — the
-                              line above is only here so a human can read it. */}
-                          <div className="sb-say">
-                            <label>Pronunciation — what the model actually says</label>
-                            <AutoTextarea
-                              className={ov.phonetic?.trim() ? '' : 'unset'}
-                              value={ov.phonetic ?? ''}
-                              placeholder="आज ही अपनी test drive book kijiye"
-                              onChange={(v) => editScene(key, { phonetic: v })}
-                            />
-                          </div>
-                        </>
+                        <div className="hint">~{wordBudget(speakingSeconds(scenePlan, sc))} words max</div>
                       )}
                     </td>
                     <td>
                       <CaptionEditor beat={sc.beat} ov={ov} onChange={(patch) => editScene(key, patch)} />
+                    </td>
+                    <td>
+                      <SceneFrameCell
+                        frame={ov.frame}
+                        busy={drawing.includes(key)}
+                        title={sc.beat.title}
+                        onDraw={onDrawScenes ? () => void draw([key]) : undefined}
+                        onClear={() => editScene(key, { frame: undefined })}
+                      />
+                      {/* What the frame is drawn from, and what the shot falls back
+                          to when nothing has been drawn. */}
+                      <RefPicker
+                        chosen={ov.ref}
+                        options={refOptions}
+                        visual={visuals[gi]!}
+                        onPick={(ref) => editScene(key, { ref })}
+                      />
                     </td>
                   </tr>,
                 );

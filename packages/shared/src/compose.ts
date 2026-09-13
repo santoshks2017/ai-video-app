@@ -126,7 +126,9 @@ function toDealerPhoto(img: StoredImage, kind: DealerPhoto['kind']): DealerPhoto
     kind,
     refId: img.refId,
     storagePath: img.storagePath,
-    src: img.url,
+    // Records written before uploads carried a url of their own still know where
+    // their bytes are; the path is served by the same route either way.
+    src: img.url || (img.refId && img.filename ? `/api/refs/${img.refId}/${img.filename}` : undefined),
   };
 }
 

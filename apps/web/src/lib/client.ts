@@ -28,7 +28,17 @@ export function isApiError(x: unknown): x is ApiError {
 }
 
 /** Absolute URL for a server-relative path (clips, reference images). */
-export const abs = (p: string | null | undefined): string | null => (p ? `${BASE}${p}` : null);
+/**
+ * An API path made absolute — and left alone when it already is.
+ *
+ * Photos imported from Google and uploaded by hand are stored with the full URL
+ * on them, while the vehicle library stores the path. Prefixing the base onto
+ * both turned the first kind into `https://host/https://host/api/refs/…`, which
+ * is why the presenter and every showroom photo showed a broken thumbnail while
+ * the car sheets beside them loaded.
+ */
+export const abs = (p: string | null | undefined): string | null =>
+  !p ? null : /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(p) ? p : `${BASE}${p}`;
 
 export async function req<T>(path: string, init: RequestInit = {}): Promise<T | ApiError> {
   try {

@@ -17,6 +17,7 @@ import {
   shortSideFor,
   sceneCard,
   sceneVisual,
+  narrationMode,
   VEO_31_DEFAULTS,
   VEO_31_FAST_DEFAULTS,
   type SceneOverride,
@@ -86,7 +87,7 @@ import {
   type Caller,
 } from './users.js';
 import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
-import { writeScript, addPhonetics, ScriptError, type ScriptScene, type ScriptLanguage } from './script.js';
+import { writeScript, ScriptError, type ScriptScene, type ScriptLanguage } from './script.js';
 import { generateMusicBed } from './lyria.js';
 import {
   buildContext,
@@ -117,6 +118,12 @@ import {
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
 import { seePhotos, seeDealerPhotos } from './vision.js';
+import {
+  drawSceneFrame,
+  sceneImageContext,
+  SceneImageError,
+  type SceneImageRef,
+} from './sceneImage.js';
 import { syncOemModel, OemSyncError } from './oemSync.js';
 import { syncGoogleModel } from './googleSync.js';
 import { planFromBrief, PlanError, type PlanContext } from './planBrief.js';
@@ -490,32 +497,6 @@ app.post<{ Body: { prompt?: string; clientId?: string } }>('/api/projects/plan',
     return reply.code(err.status ?? 502).send({ code: err.code ?? 'plan-failed', message: err.message });
   }
 });
-
-/**
- * Re-run the pronunciation pass alone, against the current language guide.
- * Copy that is already approved keeps its wording; only the spoken spelling is
- * rebuilt — so tuning a guide costs one cheap text call, not a rewrite.
- */
-app.post<{ Body: { lines?: { index: number; line: string }[]; languageId?: string } }>(
-  '/api/script/phonetics',
-  async (req, reply) => {
-    const lines = (req.body?.lines ?? []).filter((l) => l && String(l.line ?? '').trim());
-    if (!lines.length) return reply.code(400).send({ code: 'bad-request', message: 'lines are required' });
-    const apiKey = await scriptKey();
-    if (!apiKey) {
-      return reply
-        .code(503)
-        .send({ code: 'script-no-key', message: 'This needs a Google Gemini key. Add one in APIs & models.' });
-    }
-    try {
-      const language = await resolveLanguage(req.body?.languageId);
-      return { language: language.name, lines: await addPhonetics(lines, language, apiKey) };
-    } catch (e) {
-      const err = e as ScriptError;
-      return reply.code(err.status ?? 502).send({ code: err.code ?? 'script-failed', message: err.message });
-    }
-  },
-);
 
 app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
   '/api/script',
@@ -1043,6 +1024,8 @@ async function renderSegment(
     seedFrame?: Buffer;
     /** A frame of the vehicle from the opening part — what it must keep looking like. */
     anchorFrame?: Buffer;
+    /** Stills of this part's scenes, drawn beforehand. The composition to match. */
+    frames?: LabelledRef[];
     /** Photos of the vehicle for this part, best first. These outrank everything. */
     carRefs?: LabelledRef[];
     /** The presenter. Given a slot on every part, whatever else is competing for one. */
@@ -1152,6 +1135,7 @@ async function renderSegment(
   shown.push(
     ...orderReferences<LabelledRef>({
       seed: shown[0],
+      frames: req.frames ?? [],
       car: req.carRefs ?? [],
       actor: req.actorRef,
       place: req.placeRef,
@@ -1388,6 +1372,35 @@ function carRefsForPart(
   for (const angle of ANGLE_PRIORITY) take(carRefs.find((r) => r.angle === angle));
   for (const r of carRefs) take(r);
   return picked;
+}
+
+/**
+ * The storyboard frames for this part of the film.
+ *
+ * Drawn beforehand from the same photographs, so each one already settles the
+ * camera, the framing and where everyone stands. They go in front of the
+ * photographs, which only say what the subjects look like.
+ */
+async function framesForPart(
+  part: { start: number; end: number },
+  scenePlan: ScenePlan | null,
+  sceneOverrides: Record<string, SceneOverride> | undefined,
+): Promise<LabelledRef[]> {
+  if (!sceneOverrides) return [];
+  const out: LabelledRef[] = [];
+  for (const sc of scenePlan?.scenes ?? []) {
+    if (sc.end <= part.start || sc.start >= part.end) continue;
+    const frame = sceneOverrides[sc.beat.key ?? '']?.frame;
+    if (!frame?.storagePath || out.some((r) => r.filename === frame.filename)) continue;
+    const obj = await readObject(frame.storagePath).catch(() => null);
+    if (!obj) continue;
+    out.push({
+      ref: { data: obj.bytes.toString('base64'), mimeType: obj.contentType || 'image/png', kind: 'image' },
+      filename: frame.filename,
+      label: `how the shot "${sc.beat.title}" is framed — the camera, the distance and where everything sits. Match this composition.`,
+    });
+  }
+  return out;
 }
 
 /**
@@ -1667,7 +1680,12 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       // The photos of the vehicle this part frames — the cabin shot for a cabin
       // scene, the rear for a rear scene — rather than whatever came first.
       const partCars: LabelledRef[] = carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs);
-      sentRefs[i] = { part: part.partNum, files: partCars.map((r) => r.filename) };
+      // The storyboard's own frames for these scenes, when they were drawn.
+      const partFrames = await framesForPart(part, scenePlan, req.body?.sceneOverrides);
+      sentRefs[i] = {
+        part: part.partNum,
+        files: [...partFrames.map((r) => r.filename), ...partCars.map((r) => r.filename)],
+      };
 
       const renderStart = Date.now();
       const ask = (): Promise<{ bytes: Buffer; interactionId: string; renderResolution: Resolution }> =>
@@ -1676,6 +1694,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
           aspect: brief.aspect,
           duration: part.duration,
           resolution: wanted,
+          frames: partFrames,
           carRefs: partCars,
           actorRef,
           placeRef,
@@ -2131,6 +2150,9 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
             resolution: wantedResolution(brief),
             seedFrame,
             anchorFrame,
+            // The storyboard's frame for these scenes still says how they are shot,
+            // unless the retake itself came with a picture.
+            frames: attached.length ? [] : await framesForPart(part, scenePlan, req.body?.sceneOverrides),
             // An image attached to the retake outranks even the project's vehicle photos.
             carRefs: attached.length
               ? attached
@@ -2896,6 +2918,111 @@ app.post<{
     label: b.label.trim(),
     kind: b.kind || 'dealer',
   };
+});
+
+/**
+ * Draw the storyboard's frames: one still per scene, from the same photographs
+ * the video will be built on.
+ *
+ * Batched, and the assets are read once for the lot — a film is eight scenes and
+ * reading the whole reference set eight times is eight times the wait for nothing.
+ * A scene that fails comes back with its reason rather than failing the batch: one
+ * refusal should not cost the other seven.
+ */
+app.post<{
+  Body: {
+    brief?: Brief;
+    scenes?: { key: string; shot?: string; title?: string; line?: string; ref?: string }[];
+  };
+}>('/api/scene-images', async (req, reply) => {
+  const brief = req.body?.brief;
+  const scenes = (req.body?.scenes ?? []).filter((sc) => sc?.key && String(sc.shot ?? '').trim());
+  if (!brief || !scenes.length) {
+    return reply.code(400).send({ code: 'bad-request', message: 'A brief and at least one scene are required.' });
+  }
+  const apiKey = await scriptKey();
+  if (!apiKey) {
+    return reply
+      .code(503)
+      .send({ code: 'script-no-key', message: 'Drawing scenes needs a Google Gemini key. Add one in APIs & models.' });
+  }
+
+  const { carRefs, actorRef, placeRef } = await loadBriefAssets(brief);
+  const ctx = sceneImageContext(brief);
+  const onCameraPerson = narrationMode(brief.narration).onCameraPerson;
+
+  const shot = (sc: (typeof scenes)[number]): SceneImageRef[] => {
+    const out: SceneImageRef[] = [];
+    // The photograph this shot was going to be built on, first — then a couple more
+    // sides of the vehicle, so the model is not guessing at the ones just out of frame.
+    const visual = sceneVisual(sc.shot ?? '', sc.ref, brief.attachments ?? [], brief.vehicleKind ?? 'car');
+    const wanted =
+      visual.kind === 'picked' || visual.kind === 'matched'
+        ? carRefs.find((r) => r.filename === visual.photo.filename)
+        : undefined;
+    for (const r of [wanted, ...carRefs].filter(Boolean).slice(0, 4)) {
+      const ref = r as (typeof carRefs)[number];
+      if (!ref.ref.data || out.some((x) => x.data === ref.ref.data)) continue;
+      out.push({ data: ref.ref.data, mimeType: ref.ref.mimeType, label: ref.label });
+    }
+    if (onCameraPerson && actorRef?.ref.data) {
+      out.push({ data: actorRef.ref.data, mimeType: actorRef.ref.mimeType, label: actorRef.label });
+    }
+    if (placeRef?.ref.data) {
+      out.push({ data: placeRef.ref.data, mimeType: placeRef.ref.mimeType, label: placeRef.label });
+    }
+    return out.slice(0, 6);
+  };
+
+  type Result = { key: string; frame?: StoredImage; error?: string };
+  const results: Result[] = scenes.map((sc) => ({ key: sc.key }));
+  let next = 0;
+  const LANES = 3;
+  await Promise.all(
+    Array.from({ length: Math.min(LANES, scenes.length) }, async () => {
+      for (;;) {
+        const i = next++;
+        const sc = scenes[i];
+        if (!sc) return;
+        try {
+          const drawn = await drawSceneFrame(
+            {
+              ...ctx,
+              shot: String(sc.shot),
+              title: sc.title,
+              line: sc.line,
+              onCameraPerson,
+              references: shot(sc),
+            },
+            apiKey,
+          );
+          const ext = drawn.mimeType.includes('png') ? 'png' : 'jpg';
+          const filename = `scene-${sc.key.replace(/[^a-zA-Z0-9]+/g, '-')}-${Date.now().toString(36)}.${ext}`;
+          const { refId, storagePath } = await putRef(filename, drawn.mimeType, drawn.bytes);
+          results[i] = {
+            key: sc.key,
+            frame: {
+              refId,
+              storagePath,
+              filename,
+              url: `/api/refs/${refId}/${filename}`,
+              label: `${sc.title || 'Scene'} — how this shot is framed`,
+            },
+          };
+        } catch (e) {
+          const err = e as SceneImageError;
+          results[i] = { key: sc.key, error: err.message || 'The image model did not answer.' };
+        }
+      }
+    }),
+  );
+
+  const made = results.filter((r) => r.frame).length;
+  if (!made) {
+    const why = results.find((r) => r.error)?.error ?? 'Nothing came back.';
+    return reply.code(502).send({ code: 'no-frames', message: why });
+  }
+  return { scenes: results, made };
 });
 
 app.get<{ Params: { refId: string; name: string } }>('/api/refs/:refId/:name', async (req, reply) => {

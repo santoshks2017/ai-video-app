@@ -13,9 +13,10 @@
 import type { Brief, DealerPhoto } from './types.js';
 
 /** What a reference is a picture of. */
-export type RefRole = 'vehicle' | 'presenter' | 'dealership' | 'extra' | 'video' | 'overlay';
+export type RefRole = 'scene' | 'vehicle' | 'presenter' | 'dealership' | 'extra' | 'video' | 'overlay';
 
 export const ROLE_LABEL: Record<RefRole, string> = {
+  scene: 'Scene',
   vehicle: 'Vehicle',
   presenter: 'Presenter',
   dealership: 'Dealership',
@@ -37,6 +38,12 @@ export function refRole(a: DealerPhoto): RefRole {
 export interface RefSlots<T> {
   /** The frame the part before this one ended on. Always first when there is one. */
   seed?: T;
+  /**
+   * Stills of the scenes in this part, drawn beforehand from the same photographs.
+   * They say what the shot looks like, so they come before the photographs that
+   * only say what the subjects look like.
+   */
+  frames?: T[];
   /** Photographs of the vehicle, best first. These outrank everything. */
   car: T[];
   /** The presenter. Reserved a slot on every part. */
@@ -67,6 +74,9 @@ export interface RefSlots<T> {
 export function orderReferences<T>(s: RefSlots<T>): T[] {
   const out: T[] = [];
   if (s.seed) out.push(s.seed);
+  // At most two: a part holds two or three scenes, and a reference set that is
+  // mostly compositions stops being a record of what the car looks like.
+  out.push(...(s.frames ?? []).slice(0, 2));
   const room = (): number => Math.max(0, s.max - out.length);
 
   out.push(...s.car.slice(0, Math.max(1, s.max - out.length - 2)));

@@ -372,6 +372,8 @@ export interface Project {
     {
       dialogue?: string;
       phonetic?: string;
+      /** The still this scene is framed on, drawn by the image model. */
+      frame?: { refId: string; storagePath: string; url?: string; filename: string; label: string };
       shot?: string;
       ref?: string;
       card?: string;

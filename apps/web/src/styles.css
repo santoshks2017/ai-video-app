@@ -546,19 +546,22 @@ code {
 /* The storyboard is read, not skimmed: nothing may be clipped, so every field
    grows to its content and the columns are given fixed shares of the width
    instead of fighting each other for it. */
+/* Five columns, sized to fit. The storyboard is read across, so a table you have
+   to scroll sideways hides half of every scene — the column that went was the
+   pronunciation respelling, which stopped being a separate thing to read. */
 .sb-scroll { overflow-x: auto; }
 .sb-table {
   width: 100%;
-  min-width: 860px;
+  min-width: 640px;
   table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
 }
-.sb-table col.c-scene { width: 15%; }
-.sb-table col.c-ref   { width: 13%; }
-.sb-table col.c-shot  { width: 21%; }
-.sb-table col.c-vo    { width: 33%; }
-.sb-table col.c-card  { width: 18%; }
+.sb-table col.c-scene { width: 14%; }
+.sb-table col.c-shot  { width: 23%; }
+.sb-table col.c-vo    { width: 25%; }
+.sb-table col.c-card  { width: 17%; }
+.sb-table col.c-frame { width: 21%; }
 .sb-table th,
 .sb-table td {
   border: 1px solid var(--line);
@@ -1298,16 +1301,28 @@ code {
 .script-bar button { flex: none; }
 
 /* ---- storyboard: the pronunciation spelling the model actually performs ---- */
-.sb-say { margin-top: 6px; display: grid; gap: 3px; }
-.sb-say label {
-  margin: 0; font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em;
-  text-transform: uppercase; color: var(--ink-faint);
-}
-.sb-say textarea {
-  font-family: var(--font-mono); font-size: 12px;
+/* The scene, drawn before it is filmed. */
+.sb-frame { display: grid; gap: 5px; margin-bottom: 8px; }
+.sb-frame-shot {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
   background: var(--surface-2);
+  aspect-ratio: 4 / 3;
 }
-.sb-say textarea.unset { border-color: var(--warn); }
+.sb-frame-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sb-frame-shot.empty {
+  display: grid;
+  place-items: center;
+  border-style: dashed;
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+.sb-frame-shot.empty.busy { border-style: solid; border-color: var(--accent); color: var(--accent); }
+a.sb-frame-shot:hover { border-color: var(--accent); }
+.sb-frame-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.sb-frame-actions .btn { padding: 2px 8px; }
 
 /* ---- Languages: the guides are long documents, the glossary a table ---- */
 textarea.guide {

@@ -99,6 +99,17 @@ export function collection<T extends { id: string }>(name: string) {
   };
 }
 
+/**
+ * Look at a vehicle's photos again and file each under what it shows. The
+ * library was built from CarDekho's filenames, and those are a guess.
+ */
+export async function recheckCarPhotos(id: string) {
+  return await post<{ ok: true; moved: string[]; dropped: string[]; angles: string[] }>(
+    `/api/cars/${id}/recheck`,
+    {},
+  );
+}
+
 /* ---------------- reference-image upload ---------------- */
 
 export async function uploadRef(file: File, label: string, kind = 'dealer') {

@@ -12,6 +12,7 @@
  */
 
 import { putRef } from './store.js';
+import { seePhotos } from './vision.js';
 import { brandMatches } from '@ava/shared';
 import type {
   CarSpecs,
@@ -439,6 +440,11 @@ export interface SyncOptions {
   maxColours?: number;
   /** Which site to read. Defaults to cars. */
   kind?: VehicleKind;
+  /**
+   * Gemini key. With one, every photo is looked at and filed under what it
+   * actually shows; without one, the filename is all there is to go on.
+   */
+  apiKey?: string;
 }
 
 export const syncCarModel = (input: string, opts: SyncOptions = {}): Promise<CarModelProfile> =>
@@ -533,16 +539,58 @@ export async function syncVehicleModel(input: string, opts: SyncOptions = {}): P
     picked[a]!.push(u);
   }
 
-  const images: Partial<Record<CarAngle, StoredImage[]>> = {};
+  /*
+   * What the filename says, then what the photograph says.
+   *
+   * CarDekho's names are a guess: in the XUV 3XO set a file named for the front
+   * held a side profile, and one named for the side held the front. Filing a
+   * side shot under "front" is worse than having no front at all — the app then
+   * captions it FRONT and tells the model that is what the front looks like.
+   * So the pool is downloaded first and every picture is looked at; the name is
+   * only the fallback when there is no key or the call fails.
+   */
+  const pool: { url: string; guess: CarAngle; bytes: Buffer }[] = [];
   for (const [angle, urls] of Object.entries(picked)) {
+    for (const u of urls) {
+      const bytes = await fetchImage(u);
+      if (bytes) pool.push({ url: u, guess: angle as CarAngle, bytes });
+    }
+  }
+
+  const subject = `${brand} ${model}`;
+  const seen = opts.apiKey ? await seePhotos(pool.map((p) => ({ bytes: p.bytes })), subject, opts.apiKey) : [];
+  const photoNotes: string[] = [];
+
+  const byAngle: Record<string, { url: string; bytes: Buffer }[]> = {};
+  pool.forEach((p, i) => {
+    const look = seen[i];
+    // A picture that is not this vehicle is dropped outright, however it was named.
+    if (look && !look.isVehicle) {
+      photoNotes.push(`dropped a photo that is not the ${subject}${look.note ? ` (${look.note})` : ''}`);
+      return;
+    }
+    const view = look && look.view !== 'other' && look.view !== 'detail' ? look.view : null;
+    if (look && view && view !== p.guess) {
+      photoNotes.push(`a photo named ${p.guess} is really the ${view}`);
+    }
+    if (look && !view) return; // a close-up of one part teaches nothing about a side
+    const angle = (view ?? p.guess) as CarAngle;
+    (byAngle[angle] ??= []).push({ url: p.url, bytes: p.bytes });
+  });
+
+  const images: Partial<Record<CarAngle, StoredImage[]>> = {};
+  for (const [angle, shots] of Object.entries(byAngle)) {
     const list: StoredImage[] = [];
-    for (let i = 0; i < urls.length; i++) {
-      const img = await store(
-        urls[i]!,
-        kind === 'bike' ? `${brand} ${model} — photo` : `${brand} ${model} — ${angle}`,
-        `${id}-${angle}-${i + 1}.jpg`,
-      );
-      if (img) list.push(img);
+    for (const [i, shot] of shots.slice(0, want[angle as CarAngle] ?? 2).entries()) {
+      const { refId, storagePath } = await putRef(`${id}-${angle}-${i + 1}.jpg`, 'image/jpeg', shot.bytes);
+      list.push({
+        refId,
+        storagePath,
+        label: kind === 'bike' ? `${brand} ${model} — photo` : `${brand} ${model} — ${angle}`,
+        filename: `${id}-${angle}-${i + 1}.jpg`,
+        url: `/api/refs/${refId}/${id}-${angle}-${i + 1}.jpg`,
+        angle: angle as CarAngle,
+      });
     }
     if (list.length) images[angle as CarAngle] = list;
   }
@@ -594,9 +642,14 @@ export async function syncVehicleModel(input: string, opts: SyncOptions = {}): P
     syncedAt: now,
     syncStatus,
     syncNote:
-      syncStatus === 'ok'
-        ? undefined
-        : `Only ${angles.length} angle(s) found — upload the missing views manually.`,
+      [
+        syncStatus === 'ok' ? '' : `Only ${angles.length} angle(s) found — upload the missing views manually.`,
+        // What looking at the photographs changed, so a mislabelled set is visible
+        // rather than silently believed.
+        photoNotes.length ? `Checked the photos: ${[...new Set(photoNotes)].join('; ')}.` : '',
+      ]
+        .filter(Boolean)
+        .join(' ') || undefined,
     createdAt: now,
     updatedAt: now,
   };

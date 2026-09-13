@@ -3,7 +3,7 @@ import type { CarModelProfile, CarAngle, StoredImage, BrandEntry, VehicleDataSou
 import { BRAND_CATALOGUE } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
-import { isApiError, post, get, abs } from '../lib/client.js';
+import { isApiError, post, get, abs, recheckCarPhotos } from '../lib/client.js';
 
 const ANGLES: CarAngle[] = ['front', 'side', 'rear', 'interior'];
 
@@ -38,6 +38,31 @@ export function CarsSection() {
   const [oemUrl, setOemUrl] = useState('');
   const [sourceBusy, setSourceBusy] = useState('');
   const [sourceNote, setSourceNote] = useState('');
+  const [checkBusy, setCheckBusy] = useState(false);
+
+  /**
+   * Look at this vehicle's photos and file each under what it shows. CarDekho
+   * names its files by angle and the names are a guess — a file named for the
+   * front can hold a side profile, which is how a film came back with the wrong
+   * face on the right car.
+   */
+  const recheck = async () => {
+    if (!activeId) return;
+    setCheckBusy(true);
+    setSourceNote('');
+    const r = await recheckCarPhotos(activeId);
+    setCheckBusy(false);
+    if (isApiError(r)) {
+      setSourceNote(`${r.code}: ${r.message}`);
+      return;
+    }
+    await refresh();
+    setSourceNote(
+      r.moved.length || r.dropped.length
+        ? `Re-filed: ${[...r.moved, ...r.dropped.map((d) => `dropped ${d}`)].join('; ')}.`
+        : 'Every photo was already filed correctly.',
+    );
+  };
 
   const brands = BRAND_CATALOGUE.filter((b) => b.kind === kind);
 
@@ -403,6 +428,15 @@ export function CarsSection() {
                   <button
                     className="btn ghost small"
                     type="button"
+                    disabled={checkBusy || Boolean(sourceBusy)}
+                    title="Look at each photo and file it under what it actually shows"
+                    onClick={() => void recheck()}
+                  >
+                    {checkBusy ? 'Looking…' : 'Check the photos'}
+                  </button>
+                  <button
+                    className="btn ghost small"
+                    type="button"
                     disabled={Boolean(sourceBusy)}
                     onClick={() => resync(active.source ?? 'cardekho')}
                   >
@@ -434,15 +468,39 @@ export function CarsSection() {
                     <Field key={angle} label={angle[0]!.toUpperCase() + angle.slice(1)}>
                       <div className="thumbs">
                         {imgs.map((img) => (
-                          <Thumb
-                            key={img.refId}
-                            img={img}
-                            onRemove={() =>
-                              patchActive({
-                                images: { ...active.images, [angle]: imgs.filter((x) => x.refId !== img.refId) },
-                              })
-                            }
-                          />
+                          <div className="veh-photo" key={img.refId}>
+                            <Thumb
+                              img={img}
+                              onRemove={() =>
+                                patchActive({
+                                  images: { ...active.images, [angle]: imgs.filter((x) => x.refId !== img.refId) },
+                                })
+                              }
+                            />
+                            {/* Filed wrongly, it can be moved by hand — the check is
+                                a machine looking at a picture, not an oracle. */}
+                            <select
+                              aria-label={`What ${img.label} shows`}
+                              value={angle}
+                              onChange={(e) => {
+                                const to = e.target.value as CarAngle;
+                                if (to === angle) return;
+                                patchActive({
+                                  images: {
+                                    ...active.images,
+                                    [angle]: imgs.filter((x) => x.refId !== img.refId),
+                                    [to]: [...(active.images?.[to] ?? []), { ...img, angle: to }],
+                                  },
+                                });
+                              }}
+                            >
+                              {ANGLES.map((a) => (
+                                <option key={a} value={a}>
+                                  {a[0]!.toUpperCase() + a.slice(1)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         ))}
                         <ImageUpload
                           label={`${active.brand} ${active.model} — ${angle}`}

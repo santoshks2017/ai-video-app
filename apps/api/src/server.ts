@@ -25,6 +25,9 @@ import {
   type PromptPart,
   type ScenePlan,
   type DealerPhoto,
+  type CarAngle,
+  type CarModelProfile,
+  type StoredImage,
 } from '@ava/shared';
 import { loadConfig } from './config.js';
 import { generateClip, downloadFile, fetchInteractionVideo, OmniFlashError, type OmniRef } from './omniFlash.js';
@@ -109,6 +112,7 @@ import {
   plainSpoken,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
+import { seePhotos } from './vision.js';
 import { syncOemModel, OemSyncError } from './oemSync.js';
 import { planFromBrief, PlanError, type PlanContext } from './planBrief.js';
 import { importPlace, PlacesError } from './places.js';
@@ -798,7 +802,7 @@ app.post<{ Body: { brand?: string; kind?: VehicleKind; limit?: number; refresh?:
         continue;
       }
       try {
-        const profile = await syncVehicleModel(`${b.slug}/${m.slug}`, { kind: b.kind });
+        const profile = await syncVehicleModel(`${b.slug}/${m.slug}`, { kind: b.kind, apiKey: config.googleApiKey });
         const prior = existing.find((c) => c.id === profile.id);
         await upsert('cars', { ...profile, source: 'cardekho', createdAt: prior?.createdAt ?? profile.createdAt });
         results.push({
@@ -859,7 +863,11 @@ app.post<{
   const query = req.body?.query?.trim() || [held?.brand, held?.model].filter(Boolean).join(' ');
   if (!query) return reply.code(400).send({ code: 'bad-request', message: 'query required (e.g. "Hyundai Creta")' });
   try {
-    const profile = await syncVehicleModel(query, { kind: req.body?.kind ?? held?.kind ?? 'car' });
+    // With a key, every photo is looked at and filed under what it shows.
+    const profile = await syncVehicleModel(query, {
+      kind: req.body?.kind ?? held?.kind ?? 'car',
+      apiKey: config.googleApiKey,
+    });
     // Switching an existing vehicle back to CarDekho writes into the same record; the
     // manufacturer's page is kept so the switch can be made again without retyping it.
     const id = held?.id ?? profile.id;
@@ -1264,7 +1272,9 @@ async function loadBriefAssets(brief: Brief): Promise<{
     if (a.kind === 'car-model') {
       const side = a.angle ? `${noun}, ${a.angle}` : `${noun} — ${a.label}`;
       carRefs.push({ ref, filename: a.filename, label: side, angle: a.angle });
-      carTiles.push({ bytes: obj.bytes, label: a.angle ?? 'the vehicle' });
+      // A tile is captioned with its angle only when the angle is known. A sheet
+      // that says FRONT over a side profile teaches the model the wrong face.
+      carTiles.push({ bytes: obj.bytes, label: a.angle ?? 'this vehicle' });
     } else if (a.kind === 'actor') {
       // First of the rest: the same face, hair and clothes in every part.
       actorRef = {
@@ -2495,6 +2505,64 @@ app.get<{ Params: { jobId: string } }>('/api/generations/:jobId', async (req, re
     feedback: job.feedback,
     parentJobId: job.parentJobId,
   };
+});
+
+/**
+ * Look at a vehicle's photographs again and file each one under what it shows.
+ *
+ * The library was built by trusting CarDekho's filenames. They are a guess: for
+ * the XUV 3XO, the file named for the front held a side profile and the one
+ * named for the side held the front — so the app captioned a side shot FRONT,
+ * told the model that was the front, and the front became the one view it never
+ * saw. This re-files the photos already stored, without downloading anything.
+ */
+app.post<{ Params: { id: string } }>('/api/cars/:id/recheck', async (req, reply) => {
+  const car = await getOne<CarModelProfile>('cars', req.params.id);
+  if (!car) return reply.code(404).send({ code: 'not-found', message: 'No such vehicle' });
+  if (!config.googleApiKey) {
+    return reply.code(503).send({ code: 'no-key', message: 'Checking photos needs the Google key.' });
+  }
+
+  const flat: { angle: CarAngle; img: StoredImage; bytes: Buffer }[] = [];
+  for (const angle of ['front', 'side', 'rear', 'interior'] as CarAngle[]) {
+    for (const img of car.images?.[angle] ?? []) {
+      const obj = img.storagePath ? await readObject(img.storagePath).catch(() => null) : null;
+      if (obj) flat.push({ angle, img, bytes: obj.bytes });
+    }
+  }
+  if (!flat.length) return reply.code(400).send({ code: 'no-photos', message: 'No photos to look at.' });
+
+  const subject = `${car.brand} ${car.model}`;
+  const seen = await seePhotos(flat.map((f) => ({ bytes: f.bytes })), subject, config.googleApiKey);
+  if (!seen.length) {
+    return reply.code(502).send({ code: 'check-failed', message: 'The photo check did not come back.' });
+  }
+
+  const images: Partial<Record<CarAngle, StoredImage[]>> = {};
+  const moved: string[] = [];
+  const dropped: string[] = [];
+  flat.forEach((f, i) => {
+    const look = seen[i];
+    if (look && !look.isVehicle) {
+      dropped.push(`${f.img.filename}${look.note ? ` — ${look.note}` : ''}`);
+      return;
+    }
+    const view = look && look.view !== 'other' && look.view !== 'detail' ? look.view : f.angle;
+    if (view !== f.angle) moved.push(`${f.img.filename}: ${f.angle} → ${view}`);
+    (images[view] ??= []).push({ ...f.img, angle: view, label: `${subject} — ${view}` });
+  });
+
+  const angles = Object.keys(images) as CarAngle[];
+  await patch('cars', car.id, {
+    images,
+    syncStatus: angles.length >= 4 ? 'ok' : angles.length >= 2 ? 'partial' : 'needs-manual',
+    syncNote:
+      moved.length || dropped.length
+        ? `Looked at the photos: ${[...moved, ...dropped.map((d) => `dropped ${d}`)].join('; ')}.`
+        : 'Looked at the photos — every one was filed correctly.',
+    updatedAt: Date.now(),
+  });
+  return { ok: true, moved, dropped, angles };
 });
 
 /** Every generation ever made for a project — nothing is overwritten. */

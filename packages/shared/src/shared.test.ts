@@ -1120,3 +1120,25 @@ test('a film with nobody on camera sends no photograph of anyone', () => {
   assert.ok(!off.attachments.some((a) => a.kind === 'actor'), 'and not at all when nobody is on camera');
   assert.notEqual(off.actor.name, 'Meera');
 });
+
+test('the card-length warning names the scene, and follows the edits', () => {
+  const b = base({ categories: ['offer'], narration: 'presenter', durationSec: 30, maxChunkSec: 10,
+    fieldValues: { offer: { cashDiscount: 'Rs 40,000 Cash Discount' } } });
+  b.cta = 'Visit Sahyadri Motors in Pune for a test drive today';
+  b.endCardOn = true;
+
+  // A real card that is too long is worth a warning — but it has to say where it
+  // is, or a string nobody can find on the board reads as a bug in the warning.
+  const warn = runChecks(b).checks.find((c) => c.code === 'long-onscreen-string');
+  assert.ok(warn, 'a 52-character card is flagged');
+  assert.match(warn!.text, /scene \d+/, 'and the scene it is on is named');
+
+  // Shortening it clears the warning — reading the beat alone never noticed.
+  const plan = buildPrompt(b)!.scenePlan;
+  const key = plan.scenes.find((sc) => sceneCard(sc.beat, undefined)?.text === b.cta)!.beat.key!;
+  const short = { [key]: { card: 'Book a test drive' } };
+  assert.ok(!runChecks(b, { sceneOverrides: short }).checks.some((c) => c.code === 'long-onscreen-string'));
+
+  // The end card is a whole frame with its own lines, never a caption panel.
+  assert.ok(!/end card/i.test(warn!.text));
+});

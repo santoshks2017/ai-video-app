@@ -1260,6 +1260,8 @@ interface LabelledRef {
   filename: string;
   /** A contact sheet — several photographs in one image, which must never be drawn as one. */
   sheet?: boolean;
+  /** For a dealership photograph, the part of the place it shows. */
+  view?: DealerView;
 }
 
 /** A photo of the vehicle, with the side of it that the photo shows. */
@@ -1341,6 +1343,7 @@ async function loadBriefAssets(brief: Brief): Promise<{
         filename: a.filename,
         label: a.sheet ? a.label : `${a.kind === 'extra' ? 'a reference for this film' : 'the dealership'} — ${a.label}`,
         sheet: a.sheet,
+        view: a.view,
       });
     }
   }
@@ -1355,6 +1358,37 @@ async function loadBriefAssets(brief: Brief): Promise<{
     dealerLogo,
     brandLogo,
   };
+}
+
+/**
+ * Which part of the dealership a shot is set in, read from the shot itself.
+ *
+ * A showroom is several rooms, and every scene used to be handed whichever
+ * dealership photograph happened to be first. So a wide exterior of the building
+ * was drawn from a photograph of the showroom floor, and the film opened on
+ * somebody else's forecourt.
+ */
+const PLACE_WORDS: [DealerView, RegExp][] = [
+  ['exterior', /exterior|facade|fa\u00e7ade|forecourt|outside|street|entrance|signage|building|kerb|curb|frontage|drive-?way|car park/i],
+  ['delivery', /delivery|handover|hand-?over|keys?\b|garland|ribbon|ceremony|collect/i],
+  ['lounge', /lounge|waiting|reception|seating|sofa|desk|cafe|coffee|sit(-| )down|consultation/i],
+  ['team', /team|staff|salesperson|service bay|technician|workshop|advisor/i],
+  ['interior', /showroom floor|inside the showroom|indoor|shop floor|display area|under showroom/i],
+];
+
+export function placeViewFor(shot: string): DealerView | undefined {
+  const text = shot ?? '';
+  for (const [view, rx] of PLACE_WORDS) if (rx.test(text)) return view;
+  return undefined;
+}
+
+/** The dealership photograph a shot should be built on, best first. */
+function placeRefsFor(shot: string, references: LabelledRef[]): LabelledRef[] {
+  const want = placeViewFor(shot);
+  const places = references.filter((r) => r.view || /dealership/.test(r.label));
+  const matched = want ? places.filter((r) => r.view === want) : [];
+  // The matching room first, then any other photograph of the place.
+  return [...matched, ...places.filter((r) => !matched.includes(r)), ...references.filter((r) => !places.includes(r))];
 }
 
 /** Angles in the order they are worth showing when a part asks for nothing specific. */
@@ -1701,6 +1735,12 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       const partCars: LabelledRef[] = carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs);
       // The storyboard's own frames for these scenes, when they were drawn.
       const partFrames = await framesForPart(part, scenePlan, req.body?.sceneOverrides);
+      // And the room this part is set in, rather than the same photograph every time.
+      const partShots = (scenePlan?.scenes ?? [])
+        .filter((sc) => sc.end > part.start && sc.start < part.end)
+        .map((sc) => (req.body?.sceneOverrides?.[sc.beat.key ?? '']?.shot ?? sc.beat.shot) || '')
+        .join(' ');
+      const partPlace = placeRefsFor(partShots, references.filter((r) => r !== actorRef))[0] ?? placeRef;
       sentRefs[i] = {
         part: part.partNum,
         files: [...partFrames.map((r) => r.filename), ...partCars.map((r) => r.filename)],
@@ -1716,7 +1756,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
           frames: partFrames,
           carRefs: partCars,
           actorRef,
-          placeRef,
+          placeRef: partPlace,
           references,
           videoRefs,
         });
@@ -2966,23 +3006,44 @@ app.post<{
       .send({ code: 'script-no-key', message: 'Drawing scenes needs a Google Gemini key. Add one in APIs & models.' });
   }
 
-  const { carRefs, actorRef, placeRef } = await loadBriefAssets(brief);
+  const { carRefs, actorRef, references } = await loadBriefAssets(brief);
   const ctx = sceneImageContext(brief);
   const onCameraPerson = narrationMode(brief.narration).onCameraPerson;
 
   const shot = (sc: (typeof scenes)[number]): SceneImageRef[] => {
     const out: SceneImageRef[] = [];
-    // The photograph this shot was going to be built on, first — then a couple more
-    // sides of the vehicle, so the model is not guessing at the ones just out of frame.
-    const visual = sceneVisual(sc.shot ?? '', sc.ref, brief.attachments ?? [], brief.vehicleKind ?? 'car');
-    const wanted =
+    const add = (r: LabelledRef | undefined): void => {
+      if (!r?.ref.data || out.some((x) => x.data === r.ref.data)) return;
+      out.push({ data: r.ref.data, mimeType: r.ref.mimeType, label: r.label });
+    };
+
+    const text = sc.shot ?? '';
+    // The photograph this shot was going to be built on — then a couple more sides
+    // of the vehicle, so the model is not guessing at the ones just out of frame.
+    const visual = sceneVisual(text, sc.ref, brief.attachments ?? [], brief.vehicleKind ?? 'car');
+    const wantedCar =
       visual.kind === 'picked' || visual.kind === 'matched'
         ? carRefs.find((r) => r.filename === visual.photo.filename)
         : undefined;
-    for (const r of [wanted, ...carRefs].filter(Boolean).slice(0, 4)) {
-      const ref = r as (typeof carRefs)[number];
-      if (!ref.ref.data || out.some((x) => x.data === ref.ref.data)) continue;
-      out.push({ data: ref.ref.data, mimeType: ref.ref.mimeType, label: ref.label });
+    const cars = [wantedCar, ...carRefs].filter(Boolean) as LabelledRef[];
+    // The room this shot is set in, rather than whichever dealership photograph
+    // came first — a wide exterior of the building was being drawn from a picture
+    // of the showroom floor, so the film opened on somebody else's forecourt.
+    const places = placeRefsFor(text, references.filter((r) => r !== actorRef));
+
+    /*
+     * Which matters more in this frame.
+     *
+     * A shot that names the place is a shot about the place: it leads with the
+     * photographs of it and keeps one of the vehicle, so the car in the background
+     * is still the right car. Everything else leads with the vehicle.
+     */
+    if (placeViewFor(text)) {
+      places.slice(0, 3).forEach(add);
+      cars.slice(0, 2).forEach(add);
+    } else {
+      cars.slice(0, 4).forEach(add);
+      places.slice(0, 1).forEach(add);
     }
     /*
      * The presenter, whenever there is one.
@@ -2993,12 +3054,7 @@ app.post<{
      * film cast with a woman, and then in the video, because this still is what the
      * video is built from.
      */
-    if (actorRef?.ref.data) {
-      out.push({ data: actorRef.ref.data, mimeType: actorRef.ref.mimeType, label: actorRef.label });
-    }
-    if (placeRef?.ref.data) {
-      out.push({ data: placeRef.ref.data, mimeType: placeRef.ref.mimeType, label: placeRef.label });
-    }
+    add(actorRef);
     return out.slice(0, 6);
   };
 

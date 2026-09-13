@@ -15,7 +15,7 @@ import { buildContext } from './context.js';
 import { buildBeats, collectStrings } from './buildBeats.js';
 import { planScenes, speakingSeconds } from './planScenes.js';
 import { CATEGORY_BY_ID, isPromptOnly, categoryValues, listRows } from './categories.js';
-import { sceneEditFor, wordBudget } from './buildPrompt.js';
+import { sceneCard, sceneEditFor, wordBudget } from './buildPrompt.js';
 
 export interface PreflightResult {
   checks: Check[];
@@ -292,9 +292,25 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
   // composited in post, so they can no longer be dropped or misspelled. What is
   // left is a viewer problem: cards stacked this close together go by faster
   // than anyone can read them.
-  const cardMoments = plan.scenes.filter(
-    (s) => !s.beat.isEndCard && (s.beat.card || (s.beat.cardLines ?? []).length),
-  ).length;
+  /*
+   * The cards as they will actually be composited.
+   *
+   * Read off the beats alone, this counted a card the designer had removed and
+   * missed one they had typed — and it measured the end card, which is not a card
+   * at all. The end card is a whole frame of its own with its own lines and its
+   * own length rules; holding it to a caption panel's 42 characters warned about a
+   * call to action that was never going to be squeezed into a caption.
+   */
+  const edits = opts.sceneOverrides ?? {};
+  const composited = plan.scenes
+    .map((sc, i) => ({
+      scene: i + 1,
+      title: sc.beat.title,
+      isEndCard: Boolean(sc.beat.isEndCard),
+      card: sceneCard(sc.beat, sceneEditFor(edits, plan, sc)),
+    }))
+    .filter((x) => !x.isEndCard && x.card?.text?.trim());
+  const cardMoments = composited.length;
   const cap = cardCap(ctx.totalDuration);
   if (cardMoments > cap) {
     checks.push({
@@ -304,12 +320,18 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
     });
   }
 
-  const longCards = collectStrings(plan.scenes).filter((c) => c.length > LONG_STRING_CHARS);
+  // Said with the scene it is on. Without that, a warning about a string nobody
+  // can find on the board reads as a bug in the warning.
+  const longCards = composited
+    .flatMap((x) => [x.card!.text, x.card!.sub].map((t) => ({ ...x, t })))
+    .filter((x) => (x.t ?? '').trim().length > LONG_STRING_CHARS);
   if (longCards.length) {
+    const first = longCards[0]!;
+    const where = longCards.map((x) => `scene ${x.scene}`).join(', ');
     checks.push({
       level: 'warn',
       code: 'long-onscreen-string',
-      text: `${longCards.length} on-screen string(s) run past ${LONG_STRING_CHARS} characters. They are composited, so they will be spelled correctly and will fit — but the panel shrinks the type to make them fit, and a card this long is read as a paragraph rather than a figure. Shorten: "${longCards[0]!.slice(0, 50)}…".`,
+      text: `The on-screen text on ${where} runs past ${LONG_STRING_CHARS} characters. It is composited, so it will be spelled correctly and will fit — but the panel shrinks the type to make it fit, and a card this long is read as a paragraph rather than a figure. Scene ${first.scene} (${first.title}) reads "${first.t!.slice(0, 50)}${first.t!.length > 50 ? '…' : ''}".`,
     });
   }
 

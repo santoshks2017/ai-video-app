@@ -42,18 +42,20 @@ function Lock({ on, what, onToggle }: { on: boolean; what: string; onToggle: () 
       onClick={onToggle}
     >
       {/*
-       * One icon, one meaning.
+       * A shut padlock, and an open one — drawn far enough apart to tell at 13px.
        *
-       * Every two-icon version of this read backwards to somebody: a key can mean
-       * "locked with a key" as easily as "unlocked", and an open padlock and a shut
-       * one are the same drawing at 13px. So there is only ever a shut padlock, and
-       * it is only ever there when the field is shut. An unlocked field shows a
-       * faint outline when you are over it — the place to click to lock it — and
-       * nothing at all when you are not.
+       * Shut: the shackle sits squarely over a filled body, in the accent. Open: the
+       * body is a grey outline and the shackle is lifted clear of it and swung to
+       * the side, so the silhouette differs as well as the colour. The state is also
+       * on the field itself, which is tinted when it is locked.
        */}
-      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden focusable="false">
+      <svg viewBox="0 0 18 16" width="14" height="13" aria-hidden focusable="false">
         <rect x="3" y="7" width="10" height="7" rx="1.6" />
-        <path d="M5.4 7V4.9a2.6 2.6 0 0 1 5.2 0V7" />
+        {on ? (
+          <path d="M5.4 7V4.9a2.6 2.6 0 0 1 5.2 0V7" />
+        ) : (
+          <path d="M10.6 7V4.2a2.6 2.6 0 0 1 5.2 0v1" />
+        )}
       </svg>
     </button>
   );
@@ -600,7 +602,7 @@ export function Storyboard({
           */}
         <div className="sb-bar">
           {mode.speaks && onWriteScript && (
-            <div className="sb-bar-group">
+            <div className="sb-bar-group script">
               <label>
                 Script
                 <Info>
@@ -655,7 +657,7 @@ export function Storyboard({
           )}
 
           {onDrawScenes && (
-            <div className="sb-bar-group">
+            <div className="sb-bar-group drawn">
               <label>
                 Scenes drawn
                 <Info>
@@ -696,7 +698,7 @@ export function Storyboard({
 
           {length && onLength && (
             <>
-              <div className="sb-bar-group">
+              <div className="sb-bar-group length">
                 <label>
                   Length at 1x
                   <Info>
@@ -736,7 +738,7 @@ export function Storyboard({
                 </div>
               </div>
 
-              <div className="sb-bar-group">
+              <div className="sb-bar-group pace">
                 <label>
                   Pace
                   <Info>

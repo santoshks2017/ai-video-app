@@ -354,6 +354,14 @@ export interface Project {
   /** Tags — every project is filed under these for search. */
   clientId?: string;
   actorId?: string;
+  /**
+   * Is there a person on camera in this film at all?
+   *
+   * On unless it is turned off. Off means no presenter is written into any shot,
+   * no photograph of one is sent, and the picker beside it is greyed: a film of
+   * the vehicle and the showroom, with a voice over it.
+   */
+  useActor?: boolean;
   /** The hero vehicle. Kept for projects created before multi-select. */
   carId?: string;
   /**

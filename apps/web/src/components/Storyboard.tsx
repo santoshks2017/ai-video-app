@@ -41,21 +41,20 @@ function Lock({ on, what, onToggle }: { on: boolean; what: string; onToggle: () 
       aria-label={on ? `Unlock this ${what}` : `Lock this ${what}`}
       onClick={onToggle}
     >
-      {/* Two different objects, not two states of one. An open padlock and a shut
-          one are the same drawing with a hinge moved, and at this size nobody can
-          tell them apart — 🔒 and 🔓 could not be told apart either. A padlock
-          means shut; a key means it is yours to change. */}
-      {on ? (
-        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden focusable="false">
-          <rect x="3" y="7" width="10" height="7" rx="1.6" />
-          <path d="M5.4 7V4.9a2.6 2.6 0 0 1 5.2 0V7" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden focusable="false">
-          <circle cx="5" cy="8" r="2.9" />
-          <path d="M7.9 8h6.4M11.3 8v2.5M13.5 8v1.9" />
-        </svg>
-      )}
+      {/*
+       * One icon, one meaning.
+       *
+       * Every two-icon version of this read backwards to somebody: a key can mean
+       * "locked with a key" as easily as "unlocked", and an open padlock and a shut
+       * one are the same drawing at 13px. So there is only ever a shut padlock, and
+       * it is only ever there when the field is shut. An unlocked field shows a
+       * faint outline when you are over it — the place to click to lock it — and
+       * nothing at all when you are not.
+       */}
+      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden focusable="false">
+        <rect x="3" y="7" width="10" height="7" rx="1.6" />
+        <path d="M5.4 7V4.9a2.6 2.6 0 0 1 5.2 0V7" />
+      </svg>
     </button>
   );
 }
@@ -415,6 +414,8 @@ export function Storyboard({
   onDrawScenes,
   onLockScene,
   onLockAll,
+  onUndo,
+  undoLabel,
   vehicle = 'car',
   speechWpm,
   length,
@@ -448,6 +449,15 @@ export function Storyboard({
   onLockScene?: (key: string, field: LockField, lock: boolean) => void;
   /** Take every lock off, or put one on every written field. */
   onLockAll?: (lock: boolean) => void;
+  /**
+   * Put the storyboard back as it was before the last rewrite or redraw.
+   *
+   * Both buttons replace work that took thought, and the second one costs money.
+   * A misclick should be one click to undo, not a rewrite to get back to.
+   */
+  onUndo?: () => void;
+  /** What the undo would put back — "the script", "6 scene images". */
+  undoLabel?: string;
   /** Cars and bikes name their parts differently. */
   vehicle?: 'car' | 'bike';
   /** How fast this film speaks — the rate every scene's word budget is worked out at. */
@@ -522,6 +532,7 @@ export function Storyboard({
   const unframed = scenePlan.scenes
     .filter((sc) => !sceneEditFor(sceneEdits, scenePlan, sc)?.frame)
     .map((sc, i) => sc.beat.key ?? String(i));
+  const allKeys = scenePlan.scenes.map((sc, i) => sc.beat.key ?? String(i));
 
   const draw = async (keys: string[]): Promise<void> => {
     if (!onDrawScenes || !keys.length) return;
@@ -657,15 +668,28 @@ export function Storyboard({
                 <span className={`sb-tally${!unframed.length ? ' done' : ''}`}>
                   {framed.length}/{scenePlan.scenes.length}
                 </span>
-                <button
-                  className="btn small"
-                  type="button"
-                  disabled={drawing.length > 0 || !unframed.length}
-                  onClick={() => void draw(unframed)}
-                  title={unframed.length ? 'Draw the scenes that have no frame yet' : 'Every scene has a frame'}
-                >
-                  {drawing.length ? `Drawing ${drawing.length}…` : !unframed.length ? 'All drawn' : `Draw ${unframed.length}`}
-                </button>
+                {unframed.length > 0 && (
+                  <button
+                    className="btn small"
+                    type="button"
+                    disabled={drawing.length > 0}
+                    onClick={() => void draw(unframed)}
+                    title="Draw only the scenes that have no frame yet"
+                  >
+                    {drawing.length ? `Drawing ${drawing.length}…` : `Draw ${unframed.length} pending`}
+                  </button>
+                )}
+                {framed.length > 0 && (
+                  <button
+                    className="btn ghost small"
+                    type="button"
+                    disabled={drawing.length > 0}
+                    onClick={() => void draw(allKeys)}
+                    title="Draw every scene again, including the ones that already have a frame"
+                  >
+                    {drawing.length && !unframed.length ? `Drawing ${drawing.length}…` : `Redraw all ${allKeys.length}`}
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -743,8 +767,21 @@ export function Storyboard({
           )}
         </div>
 
-        {(scriptNote || drawNote) && (
-          <div className="sb-bar-note">{[scriptNote, drawNote].filter(Boolean).join(' · ')}</div>
+        {(scriptNote || drawNote || onUndo) && (
+          <div className="sb-bar-note">
+            {[scriptNote, drawNote].filter(Boolean).join(' · ')}
+            {onUndo && undoLabel && (
+              <button
+                type="button"
+                className="btn ghost small"
+                style={{ marginLeft: 8 }}
+                onClick={onUndo}
+                title={`Put ${undoLabel} back as it was before`}
+              >
+                Undo — restore {undoLabel}
+              </button>
+            )}
+          </div>
         )}
 
         {/* The idea the copy is arguing. Judge this before judging the lines — a

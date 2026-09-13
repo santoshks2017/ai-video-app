@@ -1490,12 +1490,16 @@ code {
   transition: opacity 0.12s ease, color 0.12s ease;
 }
 .sb-lock svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
-/* The shut padlock is filled in: a solid shape reads as closed at a glance. The
-   key stays an outline — it is a different object, not a lighter lock. */
-.sb-lock.on svg rect { fill: currentColor; }
-.sb-field:hover .sb-lock { opacity: 0.75; }
-.sb-lock:hover { opacity: 1; color: var(--accent); }
+/* A shut padlock, and only when the field is shut: filled and in the accent, on a
+   field that is tinted to match. An unlocked field shows nothing until the cursor
+   is over it, and then only a faint outline — the place to click to lock it. */
+.sb-lock { opacity: 0; }
 .sb-lock.on { opacity: 1; color: var(--accent); }
+.sb-lock.on svg rect { fill: currentColor; }
+.sb-field:hover .sb-lock { opacity: 0.45; }
+.sb-field:hover .sb-lock.on { opacity: 1; }
+.sb-lock:focus-visible { opacity: 1; }
+.sb-lock:hover { opacity: 1 !important; color: var(--accent); }
 .sb-field:has(.sb-lock.on) textarea { background: var(--accent-wash); border-color: var(--line-strong); }
 
 /* The scene, drawn before it is filmed. */

@@ -20,8 +20,54 @@ const STAGE: Partial<Record<CategoryId, number>> = { offer: 2 };
  * now the moment to buy — and a theme such as a festival adds no scenes of its own. It is
  * the look of every shot, the greeting that opens the film and the wish near its end.
  */
+/** A shot that already says who is in it — or says that nobody is. */
+const NAMES_A_PERSON =
+  /presenter|customer|family|couple|team|staff|salesperson|owner|driver|person|people|hand[s]?\b|no one|nobody/i;
+/** A shot held close on one part of the vehicle, where a whole person would not fit. */
+const IS_MACRO = /macro|close-?up|detail|readout|display|port|badge|lamp|dial|stitch|screen/i;
+/**
+ * A shot nobody can stand in: the vehicle is moving, or the camera is not on the
+ * ground beside it. A presenter written into one of these is a presenter standing
+ * in the middle of a road, which is worse than a shot with nobody in it.
+ */
+const NO_ROOM_FOR_A_PERSON =
+  /driving|driven|drives\b|on the road|open road|highway|rolling|glide-?by|pull-?away|drone|aerial|crane|fly-?over|in motion|cornering|silhouette|beauty shot|graphic beat/i;
+
+/**
+ * Put the presenter in the shot when the film has one.
+ *
+ * A use case writes its shots for the film in general, and the product beats are
+ * written as product shots — "slow macro pan across the signature detail" names
+ * nobody, because on paper nobody is needed. But a presenter-led ad has a
+ * presenter in it, and a shot that does not say so produces a scene image with an
+ * empty showroom in it, which then becomes the reference the video is built from.
+ *
+ * So a shot that names no one is told who is there, in the way that shot can hold
+ * them: a hand entering a macro, the presenter beside the vehicle in anything
+ * wider. A shot that already names someone — or says the frame is empty — is left
+ * exactly as it was written.
+ */
+function withPresenter(shot: string | undefined, who: string): string | undefined {
+  const text = (shot ?? '').trim();
+  // Already cast, or a shot nobody belongs in. Both are left exactly as written:
+  // a presenter forced into a driving shot stands in the middle of a road.
+  if (!text || NAMES_A_PERSON.test(text) || NO_ROOM_FOR_A_PERSON.test(text)) return shot;
+  const sep = /[.!?]$/.test(text) ? ' ' : '. ';
+  return IS_MACRO.test(text)
+    ? `${text}${sep}${who}'s hand enters frame to point it out; no one else is in shot.`
+    : `${text}${sep}${who} is in frame beside the vehicle.`;
+}
+
 export function buildBeats(ctx: RenderContext): Beat[] {
   const bctx = beatContext(ctx);
+  // Named where a name was given, so the shot reads like a call sheet rather than
+  // a form. Everything downstream — the prompt, the scene stills — reads this text.
+  // Nobody is written into a shot unless this film actually has someone on camera:
+  // the narration has to put a person there, and the project has to want one.
+  const presenter =
+    ctx.mode.onCameraPerson && ctx.brief.useActor !== false
+      ? ctx.brief.actor?.name?.trim() || 'The presenter'
+      : '';
   const groups = ctx.brief.categories
     .map((id) => CATEGORY_BY_ID[id])
     .filter((cat): cat is CategoryDef => Boolean(cat))
@@ -31,7 +77,14 @@ export function buildBeats(ctx: RenderContext): Beat[] {
       // that have none — so adding a feature row does not shift the key of the scene
       // after the list, and an edit never jumps to a neighbouring scene.
       let place = 0;
-      const beats = (cat.beats(values, bctx) ?? []).map((b) => ({ ...b, key: `${cat.id}:${b.id ?? place++}`, cat: cat.label }));
+      const beats = (cat.beats(values, bctx) ?? []).map((b) => ({
+        ...b,
+        key: `${cat.id}:${b.id ?? place++}`,
+        cat: cat.label,
+        ...(presenter && !b.isEndCard
+          ? { shot: withPresenter(b.shot, presenter) ?? b.shot, shotAlt: b.shotAlt }
+          : {}),
+      }));
       return { cat, beats };
     });
 

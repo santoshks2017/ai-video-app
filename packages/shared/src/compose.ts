@@ -257,7 +257,9 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
     };
   }
 
-  if (actor) {
+  // A film can be presenter-led in its narration and still want nobody on screen.
+  b.useActor = project.useActor !== false;
+  if (actor && b.useActor) {
     b.actor = {
       id: actor.id,
       name: actor.name,
@@ -400,7 +402,7 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   }
   // The presenter's own photograph. Described in prose the look drifts — hair up
   // in one part, down in the next — and prose is all this used to be.
-  if (actor?.photo?.storagePath) {
+  if (actor?.photo?.storagePath && b.useActor) {
     attachments.push({
       ...toDealerPhoto(actor.photo, 'actor'),
       label: `${actor.name || 'The presenter'} — the person on camera`,

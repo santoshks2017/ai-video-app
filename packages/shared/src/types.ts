@@ -234,6 +234,8 @@ export interface Brief {
   narration: NarrationKey;
   /** Whether the video references a specific car model (triggers the scraper, P0.2). */
   modelSpecific: boolean;
+  /** False when this film deliberately has nobody on camera, whatever the narration mode. */
+  useActor?: boolean;
   carModel?: string;
   /**
    * The hero car's paint, as a person says it ("Stealth Black"). The library's

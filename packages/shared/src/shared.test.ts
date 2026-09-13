@@ -41,6 +41,7 @@ import {
   speechRate,
   DEFAULT_WPM,
   type CarModelProfile,
+  type ActorProfile,
   type DealerPhoto,
   type ClientProfile,
   ageBandOf,
@@ -1062,4 +1063,60 @@ test('a locked line is not up for rewriting', () => {
   // A lock is per field, so locking the line leaves the shot and the card free.
   assert.ok(!edits[keys[0]!]!.locked!.includes('shot'));
   assert.ok(!edits[keys[0]!]!.locked!.includes('card'));
+});
+
+test('a presenter-led film says who is in the shot', () => {
+  const withMode = (narration: 'presenter' | 'voiceover'): Beat[] => {
+    const b = base({ categories: ['feature'], narration, durationSec: 24, maxChunkSec: 10,
+      fieldValues: { feature: { feature1: 'Panoramic sunroof' } } });
+    b.actor = { ...b.actor, name: 'Meera', gender: 'female' };
+    return buildBeats(buildContext(b));
+  };
+
+  // A product beat names nobody on paper, and a scene image drawn from it came
+  // back as an empty showroom — which then seeded the video.
+  const shots = withMode('presenter').map((x) => x.shot ?? '');
+  assert.ok(shots.some((x) => /Meera/.test(x)), 'the presenter is placed in the shots');
+  const macro = shots.find((x) => /macro/i.test(x));
+  assert.ok(macro && /hand enters frame/.test(macro), 'a macro gets a hand, not a whole person');
+
+  // A shot that already says who is there keeps its own words.
+  const named = shots.find((x) => /presenter addressing camera/i.test(x));
+  if (named) assert.ok(!named.includes('is in frame beside'), 'nothing is appended twice');
+
+  // No one is on camera in a voiceover film, so nobody is written into the shots.
+  assert.ok(!withMode('voiceover').some((x) => /Meera/.test(x.shot ?? '')));
+});
+
+test('nobody is written into a shot that cannot hold a person', () => {
+  const b = base({ categories: ['ev'], narration: 'presenter', durationSec: 24, maxChunkSec: 10 });
+  b.actor = { ...b.actor, name: 'Meera', gender: 'female' };
+  const shots = buildBeats(buildContext(b)).map((x) => x.shot ?? '');
+
+  // A car in motion, or a beauty pass, is not a shot with someone standing in it.
+  const moving = shots.filter((x) => /glide-by|pull-away|beauty shot/i.test(x));
+  assert.ok(moving.length, 'the EV use case has shots like these');
+  for (const x of moving) assert.ok(!x.includes('is in frame beside'), `a presenter was forced into: ${x}`);
+
+  // And turning the presenter off empties every shot of people.
+  const none = buildBeats(buildContext({ ...b, useActor: false })).map((x) => x.shot ?? '');
+  assert.ok(!none.some((x) => /Meera/.test(x)));
+});
+
+test('a film with nobody on camera sends no photograph of anyone', () => {
+  const actor: ActorProfile = {
+    id: 'a1',
+    name: 'Meera',
+    gender: 'female',
+    photo: { refId: 'r9', storagePath: 'p/9', filename: 'meera.jpg', label: 'Meera' },
+    createdAt: 0,
+    updatedAt: 0,
+  };
+  const on = composeBrief({ ...emptyProject(), actorId: 'a1' }, { actor });
+  assert.ok(on.attachments.some((a) => a.kind === 'actor'), 'the presenter travels by default');
+  assert.equal(on.actor.name, 'Meera');
+
+  const off = composeBrief({ ...emptyProject(), actorId: 'a1', useActor: false }, { actor });
+  assert.ok(!off.attachments.some((a) => a.kind === 'actor'), 'and not at all when nobody is on camera');
+  assert.notEqual(off.actor.name, 'Meera');
 });

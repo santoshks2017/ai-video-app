@@ -301,6 +301,19 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const fold = (id: string) => ({ open: panelOpen(id), onOpenChange: (o: boolean) => setPanelOpen(id, o) });
   /** Use-case details are folded away; picking a use case opens its own block. */
   const [openCats, setOpenCats] = useState<CategoryId[]>([]);
+  /**
+   * The storyboard as it was before the last rewrite or redraw.
+   *
+   * Both of those buttons replace work that took thought, and one of them costs
+   * money — a misclick should be one click to get back from, not a second rewrite
+   * that produces something different again. It holds one step, which is the step
+   * anyone actually wants.
+   */
+  const [storyUndo, setStoryUndo] = useState<{
+    label: string;
+    edits: Project['sceneEdits'];
+    angle?: Project['scriptAngle'];
+  } | null>(null);
   const [planning, setPlanning] = useState(false);
   const [planNote, setPlanNote] = useState('');
   const [planUndo, setPlanUndo] = useState<Project | null>(null);
@@ -351,6 +364,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     // The storyboard travels with the request: a locked line is not rewritten, and
     // the writer is shown it anyway so the lines around it are written to flow with it.
     const r = await genApi.script(brief, language?.id, project.id, edits);
+    if (!isApiError(r)) setStoryUndo({ label: 'the script', edits, angle: project.scriptAngle });
     if (isApiError(r)) return `${r.code}: ${r.message}`;
     if (!r.lines.length) return 'Every line is locked — unlock the ones you want rewritten.';
     const next = { ...edits };
@@ -407,6 +421,11 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
     const r = await genApi.sceneImages(brief, wanted);
     if (isApiError(r)) return `${r.code}: ${r.message}`;
+    setStoryUndo({
+      label: `${wanted.length} scene image${wanted.length === 1 ? '' : 's'}`,
+      edits,
+      angle: project.scriptAngle,
+    });
     const next = { ...edits };
     for (const row of r.scenes) {
       if (row.frame) next[row.key] = { ...next[row.key], frame: row.frame };
@@ -793,22 +812,49 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 </select>
               </Field>
               <Field
-                label="Actor"
+                label="Presenter"
                 hint={
-                  usualActor && usual
-                    ? `${usualActor.name} fronts ${usual.count} of ${usual.total} films for this client.`
-                    : undefined
+                  project.useActor === false
+                    ? 'Nobody on camera: no presenter is written into any shot and no photograph of one is sent. The film is the vehicle and the showroom, with a voice over it.'
+                    : usualActor && usual
+                      ? `${usualActor.name} fronts ${usual.count} of ${usual.total} films for this client. Whoever is picked is written into the shots that can hold a person — never into a driving shot or a beauty pass.`
+                      : 'Whoever is picked is written into the shots that can hold a person — never forced into a driving shot or a beauty pass.'
                 }
               >
-                <select value={project.actorId ?? ''} onChange={(e) => set({ actorId: e.target.value || undefined })}>
-                  <option value="">— none —</option>
-                  {actors.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-                {usualActor && project.actorId !== usualActor.id && (
+                {/* Two decisions, in the order they are made: whether anyone is on
+                    camera at all, and then who. The second is meaningless without
+                    the first, so it greys out rather than sitting there enabled. */}
+                <div className="sb-bar-row">
+                  <div className="seg">
+                    <button
+                      type="button"
+                      className={project.useActor !== false ? 'on' : ''}
+                      onClick={() => set({ useActor: true })}
+                    >
+                      On camera
+                    </button>
+                    <button
+                      type="button"
+                      className={project.useActor === false ? 'on' : ''}
+                      onClick={() => set({ useActor: false })}
+                    >
+                      Nobody
+                    </button>
+                  </div>
+                  <select
+                    value={project.actorId ?? ''}
+                    disabled={project.useActor === false}
+                    onChange={(e) => set({ actorId: e.target.value || undefined })}
+                  >
+                    <option value="">— none —</option>
+                    {actors.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {project.useActor !== false && usualActor && project.actorId !== usualActor.id && (
                   <button
                     className="btn ghost small"
                     type="button"
@@ -1599,6 +1645,15 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 onDrawScenes={drawScenes}
                 onLockScene={lockScene}
                 onLockAll={lockAll}
+                undoLabel={storyUndo?.label}
+                onUndo={
+                  storyUndo
+                    ? () => {
+                        set({ sceneEdits: storyUndo.edits, scriptAngle: storyUndo.angle });
+                        setStoryUndo(null);
+                      }
+                    : undefined
+                }
                 vehicle={brief?.vehicleKind ?? 'car'}
                 speechWpm={project.spec.speechWpm}
                 length={{

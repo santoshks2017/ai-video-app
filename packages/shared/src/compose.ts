@@ -22,6 +22,7 @@ import type {
   CarAngle,
   LanguageProfile,
 } from './library.js';
+import { CAR_VIEWS } from './library.js';
 import { emptyBrief } from './defaults.js';
 
 export function emptySpec(): ProjectVideoSpec {
@@ -325,18 +326,49 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
         label: `Colour reference — ${paint}: paint the car exactly this colour`,
       });
     }
-    // Each shot keeps the part of the car it shows, so a scene about the cabin is
-    // matched to a cabin photo — or flagged when there is none.
-    const heroVariant = car!.variants.find((v) => v.name === project.carVariant);
-    const angleOf = (img: StoredImage): CarAngle | undefined =>
-      ANGLE_ORDER.find((a) =>
-        [...(heroVariant?.images?.[a] ?? []), ...(car!.images?.[a] ?? [])].some((x) => x.storagePath === img.storagePath),
-      );
-    for (const img of hero.shots) {
-      const photo = { ...toDealerPhoto(img, 'car-model'), angle: angleOf(img) };
-      // Said in the label because the label is what the prompt cites beside each
-      // file: the model must take shape, not paint, from these.
-      attachments.push(paint && hero.swatch ? { ...photo, label: `${photo.label} — shape reference; its paint may differ` } : photo);
+    /*
+     * One sheet per view, when the vehicle has them.
+     *
+     * A sheet holds every photograph of that side of the car in a single image,
+     * so the whole car reaches the model in five slots instead of one slot per
+     * photograph — which is how three-quarters of what the source publishes used
+     * to be left behind, and a side nobody showed it is a side it invents.
+     */
+    const sheets = car!.sheets ?? {};
+    const sheeted = CAR_VIEWS.filter((v) => sheets[v]?.storagePath);
+    if (sheeted.length) {
+      for (const view of sheeted) {
+        const img = sheets[view]!;
+        attachments.push({
+          ...toDealerPhoto(img, 'car-model'),
+          angle: view === 'features' ? undefined : (view as CarAngle),
+          label:
+            view === 'features'
+              ? `${car!.brand} ${car!.model} — its details, close up and named`
+              : `${car!.brand} ${car!.model} — every photograph of the ${view}${
+                  paint ? '; shape only, the paint may differ' : ''
+                }`,
+        });
+      }
+    } else {
+      // Nothing has been gathered into sheets yet: the individual shots, as before.
+      // Each keeps the part of the car it shows, so a scene about the cabin is
+      // matched to a cabin photo — or flagged when there is none.
+      const heroVariant = car!.variants.find((v) => v.name === project.carVariant);
+      const angleOf = (img: StoredImage): CarAngle | undefined =>
+        ANGLE_ORDER.find((a) =>
+          [...(heroVariant?.images?.[a] ?? []), ...(car!.images?.[a] ?? [])].some(
+            (x) => x.storagePath === img.storagePath,
+          ),
+        );
+      for (const img of hero.shots) {
+        const photo = { ...toDealerPhoto(img, 'car-model'), angle: angleOf(img) };
+        // Said in the label because the label is what the prompt cites beside each
+        // file: the model must take shape, not paint, from these.
+        attachments.push(
+          paint && hero.swatch ? { ...photo, label: `${photo.label} — shape reference; its paint may differ` } : photo,
+        );
+      }
     }
     for (const v of vehicles.slice(1)) {
       const first = carReferenceImages(v)[0];

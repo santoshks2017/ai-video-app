@@ -114,6 +114,7 @@ import {
 import { syncVehicleModel, listBrandModels, title } from './carSync.js';
 import { seePhotos } from './vision.js';
 import { syncOemModel, OemSyncError } from './oemSync.js';
+import { syncGoogleModel } from './googleSync.js';
 import { planFromBrief, PlanError, type PlanContext } from './planBrief.js';
 import { importPlace, PlacesError } from './places.js';
 import { putCredentialKey, getCredentialKey, deleteCredentialKey } from './credentials.js';
@@ -834,8 +835,37 @@ app.post<{
     id?: string;
   };
 }>('/api/cars/sync', async (req, reply) => {
-  const source: VehicleDataSource = req.body?.source === 'oem' ? 'oem' : 'cardekho';
+  const asked = req.body?.source;
+  const source: VehicleDataSource = asked === 'oem' || asked === 'google' ? asked : 'cardekho';
   const held = req.body?.id ? await getOne<Record<string, any>>('cars', req.body.id) : null;
+
+  // Google: ask which pages carry this model's photographs, then read them the
+  // way a manufacturer's page is read.
+  if (source === 'google') {
+    const query = req.body?.query?.trim() || [held?.brand, held?.model].filter(Boolean).join(' ');
+    if (!query) {
+      return reply.code(400).send({ code: 'bad-request', message: 'Name the model to look for.' });
+    }
+    try {
+      const profile = await syncGoogleModel({
+        query,
+        kind: req.body?.kind ?? held?.kind ?? 'car',
+        id: held?.id,
+        brand: held?.brand,
+        model: held?.model,
+        apiKey: (await scriptKey()) ?? '',
+      });
+      const prior = held ?? (await getOne<{ createdAt?: number }>('cars', profile.id));
+      return await upsert('cars', {
+        ...profile,
+        oemUrl: held?.oemUrl,
+        createdAt: prior?.createdAt ?? profile.createdAt,
+      });
+    } catch (e) {
+      const err = e as OemSyncError;
+      return reply.code(err.status ?? 502).send({ code: err.code ?? 'google-sync-failed', message: err.message });
+    }
+  }
 
   if (source === 'oem') {
     const url = (req.body?.url ?? held?.oemUrl ?? '').trim();

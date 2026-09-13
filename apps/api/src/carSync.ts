@@ -12,9 +12,11 @@
  */
 
 import { putRef } from './store.js';
-import { seePhotos } from './vision.js';
-import { brandMatches } from '@ava/shared';
+import { seePhotos, type SeenPhoto } from './vision.js';
+import { contactSheet } from './post.js';
+import { brandMatches, CAR_VIEWS } from '@ava/shared';
 import type {
+  CarView,
   CarSpecs,
   VehicleKind, CarAngle, CarColour, CarModelProfile, CarVariant, StoredImage } from '@ava/shared';
 
@@ -60,6 +62,19 @@ function classify(url: string): CarAngle | 'detail' {
   if (/left-side-view|right-side-view|side-view/.test(u)) return 'side';
   if (/exterior-image-\d/.test(u)) return 'side';
   return 'detail';
+}
+
+/** "front-grill---logo-98.jpg" → "front grill logo" — the caption on a feature tile. */
+function prettyShot(url: string): string {
+  const file = (url.split('/').pop() ?? '').replace(/\.(jpe?g|png|webp)$/i, '');
+  return (
+    file
+      .replace(/-\d+$/, '')
+      .replace(/-{2,}/g, '-')
+      .replace(/-/g, ' ')
+      .trim()
+      .slice(0, 28) || 'the vehicle'
+  );
 }
 
 const resScore = (u: string): number => {
@@ -515,84 +530,144 @@ export async function syncVehicleModel(input: string, opts: SyncOptions = {}): P
     .filter((u) => (kind === 'car' ? modelRe.test(u) : true))
     .sort((a, b) => resScore(b) - resScore(a));
 
-  const picked: Record<string, string[]> = {};
-  if (kind === 'bike') {
-    // classify() reads the angle out of a car filename; bike filenames are
-    // opaque hashes, so every bike URL fell through to "detail" and was
-    // discarded — which is why bikes synced with zero images. Bikes are taken
-    // in the order the source lists them and spread across the buckets the rest
-    // of the app expects, with the schema.org list preferred because it is
-    // scoped to this model.
-    const pool = (bikeImages.length ? bikeImages : candidates).filter((u) => !/\/106X44\//.test(u));
-    const buckets: CarAngle[] = ['front', 'side', 'rear', 'interior'];
-    pool.slice(0, 6).forEach((u, i) => {
-      const a = buckets[i % buckets.length]!;
-      (picked[a] ??= []).push(u);
-    });
-  }
-  for (const u of kind === 'bike' ? [] : candidates) {
-    const a = classify(u);
-    if (a === 'detail') continue;
-    picked[a] ??= [];
-    if (picked[a]!.length >= want[a]) continue;
-    if (picked[a]!.some((x) => sameShot(x, u))) continue;
-    picked[a]!.push(u);
-  }
-
   /*
-   * What the filename says, then what the photograph says.
+   * Everything the source publishes, not two photos a side.
    *
-   * CarDekho's names are a guess: in the XUV 3XO set a file named for the front
-   * held a side profile, and one named for the side held the front. Filing a
-   * side shot under "front" is worse than having no front at all — the app then
-   * captions it FRONT and tells the model that is what the front looks like.
-   * So the pool is downloaded first and every picture is looked at; the name is
-   * only the fallback when there is no key or the call fails.
+   * CarDekho's picture page for one model carries ninety-odd photographs — every
+   * angle, the cabin from six positions, and a close-up of each feature. Keeping
+   * two per side threw away three-quarters of what the car actually looks like,
+   * and a view the model has not seen is a view it invents.
+   *
+   * So the whole page is taken, every picture is looked at, and each is filed
+   * under what it shows. What reaches the video model is then one sheet per view
+   * rather than one photograph per slot.
    */
-  const pool: { url: string; guess: CarAngle; bytes: Buffer }[] = [];
-  for (const [angle, urls] of Object.entries(picked)) {
-    for (const u of urls) {
-      const bytes = await fetchImage(u);
-      if (bytes) pool.push({ url: u, guess: angle as CarAngle, bytes });
+  const MAX_PHOTOS = 36;
+  const pool: { url: string; guess: CarAngle | 'detail'; bytes: Buffer; name: string }[] = [];
+
+  const urls: string[] = [];
+  if (kind === 'bike') {
+    const bikePool = (bikeImages.length ? bikeImages : candidates).filter((u) => !/\/106X44\//.test(u));
+    urls.push(...bikePool);
+  } else {
+    urls.push(...candidates);
+  }
+  // The best copy of each distinct shot, and never the same shot twice.
+  const bestOf = new Map<string, string>();
+  for (const u of urls) {
+    const key = u.replace(/\/\d+x\d+\//, '/').split('/').slice(-2).join('/');
+    const held = bestOf.get(key);
+    if (!held || resScore(u) > resScore(held)) bestOf.set(key, u);
+  }
+  /*
+   * Taken round-robin across what the filenames suggest, not in page order.
+   *
+   * CarDekho lists every exterior shot before the first interior one, so taking
+   * the first thirty-odd in order gave a set with no cabin in it at all. Going
+   * round the buckets means every view is covered before the budget is spent on
+   * a nineteenth close-up.
+   */
+  const groups = new Map<string, string[]>();
+  for (const u of bestOf.values()) {
+    const g = kind === 'bike' ? 'detail' : classify(u);
+    (groups.get(g) ?? groups.set(g, []).get(g)!).push(u);
+  }
+  const queues = [...groups.values()];
+  const order: string[] = [];
+  for (let i = 0; order.length < MAX_PHOTOS; i++) {
+    let moved = false;
+    for (const q of queues) {
+      if (i >= q.length) continue;
+      order.push(q[i]!);
+      moved = true;
+      if (order.length >= MAX_PHOTOS) break;
     }
+    if (!moved) break;
+  }
+  for (const u of order) {
+    const bytes = await fetchImage(u);
+    if (bytes) pool.push({ url: u, guess: kind === 'bike' ? 'detail' : classify(u), bytes, name: prettyShot(u) });
   }
 
   const subject = `${brand} ${model}`;
-  const seen = opts.apiKey ? await seePhotos(pool.map((p) => ({ bytes: p.bytes })), subject, opts.apiKey) : [];
   const photoNotes: string[] = [];
+  const seen: SeenPhoto[] = [];
+  if (opts.apiKey) {
+    // Sixteen at a time is what the vision call takes comfortably.
+    for (let i = 0; i < pool.length; i += 16) {
+      const batch = pool.slice(i, i + 16);
+      const look = await seePhotos(batch.map((p) => ({ bytes: p.bytes })), subject, opts.apiKey);
+      seen.push(...(look.length === batch.length ? look : batch.map(() => ({ view: 'other' as const, isVehicle: true }))));
+    }
+  }
 
-  const byAngle: Record<string, { url: string; bytes: Buffer }[]> = {};
+  /** Every photo that belongs to a view, in the order the source listed them. */
+  const byView: Record<CarView, { bytes: Buffer; name: string }[]> = {
+    front: [], side: [], rear: [], interior: [], features: [],
+  };
+  let dropped = 0;
   pool.forEach((p, i) => {
     const look = seen[i];
-    // A picture that is not this vehicle is dropped outright, however it was named.
     if (look && !look.isVehicle) {
-      photoNotes.push(`dropped a photo that is not the ${subject}${look.note ? ` (${look.note})` : ''}`);
+      dropped += 1;
       return;
     }
-    const view = look && look.view !== 'other' && look.view !== 'detail' ? look.view : null;
-    if (look && view && view !== p.guess) {
-      photoNotes.push(`a photo named ${p.guess} is really the ${view}`);
-    }
-    if (look && !view) return; // a close-up of one part teaches nothing about a side
-    const angle = (view ?? p.guess) as CarAngle;
-    (byAngle[angle] ??= []).push({ url: p.url, bytes: p.bytes });
+    const looked = look && look.view !== 'other' ? look.view : null;
+    if (looked && looked !== p.guess) photoNotes.push(`a photo named ${p.guess} is really the ${looked}`);
+    const view: CarView = ((looked ?? p.guess) === 'detail' ? 'features' : (looked ?? p.guess)) as CarView;
+    (byView[view] ??= []).push({ bytes: p.bytes, name: p.name });
   });
+  if (dropped) photoNotes.push(`dropped ${dropped} that are not the ${subject}`);
 
+  /* ---- the angle set, and one sheet per view ---- */
   const images: Partial<Record<CarAngle, StoredImage[]>> = {};
-  for (const [angle, shots] of Object.entries(byAngle)) {
-    const list: StoredImage[] = [];
-    for (const [i, shot] of shots.slice(0, want[angle as CarAngle] ?? 2).entries()) {
-      const { refId, storagePath } = await putRef(`${id}-${angle}-${i + 1}.jpg`, 'image/jpeg', shot.bytes);
-      list.push({
+  const sheets: Partial<Record<CarView, StoredImage>> = {};
+
+  for (const view of CAR_VIEWS) {
+    const shots = byView[view] ?? [];
+    if (!shots.length) continue;
+
+    // The individual photographs, so a scene can still be matched to one.
+    if (view !== 'features') {
+      const keep = shots.slice(0, want[view as CarAngle] ?? 2);
+      const list: StoredImage[] = [];
+      for (const [i, shot] of keep.entries()) {
+        const filename = `${id}-${view}-${i + 1}.jpg`;
+        const { refId, storagePath } = await putRef(filename, 'image/jpeg', shot.bytes);
+        list.push({
+          refId,
+          storagePath,
+          label: `${subject} — ${view}`,
+          filename,
+          url: `/api/refs/${refId}/${filename}`,
+          angle: view as CarAngle,
+        });
+      }
+      if (list.length) images[view as CarAngle] = list;
+    }
+
+    // The sheet: every shot of this view in one image. Feature close-ups carry
+    // their name, because "the boot" and "the sunroof" are different things;
+    // shots of one side do not, because the caption would be the same on each.
+    const sheetBytes = await contactSheet(
+      shots.slice(0, 9).map((sh) => ({ bytes: sh.bytes, label: sh.name })),
+      { labels: view === 'features', max: 9, cell: 480 },
+    ).catch(() => null);
+    if (sheetBytes) {
+      const filename = `${id}-sheet-${view}.jpg`;
+      const { refId, storagePath } = await putRef(filename, 'image/jpeg', sheetBytes);
+      sheets[view] = {
         refId,
         storagePath,
-        label: kind === 'bike' ? `${brand} ${model} — photo` : `${brand} ${model} — ${angle}`,
-        filename: `${id}-${angle}-${i + 1}.jpg`,
-        url: `/api/refs/${refId}/${id}-${angle}-${i + 1}.jpg`,
-        angle: angle as CarAngle,
-      });
+        label:
+          view === 'features'
+            ? `${subject} — its features, each named`
+            : `${subject} — the ${view}, ${Math.min(shots.length, 9)} photographs`,
+        filename,
+        url: `/api/refs/${refId}/${filename}`,
+        angle: view === 'features' ? undefined : (view as CarAngle),
+      };
     }
-    if (list.length) images[angle as CarAngle] = list;
   }
 
   /* ---- colours ---- */
@@ -636,8 +711,12 @@ export async function syncVehicleModel(input: string, opts: SyncOptions = {}): P
     images,
     colours,
     variants,
+    sheets,
     specs,
     highlights,
+    // Pros and cons: CarDekho draws that block in the browser, so it is not in
+    // the page this fetches. The fields stay on the record for a source that
+    // publishes them, and for a copywriter to fill by hand.
     sourceUrl,
     syncedAt: now,
     syncStatus,
@@ -646,6 +725,9 @@ export async function syncVehicleModel(input: string, opts: SyncOptions = {}): P
         syncStatus === 'ok' ? '' : `Only ${angles.length} angle(s) found — upload the missing views manually.`,
         // What looking at the photographs changed, so a mislabelled set is visible
         // rather than silently believed.
+        `Kept ${pool.length} photograph${pool.length === 1 ? '' : 's'} in ${
+          Object.keys(sheets).length
+        } sheet${Object.keys(sheets).length === 1 ? '' : 's'}.`,
         photoNotes.length ? `Checked the photos: ${[...new Set(photoNotes)].join('; ')}.` : '',
       ]
         .filter(Boolean)

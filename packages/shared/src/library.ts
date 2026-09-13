@@ -52,12 +52,16 @@ export interface ActorProfile {
 
 export type CarAngle = 'front' | 'side' | 'rear' | 'interior';
 
+/** The views a vehicle's photographs are gathered into, sheet by sheet. */
+export type CarView = CarAngle | 'features';
+export const CAR_VIEWS: CarView[] = ['front', 'side', 'rear', 'interior', 'features'];
+
 /**
  * Where a vehicle's images and specs come from. CarDekho is quick and uniform;
  * the manufacturer's own site is what a dealer can show a client who asks where
  * the pictures came from. Either can be re-synced at any time.
  */
-export type VehicleDataSource = 'cardekho' | 'oem';
+export type VehicleDataSource = 'cardekho' | 'oem' | 'google';
 
 export interface CarColour {
   name: string;
@@ -153,6 +157,19 @@ export interface CarModelProfile {
   bodyType?: string;
   /** Model-level angle set — the fallback every variant inherits. */
   images: Partial<Record<CarAngle, StoredImage[]>>;
+  /**
+   * One sheet per view: every photograph of the front in a single image, every
+   * photograph of the side in another, and so on.
+   *
+   * A video model is given a handful of reference slots. Spending them on one
+   * photo each meant three-quarters of what the source publishes never reached
+   * it — and a view it has not seen is a view it invents. A sheet spends one
+   * slot and carries every shot of that side.
+   */
+  sheets?: Partial<Record<CarView, StoredImage>>;
+  /** What the source says is good and bad about it, for the copywriter. */
+  pros?: string[];
+  cons?: string[];
   colours: CarColour[];
   variants: CarVariant[];
   /** Headline numbers, for the copywriter. */

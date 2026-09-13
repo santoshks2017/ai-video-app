@@ -16,7 +16,9 @@
  */
 
 import { putRef } from './store.js';
+import { contactSheet } from './post.js';
 import { resolveTextModel } from './script.js';
+import { CAR_VIEWS, type CarView } from '@ava/shared';
 import type {
   CarAngle,
   CarColour,
@@ -59,6 +61,19 @@ async function fetchText(url: string): Promise<string> {
     if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
   }
   return '';
+}
+
+/** "front-three-quarter.jpg" → "front three quarter", for a feature tile's caption. */
+function shotName(url: string): string {
+  const file = (url.split('/').pop() ?? '').split('?')[0] ?? '';
+  return (
+    file
+      .replace(/\.(jpe?g|png|webp)$/i, '')
+      .replace(/[-_]+/g, ' ')
+      .replace(/\d{3,}/g, '')
+      .trim()
+      .slice(0, 28) || 'the vehicle'
+  );
 }
 
 async function fetchImage(url: string): Promise<{ bytes: Buffer; mime: string } | null> {
@@ -510,7 +525,9 @@ export async function syncOemModel(input: OemSyncInput): Promise<CarModelProfile
   const id = input.id ?? `oem__${slugify(brand)}__${slugify(model)}`;
   const apiKey = input.apiKey ?? '';
 
-  const seen = await lookAtPhotos(facts.candidates.slice(0, 24), subject, apiKey);
+  // Everything the page carries, not the first two dozen: a sheet per view can
+  // hold nine photographs, and a view nobody showed the model is one it invents.
+  const seen = await lookAtPhotos(facts.candidates.slice(0, 36), subject, apiKey);
 
   /* ---- angle images ---- */
   const want: Record<CarAngle, number> = {
@@ -520,14 +537,43 @@ export async function syncOemModel(input: OemSyncInput): Promise<CarModelProfile
     interior: input.perAngle?.interior ?? 2,
   };
   const images: Partial<Record<CarAngle, StoredImage[]>> = {};
-  for (const angle of ['front', 'side', 'rear', 'interior'] as CarAngle[]) {
-    const picks = seen.filter((s) => s.vehicle && s.view === angle).slice(0, want[angle]);
-    const list: StoredImage[] = [];
-    for (let i = 0; i < picks.length; i++) {
-      const img = await store(picks[i]!.url, `${subject} — ${angle}`, `${id}-${angle}-${i + 1}.jpg`);
-      if (img) list.push(img);
+  const sheets: Partial<Record<CarView, StoredImage>> = {};
+  for (const view of CAR_VIEWS) {
+    // "features" gathers the close-ups the page carries of one part at a time.
+    const picks = seen.filter((s) => s.vehicle && (view === 'features' ? s.view === 'detail' : s.view === view));
+    if (!picks.length) continue;
+
+    if (view !== 'features') {
+      const list: StoredImage[] = [];
+      for (const [i, pick] of picks.slice(0, want[view as CarAngle]).entries()) {
+        const img = await store(pick.url, `${subject} — ${view}`, `${id}-${view}-${i + 1}.jpg`);
+        if (img) list.push({ ...img, angle: view as CarAngle });
+      }
+      if (list.length) images[view as CarAngle] = list;
     }
-    if (list.length) images[angle] = list;
+
+    // One sheet per view: every photograph of that side in a single reference.
+    const tiles: { bytes: Buffer; label: string }[] = [];
+    for (const pick of picks.slice(0, 9)) {
+      const got = await fetchImage(pick.url);
+      if (got) tiles.push({ bytes: got.bytes, label: shotName(pick.url) });
+    }
+    const sheetBytes = await contactSheet(tiles, { labels: view === 'features', max: 9, cell: 480 }).catch(() => null);
+    if (sheetBytes) {
+      const filename = `${id}-sheet-${view}.jpg`;
+      const { refId, storagePath } = await putRef(filename, 'image/jpeg', sheetBytes);
+      sheets[view] = {
+        refId,
+        storagePath,
+        label:
+          view === 'features'
+            ? `${subject} — its details, close up and named`
+            : `${subject} — every photograph of the ${view}`,
+        filename,
+        url: `/api/refs/${refId}/${filename}`,
+        angle: view === 'features' ? undefined : (view as CarAngle),
+      };
+    }
   }
 
   /* ---- whatever the structured data left out ---- */
@@ -582,6 +628,7 @@ export async function syncOemModel(input: OemSyncInput): Promise<CarModelProfile
     year: facts.year,
     bodyType: facts.bodyType,
     images,
+    sheets,
     colours,
     variants: [...byName.values()],
     specs,

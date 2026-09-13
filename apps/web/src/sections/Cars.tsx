@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CarModelProfile, CarAngle, StoredImage, BrandEntry, VehicleDataSource } from '@ava/shared';
 import { BRAND_CATALOGUE } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
@@ -39,6 +39,9 @@ export function CarsSection() {
   const [sourceBusy, setSourceBusy] = useState('');
   const [sourceNote, setSourceNote] = useState('');
   const [checkBusy, setCheckBusy] = useState(false);
+  /** Rebuilding the whole library, one vehicle at a time, with a way out. */
+  const [rebuild, setRebuild] = useState<{ done: number; total: number; now: string } | null>(null);
+  const stopRebuild = useRef(false);
 
   /**
    * Look at this vehicle's photos and file each under what it shows. CarDekho
@@ -173,7 +176,13 @@ export function CarsSection() {
       return;
     }
     setSourceNote('');
-    setSourceBusy(source === 'oem' ? 'Reading the manufacturer page…' : 'Syncing from CarDekho…');
+    setSourceBusy(
+      source === 'oem'
+        ? 'Reading the manufacturer page…'
+        : source === 'google'
+          ? 'Asking Google which pages carry this model…'
+          : 'Syncing from CarDekho…',
+    );
     const r = await post<CarModelProfile>('/api/cars/sync', {
       id: active.id,
       source,
@@ -189,12 +198,38 @@ export function CarsSection() {
     setActiveId(r.id);
     const angles = Object.keys(r.images ?? {}).length;
     setSourceNote(
-      `Synced from ${r.source === 'oem' ? 'the manufacturer site' : 'CarDekho'}: ${angles} angle set${
+      `Synced from ${
+        r.source === 'oem' ? 'the manufacturer site' : r.source === 'google' ? 'the pages Google found' : 'CarDekho'
+      }: ${angles} angle set${
         angles === 1 ? '' : 's'
       }, ${r.colours.length} colour${r.colours.length === 1 ? '' : 's'}, ${r.variants.length} variant${
         r.variants.length === 1 ? '' : 's'
       }.${r.syncNote ? ` ${r.syncNote}` : ''}`,
     );
+  };
+
+  /**
+   * Pull every photograph again, for every vehicle in the library.
+   *
+   * Everything synced before the sheets existed holds two photos a side and no
+   * cabin at all. This walks the library one vehicle at a time — slowly, because
+   * each one downloads dozens of photographs and looks at every one — and can be
+   * stopped at any point without losing what it has already done.
+   */
+  const rebuildAll = async (list: CarModelProfile[]) => {
+    stopRebuild.current = false;
+    for (const [i, c] of list.entries()) {
+      if (stopRebuild.current) break;
+      setRebuild({ done: i, total: list.length, now: `${c.brand} ${c.model}` });
+      await post<CarModelProfile>('/api/cars/sync', {
+        id: c.id,
+        source: c.source ?? 'cardekho',
+        url: c.source === 'oem' ? c.oemUrl : undefined,
+        kind: c.kind ?? 'car',
+      }).catch(() => null);
+      await refresh();
+    }
+    setRebuild(null);
   };
 
   const patchActive = async (fields: Partial<CarModelProfile>) => {
@@ -335,6 +370,26 @@ export function CarsSection() {
         </div>
       </div>
 
+      {/* Everything in the library, pulled again — every photo, in sheets. */}
+      {rebuild ? (
+        <div className="check warn">
+          <span className="icon">⟳</span>
+          <span>
+            Rebuilding {rebuild.done + 1} of {rebuild.total} — {rebuild.now}. Each one downloads every photograph
+            and looks at it, so this takes a while.
+          </span>
+          <button
+            className="btn small"
+            type="button"
+            onClick={() => {
+              stopRebuild.current = true;
+            }}
+          >
+            Stop
+          </button>
+        </div>
+      ) : null}
+
       {/* What is being browsed, right above the thing being browsed. */}
       <div className="browse-switch">
         <div className="seg">
@@ -359,6 +414,25 @@ export function CarsSection() {
           {brandRows.reduce((n, b) => n + b.models.length, 0)} {kind === 'bike' ? 'bikes & scooters' : 'cars'} in the
           library
         </span>
+        <button
+          className="btn ghost small"
+          type="button"
+          disabled={Boolean(rebuild)}
+          title="Pull every photograph again for every vehicle here, and gather them into sheets"
+          onClick={() => {
+            const list = brandRows.flatMap((b) => b.models);
+            if (
+              window.confirm(
+                `Pull every photograph again for all ${list.length} ${
+                  kind === 'bike' ? 'bikes & scooters' : 'cars'
+                }?\n\nEach one downloads dozens of photos and looks at every one, so it takes a few minutes per vehicle and spends a little on the vision calls. You can stop it at any point.`,
+              )
+            )
+              void rebuildAll(list);
+          }}
+        >
+          Rebuild every photo set
+        </button>
       </div>
 
       {/* Brand, then model, then the vehicle — each column narrowing the last. */}
@@ -520,7 +594,13 @@ export function CarsSection() {
                 <Section
                   sub
                   title="Where its photos come from"
-                  step={active.source === 'oem' ? 'The manufacturer site' : 'CarDekho'}
+                  step={
+                    active.source === 'oem'
+                      ? 'The manufacturer site'
+                      : active.source === 'google'
+                        ? 'Found through Google'
+                        : 'CarDekho'
+                  }
                 >
                   <div className="source-head">
                     <b>Source: {active.source === 'oem' ? 'manufacturer website' : 'CarDekho'}</b>

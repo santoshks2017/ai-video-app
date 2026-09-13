@@ -737,12 +737,14 @@ export async function cardPng(
  */
 export async function contactSheet(
   tiles: { bytes: Buffer; label: string }[],
-  opts: { cell?: number } = {},
+  opts: { cell?: number; labels?: boolean; max?: number } = {},
 ): Promise<Buffer | null> {
-  const items = tiles.filter((t) => t.bytes?.length).slice(0, 6);
+  const items = tiles.filter((t) => t.bytes?.length).slice(0, opts.max ?? 6);
   if (items.length < 2) return null;
   const CELL = opts.cell ?? 512;
-  const LABEL = Math.round(CELL * 0.1);
+  // A sheet of one view needs no captions — every tile is the same thing from a
+  // different distance, and a caption on each is noise the model has to read.
+  const LABEL = opts.labels === false ? 0 : Math.round(CELL * 0.1);
   const cols = items.length <= 2 ? items.length : items.length <= 4 ? 2 : 3;
   const rows = Math.ceil(items.length / cols);
 
@@ -753,6 +755,12 @@ export async function contactSheet(
         .toBuffer()
         .catch(() => null);
       if (!art) return null;
+      if (!LABEL) {
+        return sharp({ create: { width: CELL, height: CELL, channels: 3, background: '#ffffff' } })
+          .composite([{ input: art, top: 0, left: 0 }])
+          .jpeg({ quality: 90 })
+          .toBuffer();
+      }
       const caption = Buffer.from(
         `<svg xmlns="http://www.w3.org/2000/svg" width="${CELL}" height="${LABEL}">
           <rect width="${CELL}" height="${LABEL}" fill="#111111"/>

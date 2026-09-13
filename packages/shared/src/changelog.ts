@@ -18,10 +18,26 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '3.0';
+export const APP_VERSION = '3.1';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '3.1',
+    date: '2026-09-13',
+    title: 'The photograph decides which side it shows',
+    changes: [
+      'The wrong face on the right car, found and fixed. The XUV 3XO in the library was always an XUV 3XO — what was wrong was which side each photo was filed under. CarDekho names its files by angle, "front-left-side-47.jpg", and the app believed those names: in that set the file named for the front held a full side profile, and the one named for the side held the front. The app then captioned a contact-sheet tile FRONT over a side profile and told the model that was the front, so the front was the one view it never saw — and what it invents for a Mahindra XUV is the XUV300 it has seen far more of. Right rear, wrong face, an XUV310 badge in one frame.',
+      'Every photo is now looked at when a vehicle is synced: a vision pass files each under what it actually shows, drops anything that is not that vehicle, and says in the sync note what it moved.',
+      'Vehicles already in the library have a "Check the photos" button that re-files what is stored without downloading anything — worth running on every model synced before today. Each photo also carries a dropdown, so a wrong one can be corrected by hand in two seconds.',
+      'A contact-sheet tile is captioned with its angle only when the angle is known. Asserting a front we are not sure of is worse than saying nothing.',
+      'Scenes can be rearranged. Every scene row has an up and a down, and the film is re-timed and re-packed after every move: a scene pushed into a part with no room pushes the rest into the next part, and no part ever exceeds the model\u2019s clip length. Scenes can also be written by hand, at the end or below any scene, and a scene you wrote is never one of the ones dropped to make the film fit.',
+      'The board and the libraries hold still. On Projects the search, the filters and the four column headings stay where they are while the cards scroll under them, and each column scrolls on its own. Clients and Actors do the same: the list, the record and the page each keep their own scroll.',
+      'A client\u2019s campaigns moved out of the middle of its details into a column beside it, and an actor now has the same — the dealerships they front, and how many films for each.',
+      'An admin can hide a run. A generation that failed on depleted credits, or was made twice by mistake, stops counting towards the project\u2019s spend and the person\u2019s total, and disappears from everyone else\u2019s history. Nothing is deleted: an admin still sees it, marked, and can put it back.',
+      'What\u2019s new folds — one release open at a time, the current one to begin with.',
+    ],
+  },
   {
     version: '3.0',
     date: '2026-09-13',

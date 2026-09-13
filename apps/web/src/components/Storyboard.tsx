@@ -33,11 +33,21 @@ function Lock({ on, what, onToggle }: { on: boolean; what: string; onToggle: () 
       type="button"
       className={`sb-lock${on ? ' on' : ''}`}
       aria-pressed={on}
-      title={on ? `Locked — a rewrite leaves this ${what} alone. Click to unlock.` : `Lock this ${what} so a rewrite cannot change it`}
+      title={
+        on
+          ? `Locked — a rewrite leaves this ${what} alone. Click to unlock.`
+          : `Unlocked — a rewrite may change this ${what}. Click to lock it.`
+      }
       aria-label={on ? `Unlock this ${what}` : `Lock this ${what}`}
       onClick={onToggle}
     >
-      {on ? '\u{1F512}' : '\u{1F513}'}
+      {/* Drawn rather than an emoji: 🔒 and 🔓 are the same yellow padlock at this
+          size and nobody could tell which was which. Closed, the shackle sits over
+          the body; open, it is hinged clear of it. */}
+      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden focusable="false">
+        <rect x="3" y="7" width="10" height="7" rx="1.6" />
+        <path d={on ? 'M5.4 7V4.9a2.6 2.6 0 0 1 5.2 0V7' : 'M10.6 7V4.9a2.6 2.6 0 0 1 5.2 0'} />
+      </svg>
     </button>
   );
 }
@@ -969,6 +979,7 @@ export function Storyboard({
                       </div>
                     </td>
                     <td>
+                      <div className="sb-visual">
                       <SceneFrameCell
                         frame={ov.frame}
                         busy={drawing.includes(key)}
@@ -984,6 +995,7 @@ export function Storyboard({
                         visual={visuals[gi]!}
                         onPick={(ref) => editScene(key, { ref })}
                       />
+                      </div>
                     </td>
                   </tr>,
                 );

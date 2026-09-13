@@ -897,7 +897,10 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             </div>
             {selectedCar && (
               <div className="row2">
-                <Field label="Variant">
+                <Field
+                  label="Variant"
+                  hint="Only for the facts the script may quote — the price, the fuel, the gearbox. The photographs the film is built on always come from the model's own library, whichever variant is picked."
+                >
                   <select
                     value={project.carVariant ?? ''}
                     onChange={(e) => set({ carVariant: e.target.value || undefined })}

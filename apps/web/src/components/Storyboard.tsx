@@ -41,13 +41,21 @@ function Lock({ on, what, onToggle }: { on: boolean; what: string; onToggle: () 
       aria-label={on ? `Unlock this ${what}` : `Lock this ${what}`}
       onClick={onToggle}
     >
-      {/* Drawn rather than an emoji: 🔒 and 🔓 are the same yellow padlock at this
-          size and nobody could tell which was which. Closed, the shackle sits over
-          the body; open, it is hinged clear of it. */}
-      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden focusable="false">
-        <rect x="3" y="7" width="10" height="7" rx="1.6" />
-        <path d={on ? 'M5.4 7V4.9a2.6 2.6 0 0 1 5.2 0V7' : 'M10.6 7V4.9a2.6 2.6 0 0 1 5.2 0'} />
-      </svg>
+      {/* Two different objects, not two states of one. An open padlock and a shut
+          one are the same drawing with a hinge moved, and at this size nobody can
+          tell them apart — 🔒 and 🔓 could not be told apart either. A padlock
+          means shut; a key means it is yours to change. */}
+      {on ? (
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden focusable="false">
+          <rect x="3" y="7" width="10" height="7" rx="1.6" />
+          <path d="M5.4 7V4.9a2.6 2.6 0 0 1 5.2 0V7" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden focusable="false">
+          <circle cx="5" cy="8" r="2.9" />
+          <path d="M7.9 8h6.4M11.3 8v2.5M13.5 8v1.9" />
+        </svg>
+      )}
     </button>
   );
 }

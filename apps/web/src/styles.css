@@ -1490,8 +1490,8 @@ code {
   transition: opacity 0.12s ease, color 0.12s ease;
 }
 .sb-lock svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
-/* Closed, the body is filled in too — a solid shape reads as shut at a glance,
-   where an outline of the same drawing does not. */
+/* The shut padlock is filled in: a solid shape reads as closed at a glance. The
+   key stays an outline — it is a different object, not a lighter lock. */
 .sb-lock.on svg rect { fill: currentColor; }
 .sb-field:hover .sb-lock { opacity: 0.75; }
 .sb-lock:hover { opacity: 1; color: var(--accent); }

@@ -527,38 +527,18 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   }, [brief, project, built]);
 
   /**
-   * Which lock a storyboard edit belongs to. Everything else on a scene — the
-   * reference photo, the frame, skipping it — is not writing, so it locks nothing.
-   */
-  const LOCK_OF: Record<string, LockField> = {
-    dialogue: 'dialogue',
-    shot: 'shot',
-    card: 'card',
-    cardSub: 'card',
-  };
-
-  /**
-   * A storyboard edit made by hand, with the lock that follows from it.
+   * A storyboard edit, written straight through.
    *
-   * Typing in a field locks it: a line you wrote yourself is by definition one you
-   * meant, and a rewrite that quietly replaces it is the thing worth preventing.
-   * Clearing a field back to the template's own words unlocks it again — that is
-   * not writing, it is giving the field back.
+   * Editing used to lock the field it touched, on the reasoning that a line you
+   * typed is one you meant. That stops making sense once a lock actually locks:
+   * the field would go read-only under the cursor mid-sentence. A lock is now only
+   * ever put on and taken off by hand — closed means read-only here and untouched
+   * by a rewrite, open means neither.
    */
   const editScene = (key: string, patch: Record<string, unknown>): void => {
     if (!project) return;
     const edits = keyedEdits(project.sceneEdits);
-    const was = edits[key] ?? {};
-    let locked = [...(was.locked ?? [])];
-    for (const [field, value] of Object.entries(patch)) {
-      const lock = LOCK_OF[field];
-      if (!lock) continue;
-      const given = value === undefined || value === '';
-      if (given) locked = locked.filter((l) => l !== lock);
-      else if (!locked.includes(lock)) locked.push(lock);
-    }
-    const next = { ...was, ...patch, ...(locked.length ? { locked } : { locked: undefined }) };
-    set({ sceneEdits: { ...edits, [key]: next } });
+    set({ sceneEdits: { ...edits, [key]: { ...edits[key], ...patch } } });
   };
 
   /** Lock or unlock one field on one scene. */

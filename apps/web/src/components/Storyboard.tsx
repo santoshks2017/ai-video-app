@@ -35,8 +35,8 @@ function Lock({ on, what, onToggle }: { on: boolean; what: string; onToggle: () 
       aria-pressed={on}
       title={
         on
-          ? `Locked — a rewrite leaves this ${what} alone. Click to unlock.`
-          : `Unlocked — a rewrite may change this ${what}. Click to lock it.`
+          ? `Locked — this ${what} cannot be typed in, and a rewrite leaves it alone. Click to unlock and edit it.`
+          : `Open — this ${what} can be edited, and a rewrite may replace it. Click to lock it shut.`
       }
       aria-label={on ? `Unlock this ${what}` : `Lock this ${what}`}
       onClick={onToggle}
@@ -101,12 +101,15 @@ function AutoTextarea({
   className,
   placeholder,
   minRows = 2,
+  locked = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   className?: string;
   placeholder?: string;
   minRows?: number;
+  /** Shut: no caret, no typing, until the padlock beside it is opened. */
+  locked?: boolean;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -144,10 +147,13 @@ function AutoTextarea({
   return (
     <textarea
       ref={ref}
-      className={className}
+      className={`${className ?? ''}${locked ? ' locked' : ''}`.trim() || undefined}
       rows={minRows}
       value={value}
       placeholder={placeholder}
+      readOnly={locked}
+      tabIndex={locked ? -1 : undefined}
+      aria-readonly={locked || undefined}
       onChange={(e) => onChange(e.target.value)}
     />
   );
@@ -163,10 +169,12 @@ function AutoTextarea({
 function CaptionEditor({
   beat,
   ov,
+  locked = false,
   onChange,
 }: {
   beat: Beat;
   ov: SceneEdit;
+  locked?: boolean;
   onChange: (patch: SceneEdit) => void;
 }) {
   const card = sceneCard(beat, ov);
@@ -181,6 +189,7 @@ function CaptionEditor({
     <div className="sb-caption">
       <AutoTextarea
         minRows={1}
+        locked={locked}
         value={headline}
         placeholder="No caption on this scene"
         onChange={(v) => onChange({ card: v })}
@@ -191,13 +200,14 @@ function CaptionEditor({
       {card && (
         <AutoTextarea
           minRows={1}
+          locked={locked}
           className="sb-caption-sub"
           value={subline}
           placeholder="Small line under it (optional)"
           onChange={(v) => onChange({ cardSub: v })}
         />
       )}
-      {(card || edited) && (
+      {!locked && (card || edited) && (
         <div className="sb-caption-actions">
           {card && (
             <button type="button" className="btn ghost small" onClick={() => onChange({ card: '', cardSub: '' })}>
@@ -608,8 +618,9 @@ export function Storyboard({
                 <Info>
                   {scripted}/{spokenScenes} scenes have a line. Written in three passes — the angle, the draft,
                   then an edit that cuts anything generic. The model says each line exactly as written, in{' '}
-                  {languageName ?? 'the chosen language'}. Editing a line locks it, so the next rewrite leaves it
-                  alone; the padlock beside any field takes the lock off again.
+                  {languageName ?? 'the chosen language'}. Close the padlock on anything you want kept: a shut
+                  field cannot be typed in and a rewrite leaves it alone. Open it again to edit it, or to let a
+                  rewrite have it.
                 </Info>
               </label>
               <div className="sb-bar-row">
@@ -645,11 +656,11 @@ export function Storyboard({
                     onClick={() => onLockAll(!anyLock)}
                     title={
                       anyLock
-                        ? 'Take every lock off, so a rewrite is free to change anything'
-                        : 'Lock everything written so far — a rewrite would then change nothing'
+                        ? 'Open every field, so they can be edited and a rewrite may replace them'
+                        : 'Lock every written field shut — nothing can be typed in, and a rewrite changes nothing'
                     }
                   >
-                    {anyLock ? '🔓' : '🔒'}
+                    {anyLock ? 'Unlock all' : 'Lock all'}
                   </button>
                 )}
               </div>
@@ -978,6 +989,7 @@ export function Storyboard({
                     <td>
                       <div className="sb-field">
                         <AutoTextarea
+                          locked={locked.includes('shot')}
                           value={ov.shot ?? baseShot ?? ''}
                           onChange={(v) => editScene(key, { shot: v })}
                         />
@@ -996,6 +1008,7 @@ export function Storyboard({
                           because it is what has been performed, and editing replaces it. */}
                       <div className="sb-field">
                         <AutoTextarea
+                          locked={locked.includes('dialogue')}
                           value={ov.phonetic ?? ov.dialogue ?? sc.beat.dialogue ?? ''}
                           onChange={(v) => editScene(key, { dialogue: v, phonetic: undefined })}
                         />
@@ -1015,7 +1028,12 @@ export function Storyboard({
                     </td>
                     <td>
                       <div className="sb-field">
-                        <CaptionEditor beat={sc.beat} ov={ov} onChange={(patch) => editScene(key, patch)} />
+                        <CaptionEditor
+                          beat={sc.beat}
+                          ov={ov}
+                          locked={locked.includes('card')}
+                          onChange={(patch) => editScene(key, patch)}
+                        />
                         {onLockScene && (
                           <Lock
                             on={locked.includes('card')}

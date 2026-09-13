@@ -1390,7 +1390,7 @@ code {
 .sb-bar-row > .btn { min-width: 124px; justify-content: center; }
 .sb-bar-row > .btn.ghost { min-width: 92px; }
 .sb-bar-num { width: 68px; }
-.sb-bar-group.script { min-width: 216px; }
+.sb-bar-group.script { min-width: 268px; }
 .sb-bar-group.drawn { min-width: 190px; }
 .sb-bar-group.length { min-width: 236px; }
 .sb-tally {
@@ -1505,7 +1505,16 @@ code {
 .sb-field:hover .sb-lock { opacity: 0.85; }
 .sb-lock:hover,
 .sb-lock:focus-visible { opacity: 1; color: var(--accent); }
-.sb-field:has(.sb-lock.on) textarea { background: var(--accent-wash); border-color: var(--line-strong); }
+/* A shut field is shut: the click lands on nothing, there is no caret, and
+   nothing can be typed. The padlock beside it is the way back in. */
+.sb-table textarea.locked {
+  background: var(--accent-wash);
+  border-color: var(--line-strong);
+  border-style: dashed;
+  color: var(--ink-muted);
+  pointer-events: none;
+  user-select: none;
+}
 
 /* The scene, drawn before it is filmed. */
 .sb-frame { display: grid; gap: 5px; margin-bottom: 8px; }

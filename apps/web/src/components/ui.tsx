@@ -25,13 +25,72 @@ export function Info({
   wide?: boolean;
   focusable?: boolean;
 }) {
+  const [box, setBox] = useState<{ top: number; left: number; width: number; below: boolean } | null>(null);
+  const mark = useRef<HTMLSpanElement>(null);
+
+  /*
+   * Measured against the window and drawn on the body.
+   *
+   * Drawn where it sits, the note was clipped by whatever card or section it was
+   * inside — every one of them rounds its corners and hides the overflow, so a
+   * note on the last field of a panel showed two words and a straight edge. On the
+   * body it is bounded by the window instead, and the window is the one box that
+   * cannot be smaller than what has to be read.
+   */
+  const place = (): void => {
+    const r = mark.current?.getBoundingClientRect();
+    if (!r) return;
+    const GAP = 7;
+    const EDGE = 10;
+    const width = Math.min(wide ? 380 : 280, window.innerWidth - EDGE * 2);
+    // Above by default; below when there is less room above than the tallest a
+    // note gets — six or seven lines of it, near enough.
+    const below = r.top < 180;
+    setBox({
+      top: below ? r.bottom + GAP : r.top - GAP,
+      left: Math.max(EDGE, Math.min(r.left - 6, window.innerWidth - width - EDGE)),
+      width,
+      below,
+    });
+  };
+
+  useEffect(() => {
+    if (!box) return;
+    // A note is read where it was opened: if the page moves under it, it is gone.
+    const close = (): void => setBox(null);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [box]);
+
   if (!children) return null;
   return (
-    <span className={`info${wide ? ' wide' : ''}`} tabIndex={focusable ? 0 : undefined} role="note">
+    <span
+      ref={mark}
+      className={`info${wide ? ' wide' : ''}`}
+      tabIndex={focusable ? 0 : undefined}
+      role="note"
+      onMouseEnter={place}
+      onMouseLeave={() => setBox(null)}
+      onFocus={place}
+      onBlur={() => setBox(null)}
+    >
       <span className="info-mark" aria-hidden>
         i
       </span>
-      <span className="info-pop">{children}</span>
+      {box &&
+        createPortal(
+          <span
+            className={`info-pop${box.below ? ' below' : ''}`}
+            style={{ top: box.top, left: box.left, width: box.width }}
+          >
+            {children}
+          </span>,
+          document.body,
+        )}
     </span>
   );
 }

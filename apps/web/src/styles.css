@@ -1435,36 +1435,34 @@ code {
 }
 .info:hover .info-mark,
 .info:focus-visible .info-mark { color: var(--accent); border-color: var(--accent); }
+/* Drawn on the body, placed against the window — so no card's rounded, clipped
+   corner can cut the sentence in half. Above the mark by default; below it when
+   the mark is near the top of the window. */
 .info-pop {
-  position: absolute;
-  bottom: calc(100% + 7px);
-  left: -6px;
-  z-index: 60;
-  width: max-content;
-  max-width: 280px;
+  position: fixed;
+  z-index: 200;
   padding: 8px 10px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
   font-family: var(--font-ui);
   font-size: 11.5px;
   font-weight: 400;
   line-height: 1.45;
   letter-spacing: 0;
   text-transform: none;
+  text-align: left;
   color: var(--ink-muted);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(2px);
-  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0.1s;
+  transform: translateY(-100%);
   pointer-events: none;
+  animation: info-in 0.1s ease;
 }
-.info.wide .info-pop { max-width: 380px; }
-.info:hover .info-pop,
-.info:focus-visible .info-pop { opacity: 1; visibility: visible; transform: translateY(0); }
-/* Near the right edge the popup would run off; anchor it to the right instead. */
-.info:last-child .info-pop { left: auto; right: -6px; }
+.info-pop.below { transform: none; }
+@keyframes info-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 
 /* The padlock beside a field a rewrite must leave alone. */
 .sb-field { position: relative; }

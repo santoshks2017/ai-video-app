@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CarModelProfile, CarAngle, StoredImage, BrandEntry, VehicleDataSource } from '@ava/shared';
-import { BRAND_CATALOGUE } from '@ava/shared';
+import { BRAND_CATALOGUE, CAR_VIEWS } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
 import { isApiError, post, get, abs, recheckCarPhotos } from '../lib/client.js';
@@ -534,7 +534,34 @@ export function CarsSection() {
                 </Banner>
               )}
 
-              <h3 style={{ margin: '0 0 8px' }}>Angles</h3>
+              {/* What the video model is actually handed. A vehicle's photographs
+                  are gathered one sheet per view, so the whole car reaches it in
+                  five references rather than five photographs. */}
+              {active.sheets && Object.keys(active.sheets).length > 0 && (
+                <>
+                  <h3 style={{ margin: '0 0 4px' }}>Reference sheets</h3>
+                  <div className="hint" style={{ marginBottom: 8 }}>
+                    Every photograph of each view, in one image — this is what a film is built on. Click one to see
+                    it full size.
+                  </div>
+                  <div className="sheet-row">
+                    {CAR_VIEWS.filter((v) => active.sheets?.[v]?.url).map((v) => (
+                      <a
+                        key={v}
+                        className="sheet-tile"
+                        href={abs(active.sheets![v]!.url ?? null) ?? '#'}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <img src={abs(active.sheets![v]!.url ?? null) ?? ''} alt={`${active.model} — ${v}`} />
+                        <span>{v}</span>
+                      </a>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              <h3 style={{ margin: '14px 0 8px' }}>Angles</h3>
               <div className="field-grid">
                 {ANGLES.map((angle) => {
                   const imgs = active.images?.[angle] ?? [];
@@ -641,6 +668,15 @@ export function CarsSection() {
                       onClick={() => resync('oem')}
                     >
                       Sync from manufacturer site
+                    </button>
+                    <button
+                      className={`btn small${active.source === 'google' ? ' primary' : ''}`}
+                      type="button"
+                      disabled={Boolean(sourceBusy)}
+                      title="Let Google find the pages that carry this model's photographs, and read those"
+                      onClick={() => resync('google')}
+                    >
+                      Find it on Google
                     </button>
                   </div>
                   <div className="hint">

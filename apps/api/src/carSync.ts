@@ -518,11 +518,14 @@ export async function syncVehicleModel(input: string, opts: SyncOptions = {}): P
   const modelRe = new RegExp(`/${escapeRe(title(modelSeg))}(?:[-/])`, 'i');
 
   /* ---- angle images ---- */
+  // How many of each view are kept as individual photographs. The sheets carry
+  // the rest; these are what a single scene can be matched to, and what the
+  // Vehicles screen shows.
   const want: Record<CarAngle, number> = {
-    front: opts.perAngle?.front ?? 2,
-    side: opts.perAngle?.side ?? 2,
-    rear: opts.perAngle?.rear ?? 1,
-    interior: opts.perAngle?.interior ?? 2,
+    front: opts.perAngle?.front ?? 4,
+    side: opts.perAngle?.side ?? 4,
+    rear: opts.perAngle?.rear ?? 3,
+    interior: opts.perAngle?.interior ?? 4,
   };
   // Car filenames name their angle; bike filenames are opaque hashes, so bikes
   // are taken in source order and labelled honestly as photos.

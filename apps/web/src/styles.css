@@ -2151,3 +2151,29 @@ textarea.guide {
 .hist-item.hidden-run { opacity: 0.55; }
 .hist-item.hidden-run .hist-row { border-style: dashed; }
 .history-total em { font-style: normal; font-weight: 400; color: var(--ink-faint); }
+
+/* The sheets a film is built on: one per view, big enough to read. */
+.sheet-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.sheet-tile {
+  display: grid;
+  gap: 4px;
+  width: 150px;
+  text-decoration: none;
+  color: var(--ink-muted);
+}
+.sheet-tile img {
+  width: 150px;
+  height: 150px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  display: block;
+}
+.sheet-tile:hover img { border-color: var(--accent); }
+.sheet-tile span {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+}

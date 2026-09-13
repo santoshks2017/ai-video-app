@@ -1079,6 +1079,185 @@ export async function trimClip(clip: Buffer, seconds: number): Promise<Buffer> {
   }
 }
 
+/** How long a finished video runs, and what shape it is. */
+export async function videoFacts(clip: Buffer): Promise<{ duration: number; width: number; height: number }> {
+  const dir = await mkdtemp(join(tmpdir(), 'ava-facts-'));
+  try {
+    const f = join(dir, 'in.mp4');
+    await writeFile(f, clip);
+    const m = await probe(f);
+    return { duration: m.duration, width: m.width, height: m.height };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Cut a finished film into pieces no longer than `maxSeconds`.
+ *
+ * Seedance renders at most 30 seconds in one pass, so a 47-second film has to go
+ * through it in parts. The cuts are re-encoded rather than stream-copied: a
+ * stream copy lands on the nearest keyframe, which moves the join by up to a
+ * second and shows.
+ */
+export async function splitVideo(clip: Buffer, maxSeconds: number): Promise<Buffer[]> {
+  const { duration } = await videoFacts(clip);
+  if (duration <= maxSeconds + 0.05) return [clip];
+  const pieces = Math.ceil(duration / maxSeconds);
+  const each = duration / pieces;
+  const out: Buffer[] = [];
+  const dir = await mkdtemp(join(tmpdir(), 'ava-split-'));
+  try {
+    const inF = join(dir, 'in.mp4');
+    await writeFile(inF, clip);
+    for (let i = 0; i < pieces; i++) {
+      const outF = join(dir, `piece-${i}.mp4`);
+      await run('ffmpeg', [
+        '-v', 'error', '-y', '-threads', FF_THREADS,
+        '-ss', (i * each).toFixed(3), '-i', inF, '-t', each.toFixed(3),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-movflags', '+faststart', outF,
+      ]);
+      out.push(await readFile(outF));
+    }
+    return out;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** Put pieces back together, cut to cut. */
+export async function joinVideos(pieces: Buffer[]): Promise<Buffer> {
+  if (pieces.length === 0) throw new Error('nothing to join');
+  if (pieces.length === 1) return pieces[0]!;
+  const dir = await mkdtemp(join(tmpdir(), 'ava-join-'));
+  try {
+    const files: string[] = [];
+    for (const [i, bytes] of pieces.entries()) {
+      const f = join(dir, `p-${i}.mp4`);
+      await writeFile(f, bytes);
+      files.push(f);
+    }
+    const outF = join(dir, 'out.mp4');
+    const args = ['-v', 'error', '-y', '-threads', FF_THREADS];
+    for (const f of files) args.push('-i', f);
+    const chain = files
+      .map((_, i) => `[${i}:v]setsar=1,format=yuv420p[v${i}];[${i}:a]aresample=44100:async=1,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`)
+      .join(';');
+    const streams = files.map((_, i) => `[v${i}][a${i}]`).join('');
+    args.push(
+      '-filter_complex', `${chain};${streams}concat=n=${files.length}:v=1:a=1[v][a]`,
+      '-map', '[v]', '-map', '[a]',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', outF,
+    );
+    await run('ffmpeg', args);
+    return await readFile(outF);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * The same film, larger.
+ *
+ * A film the client has already approved must not be generated again to be
+ * delivered at a bigger size — a second generation is a different film. This
+ * enlarges the one that was approved: lanczos, and a light unsharp to put back
+ * the edge the scaling costs. It cannot invent detail that was never rendered.
+ */
+export async function upscaleVideo(clip: Buffer, shortSide: number): Promise<Buffer> {
+  const { width, height } = await videoFacts(clip);
+  const portrait = height >= width;
+  const w = portrait ? shortSide : Math.round((shortSide * width) / height / 2) * 2;
+  const h = portrait ? Math.round((shortSide * height) / width / 2) * 2 : shortSide;
+  if ((portrait ? width : height) >= shortSide) return clip;
+  const dir = await mkdtemp(join(tmpdir(), 'ava-up-'));
+  try {
+    const inF = join(dir, 'in.mp4');
+    const outF = join(dir, 'out.mp4');
+    await writeFile(inF, clip);
+    await run('ffmpeg', [
+      '-v', 'error', '-y', '-threads', FF_THREADS, '-i', inF,
+      '-vf', `scale=${w}:${h}:flags=lanczos,unsharp=5:5:0.5:5:5:0.0,format=yuv420p`,
+      '-c:v', 'libx264', '-preset', 'slow', '-crf', '17',
+      '-c:a', 'copy', '-movflags', '+faststart', outF,
+    ]);
+    return await readFile(outF);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Keep only the stretches asked for, in order, and drop the rest.
+ *
+ * This is what the editor's cuts come down to: a bad two seconds is removed by
+ * keeping what is either side of it. Ranges are clamped, sorted and merged, so a
+ * careless pair of numbers cannot produce an empty or scrambled film.
+ */
+export async function keepRanges(
+  clip: Buffer,
+  ranges: { from: number; to: number }[],
+  opts: { mute?: boolean } = {},
+): Promise<Buffer> {
+  const { duration } = await videoFacts(clip);
+  const clean = ranges
+    .map((r) => ({ from: Math.max(0, Math.min(duration, r.from)), to: Math.max(0, Math.min(duration, r.to)) }))
+    .filter((r) => r.to - r.from > 0.05)
+    .sort((a, b) => a.from - b.from);
+  const merged: { from: number; to: number }[] = [];
+  for (const r of clean) {
+    const last = merged[merged.length - 1];
+    if (last && r.from <= last.to + 0.02) last.to = Math.max(last.to, r.to);
+    else merged.push({ ...r });
+  }
+  if (!merged.length) throw new Error('the cut would leave nothing');
+
+  const dir = await mkdtemp(join(tmpdir(), 'ava-cut-'));
+  try {
+    const inF = join(dir, 'in.mp4');
+    const outF = join(dir, 'out.mp4');
+    await writeFile(inF, clip);
+    const parts: Buffer[] = [];
+    for (const [i, r] of merged.entries()) {
+      const f = join(dir, `k-${i}.mp4`);
+      await run('ffmpeg', [
+        '-v', 'error', '-y', '-threads', FF_THREADS,
+        '-ss', r.from.toFixed(3), '-i', inF, '-t', (r.to - r.from).toFixed(3),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+        ...(opts.mute ? ['-an'] : ['-c:a', 'aac']),
+        '-movflags', '+faststart', f,
+      ]);
+      parts.push(await readFile(f));
+    }
+    if (opts.mute) {
+      // Joined without an audio track at all, rather than with a silent one.
+      const files: string[] = [];
+      for (const [i, bytes] of parts.entries()) {
+        const f = join(dir, `m-${i}.mp4`);
+        await writeFile(f, bytes);
+        files.push(f);
+      }
+      const args = ['-v', 'error', '-y', '-threads', FF_THREADS];
+      for (const f of files) args.push('-i', f);
+      args.push(
+        '-filter_complex',
+        `${files.map((_, i) => `[${i}:v]setsar=1,format=yuv420p[v${i}]`).join(';')};${files
+          .map((_, i) => `[v${i}]`)
+          .join('')}concat=n=${files.length}:v=1:a=0[v]`,
+        '-map', '[v]', '-an',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-movflags', '+faststart', outF,
+      );
+      await run('ffmpeg', args);
+      return await readFile(outF);
+    }
+    return await joinVideos(parts);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 /** Grab a representative frame for the history thumbnail. */
 export async function posterFrame(clip: Buffer, atSeconds = 1.5): Promise<Buffer | null> {
   const dir = await mkdtemp(join(tmpdir(), 'ava-poster-'));

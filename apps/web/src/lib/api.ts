@@ -50,6 +50,12 @@ export interface GenerationHistoryItem {
   vehicle?: { model?: string; colour?: string; photos: number; attached: boolean; angles: string[] };
   /** Whether this run kept a copy of the project, so its settings can be put back. */
   restorable?: boolean;
+  /** How this video came about: made, retaken, or a version of one that exists. */
+  kind?: 'generate' | 'retake' | 'restitch' | 'enhance' | 'upscale' | 'edit';
+  /** The cut the client signed off. One per project. */
+  approved?: boolean;
+  derivedFrom?: string;
+  derivedNote?: string;
 }
 
 /** One run in full — what it was made from, and what each part was shown. */
@@ -164,6 +170,38 @@ export const api = {
   },
 
   /** Every generation for a project, newest first — nothing is overwritten. */
+  /** Mark (or unmark) the cut the client signed off. */
+  async approve(jobId: string, approved: boolean) {
+    return await req<{ ok: true; approved: boolean }>(`/api/generations/${jobId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ approved }),
+    });
+  },
+
+  /** The same film, larger. No model, no drift, no cost. */
+  async upscale(jobId: string, resolution: string) {
+    return await req<{ jobId: string; finalUrl: string }>(`/api/generations/${jobId}/upscale`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution }),
+    });
+  },
+
+  /** Re-render the approved film through Seedance for finish. */
+  async enhance(jobId: string, modelId?: string) {
+    return await req<{ jobId: string; finalUrl: string; cost?: { inr: number } }>(
+      `/api/generations/${jobId}/enhance`,
+      { method: 'POST', body: JSON.stringify({ modelId }) },
+    );
+  },
+
+  /** Export a trimmed version of a finished film. */
+  async editVideo(jobId: string, body: { keep: { from: number; to: number }[]; mute?: boolean; note?: string }) {
+    return await req<{ jobId: string; finalUrl: string }>(`/api/generations/${jobId}/edit`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
   /** Everything one run was made from — the receipt behind a finished video. */
   async generation(jobId: string): Promise<GenerationDetail | null> {
     const r = await req<GenerationDetail>(`/api/generations/${jobId}`);

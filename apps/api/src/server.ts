@@ -28,7 +28,13 @@ import {
 } from '@ava/shared';
 import { loadConfig } from './config.js';
 import { generateClip, downloadFile, fetchInteractionVideo, OmniFlashError, type OmniRef } from './omniFlash.js';
-import { generateSeedanceClip, testSeedanceKey, SeedanceError, type SeedanceRef } from './seedance.js';
+import {
+  generateSeedanceClip,
+  enhanceSeedanceClip,
+  testSeedanceKey,
+  SeedanceError,
+  type SeedanceRef,
+} from './seedance.js';
 import { generateVeoClip, VeoError } from './veo.js';
 import { checkVehicleFrame } from './vehicleCheck.js';
 import {
@@ -39,6 +45,7 @@ import {
   streamClip,
   putRef,
   readObject,
+  signedUrlFor,
   listJobsForProject,
   listRecentJobs,
   safeRefName,
@@ -47,7 +54,20 @@ import {
   listAllJobDocs,
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
-import { composeFinal, contactSheet, lastFrame, posterFrame, selfTest, trimClip, type BrandOverlay } from './post.js';
+import {
+  composeFinal,
+  contactSheet,
+  joinVideos,
+  keepRanges,
+  lastFrame,
+  posterFrame,
+  selfTest,
+  splitVideo,
+  trimClip,
+  upscaleVideo,
+  videoFacts,
+  type BrandOverlay,
+} from './post.js';
 import { bearer } from './auth.js';
 import {
   resolveIdToken,
@@ -2119,6 +2139,253 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
  * and the reference images each part was shown. This is what answers "why is the
  * car wrong in this one and right in that one" without guessing.
  */
+/**
+ * A version of a film that already exists.
+ *
+ * Nothing here generates a new film. The approved cut is the one that ships, and
+ * these are things done TO it — enlarged, re-rendered for finish, trimmed — each
+ * saved as its own entry beside the original so neither replaces the other.
+ */
+async function saveDerived(
+  source: JobRecord,
+  bytes: Buffer,
+  opts: {
+    kind: NonNullable<JobRecord['kind']>;
+    label: string;
+    note: string;
+    caller?: { uid?: string; email?: string; name?: string };
+    costInr?: number;
+    costUsd?: number;
+    resolution?: string;
+    modelName?: string;
+    modelId?: string;
+  },
+): Promise<JobRecord> {
+  const jobId = randomUUID();
+  const now = Date.now();
+  const finalStoragePath = await uploadClip(jobId, 0, bytes, 'video/mp4');
+  let posterPath: string | undefined;
+  const poster = await posterFrame(bytes).catch(() => null);
+  if (poster) posterPath = (await putRef(`poster-${jobId}.jpg`, 'image/jpeg', poster).catch(() => null))?.storagePath;
+  const facts = await videoFacts(bytes).catch(() => ({ duration: source.totalSeconds ?? 0 }));
+
+  const record: JobRecord = {
+    ...source,
+    jobId,
+    kind: opts.kind,
+    derivedFrom: source.jobId,
+    derivedNote: opts.note,
+    parentJobId: source.jobId,
+    approved: false,
+    approvedAt: undefined,
+    label: opts.label,
+    status: 'done',
+    createdAt: now,
+    startedAt: now,
+    finishedAt: now,
+    updatedAt: now,
+    clips: [],
+    refinedParts: undefined,
+    feedback: undefined,
+    userId: opts.caller?.uid,
+    userEmail: opts.caller?.email,
+    userName: opts.caller?.name,
+    costInr: opts.costInr ?? 0,
+    costUsd: opts.costUsd ?? 0,
+    totalSeconds: Math.round(facts.duration ?? source.totalSeconds ?? 0),
+    resolution: opts.resolution ?? source.resolution,
+    renderResolution: undefined,
+    modelName: opts.modelName ?? source.modelName,
+    modelId: opts.modelId ?? source.modelId,
+    finalStoragePath,
+    posterPath,
+    error: undefined,
+  };
+  await saveJob(record);
+  if (record.projectId && (opts.costInr ?? 0) > 0) {
+    const proj = await getOne<{ generationCount?: number; totalCostInr?: number }>('projects', record.projectId);
+    if (proj) {
+      await patch('projects', record.projectId, {
+        totalCostInr: (proj.totalCostInr ?? 0) + (opts.costInr ?? 0),
+      }).catch(() => {});
+    }
+  }
+  return record;
+}
+
+/** The film the client signed off. Only one version of a project holds it. */
+app.post<{ Params: { jobId: string }; Body: { approved?: boolean } }>(
+  '/api/generations/:jobId/approve',
+  async (req, reply) => {
+    const job = await getJob(req.params.jobId);
+    if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such generation' });
+    const approved = req.body?.approved !== false;
+    if (approved && job.projectId) {
+      // One approved cut per project: the last word, not a collection of them.
+      const siblings = await listJobsForProject(job.projectId);
+      for (const s of siblings) {
+        if (s.approved && s.jobId !== job.jobId) await updateJob(s.jobId, { approved: false, approvedAt: undefined });
+      }
+    }
+    await updateJob(req.params.jobId, { approved, approvedAt: approved ? Date.now() : undefined });
+    return { ok: true, approved };
+  },
+);
+
+/**
+ * The approved film, larger. No model is involved: the pixels are the ones the
+ * client already signed off, scaled up and sharpened a little. It cannot add
+ * detail that was never rendered — for that, the premium pass re-renders.
+ */
+app.post<{ Params: { jobId: string }; Body: { resolution?: Resolution } }>(
+  '/api/generations/:jobId/upscale',
+  async (req, reply) => {
+    const job = await getJob(req.params.jobId);
+    if (!job?.finalStoragePath) {
+      return reply.code(404).send({ code: 'not-found', message: 'No finished video on that run.' });
+    }
+    const want: Resolution = req.body?.resolution ?? '1080p';
+    const obj = await readObject(job.finalStoragePath);
+    if (!obj) return reply.code(404).send({ code: 'not-found', message: 'That video is gone from storage.' });
+    try {
+      const bytes = await upscaleVideo(obj.bytes, shortSideFor(want));
+      const saved = await saveDerived(job, bytes, {
+        kind: 'upscale',
+        label: `Upscaled to ${want}`,
+        note: `Scaled up from ${job.resolution ?? 'the original'} — the same film, no model involved.`,
+        caller: req.caller,
+        resolution: want,
+      });
+      return { jobId: saved.jobId, finalUrl: `/api/clips/${saved.jobId}/final` };
+    } catch (err) {
+      return reply.code(500).send({ code: 'upscale-failed', message: (err as Error).message });
+    }
+  },
+);
+
+/**
+ * The premium pass: the approved film re-rendered by Seedance for finish.
+ *
+ * Omni writes and speaks the language; Seedance makes the better-looking picture.
+ * So the film is made and approved on Omni, then passed through Seedance with one
+ * instruction — change nothing, improve the rendering — and its own audio left
+ * off, because the sound is already right. Seedance takes 30 seconds at a time,
+ * so a longer film goes through in pieces and is joined again here.
+ */
+app.post<{ Params: { jobId: string }; Body: { modelId?: string } }>(
+  '/api/generations/:jobId/enhance',
+  async (req, reply) => {
+    const job = await getJob(req.params.jobId);
+    if (!job?.finalStoragePath) {
+      return reply.code(404).send({ code: 'not-found', message: 'No finished video on that run.' });
+    }
+    const picked = await resolveModel(req.body?.modelId);
+    if ('error' in picked) return reply.code(503).send({ code: picked.code, message: picked.error });
+    if (picked.provider !== 'byteplus-ark') {
+      return reply.code(400).send({
+        code: 'wrong-model',
+        message: 'The premium pass runs on Seedance — pick a Seedance model for it.',
+      });
+    }
+    const obj = await readObject(job.finalStoragePath);
+    if (!obj) return reply.code(404).send({ code: 'not-found', message: 'That video is gone from storage.' });
+
+    const want = (job.resolution === '360p' ? '720p' : (job.resolution as Resolution)) ?? '720p';
+    const { render } = renderResolution(picked.modelId, want, picked.resolutions);
+    const seedanceRes = render === '360p' ? '480p' : render;
+    // A whole second under the cap: ModelArk rounds, and 30.0 is refused.
+    const CHUNK = 29;
+
+    const instruction = [
+      'Re-render this video at a higher standard of finish. It is a finished television commercial that has already been approved.',
+      '',
+      'Change nothing about what happens. Same shots, same framing, same camera moves, same cuts and the same length.',
+      'Same people: the same face, hair, clothes and expressions, doing exactly what they are doing.',
+      'Same vehicle: the same model, generation, colour, wheels and badges, in the same position in every frame.',
+      'Same location, same props, same on-screen text, same timing.',
+      '',
+      'What to improve, and only this: lighting quality and depth, material and surface detail — paint, chrome, glass, fabric, skin — focus, micro-contrast, colour depth and the overall filmic, premium look of a high-end car commercial.',
+      'Do not restage, reframe, re-time, add or remove anything. Do not add text, logos, graphics or effects. Do not speed up or slow down.',
+    ].join('\n');
+
+    try {
+      const pieces = await splitVideo(obj.bytes, CHUNK);
+      const done: Buffer[] = [];
+      for (const piece of pieces) {
+        const facts = await videoFacts(piece);
+        // A link if the bucket will sign one; the bytes themselves if it will not.
+        const path = await uploadClip(`enhance-${job.jobId}`, done.length + 1, piece, 'video/mp4');
+        const url = await signedUrlFor(path, 180);
+        const out = await enhanceSeedanceClip(
+          {
+            prompt: instruction,
+            model: picked.modelId,
+            resolution: seedanceRes as '480p' | '720p' | '1080p',
+            duration: facts.duration,
+            videoUrl: url ?? undefined,
+            videoData: url ? undefined : piece.toString('base64'),
+            mimeType: 'video/mp4',
+          },
+          picked.apiKey,
+        );
+        done.push(out.bytes);
+      }
+      const joined = await joinVideos(done);
+      const seconds = (await videoFacts(joined)).duration;
+      const cost = estimateSegmentsCost(seconds, pieces.length, { usdPerSecond: picked.usdPerSecond });
+      const saved = await saveDerived(job, joined, {
+        kind: 'enhance',
+        label: `Premium pass · ${picked.label}`,
+        note: `Re-rendered for finish by ${picked.label} in ${pieces.length} pass${pieces.length === 1 ? '' : 'es'}; the cut, the people, the vehicle and the sound are the approved ones.`,
+        caller: req.caller,
+        costInr: cost.inr,
+        costUsd: cost.usd,
+        resolution: seedanceRes,
+        modelName: picked.label,
+        modelId: picked.modelId,
+      });
+      return { jobId: saved.jobId, finalUrl: `/api/clips/${saved.jobId}/final`, cost };
+    } catch (err) {
+      const e = err as SeedanceError;
+      app.log.error({ jobId: job.jobId, code: e.code, message: e.message }, 'premium pass failed');
+      return reply.code(502).send({ code: e.code ?? 'enhance-failed', message: e.message });
+    }
+  },
+);
+
+/**
+ * The editor's export: the same film with stretches taken out, and optionally
+ * silent. Nothing is generated, so it costs nothing and cannot drift.
+ */
+app.post<{ Params: { jobId: string }; Body: { keep?: { from: number; to: number }[]; mute?: boolean; note?: string } }>(
+  '/api/generations/:jobId/edit',
+  async (req, reply) => {
+    const job = await getJob(req.params.jobId);
+    if (!job?.finalStoragePath) {
+      return reply.code(404).send({ code: 'not-found', message: 'No finished video on that run.' });
+    }
+    const keep = (req.body?.keep ?? []).filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to));
+    if (!keep.length) return reply.code(400).send({ code: 'bad-request', message: 'Nothing to keep.' });
+    const obj = await readObject(job.finalStoragePath);
+    if (!obj) return reply.code(404).send({ code: 'not-found', message: 'That video is gone from storage.' });
+    try {
+      const bytes = await keepRanges(obj.bytes, keep, { mute: req.body?.mute === true });
+      const saved = await saveDerived(job, bytes, {
+        kind: 'edit',
+        label: req.body?.note?.trim() || 'Edited cut',
+        note:
+          `Kept ${keep.map((r) => `${r.from.toFixed(1)}–${r.to.toFixed(1)}s`).join(', ')}` +
+          (req.body?.mute ? ', silent.' : '.'),
+        caller: req.caller,
+        resolution: job.resolution,
+      });
+      return { jobId: saved.jobId, finalUrl: `/api/clips/${saved.jobId}/final` };
+    } catch (err) {
+      return reply.code(400).send({ code: 'edit-failed', message: (err as Error).message });
+    }
+  },
+);
+
 app.get<{ Params: { jobId: string } }>('/api/generations/:jobId', async (req, reply) => {
   const job = await getJob(req.params.jobId);
   if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such generation' });
@@ -2245,6 +2512,10 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req)
           : Math.max(0, (j.finishedAt ?? j.updatedAt) - (j.startedAt ?? j.createdAt)) || undefined,
       renderResolution: j.renderResolution,
       vehicle: j.vehicle,
+      kind: j.kind ?? (j.parentJobId ? 'retake' : 'generate'),
+      approved: j.approved === true,
+      derivedFrom: j.derivedFrom,
+      derivedNote: j.derivedNote,
       /** Whether this run can be re-opened — older runs were saved before the receipt existed. */
       restorable: Boolean(j.projectSnapshot),
       finalUrl: j.finalStoragePath ? `/api/clips/${j.jobId}/final` : null,

@@ -149,6 +149,74 @@ export async function generateSeedanceClip(
   };
 }
 
+/**
+ * Re-render a finished film through Seedance, keeping everything but the finish.
+ *
+ * Omni writes and speaks Hindi far better than Seedance does; Seedance renders a
+ * more expensive-looking picture. So a film is made with Omni, approved by the
+ * client, and only then passed through here — the same cut, the same people, the
+ * same car, the same words, rendered better. ModelArk takes at most 30 seconds
+ * in a pass, so a longer film arrives here in pieces and is joined again after.
+ */
+export async function enhanceSeedanceClip(
+  input: {
+    prompt: string;
+    model: string;
+    resolution: '480p' | '720p' | '1080p';
+    /** A link ModelArk can fetch, preferred — a large video inline is often refused. */
+    videoUrl?: string;
+    /** Fallback: the video itself, base64. */
+    videoData?: string;
+    mimeType?: string;
+    duration: number;
+  },
+  apiKey: string,
+): Promise<SeedanceClip> {
+  const url = input.videoUrl ?? `data:${input.mimeType ?? 'video/mp4'};base64,${input.videoData ?? ''}`;
+  if (!input.videoUrl && !input.videoData) {
+    throw new SeedanceError('seedance-no-source', 'Nothing to enhance — no video was supplied.');
+  }
+
+  const body: Record<string, unknown> = {
+    model: input.model,
+    content: [
+      { type: 'text', text: input.prompt },
+      { type: 'video_url', video_url: { url }, role: 'reference_video' },
+    ],
+    resolution: input.resolution,
+    duration: Math.max(1, Math.round(input.duration)),
+    // The sound is already right — it came from Omni — so nothing new is spoken.
+    generate_audio: false,
+    watermark: false,
+    output_format: 'mp4',
+    omni_reference_task_type: 'reference',
+  };
+
+  const created = await fetch(`${ARK_BASE}/contents/generations/tasks`, {
+    method: 'POST',
+    headers: authHeaders(apiKey),
+    body: JSON.stringify(body),
+  });
+  const createdJson = (await created.json().catch(() => ({}))) as { id?: string };
+  if (!created.ok) throw arkError(createdJson, `ModelArk returned ${created.status} creating the enhance task.`);
+  const taskId = createdJson.id;
+  if (!taskId) throw new SeedanceError('seedance-no-task-id', 'ModelArk accepted the request but returned no task id.');
+
+  const task = await pollTask(taskId, apiKey);
+  const videoUrl = task.content?.video_url;
+  if (!videoUrl) throw new SeedanceError('seedance-no-video', `Task ${taskId} succeeded but carried no video.`);
+  const file = await fetch(videoUrl);
+  if (!file.ok) {
+    throw new SeedanceError('seedance-download-failed', `Could not download the enhanced video (${file.status}).`);
+  }
+  return {
+    taskId,
+    bytes: Buffer.from(await file.arrayBuffer()),
+    mimeType: file.headers.get('content-type') || 'video/mp4',
+    seconds: task.duration,
+  };
+}
+
 interface ArkTask {
   status?: string;
   content?: { video_url?: string };

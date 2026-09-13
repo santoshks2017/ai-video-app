@@ -1972,3 +1972,24 @@ textarea.guide {
 /* The segment being browsed sits with the columns, not in the toolbar. */
 .browse-switch { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .browse-switch .hint { margin: 0; }
+
+/* ---- the cutting room: trimming a finished film, no model involved ---- */
+.cutroom {
+  display: grid;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.cutroom .clip-video { aspect-ratio: auto; max-height: 320px; object-fit: contain; }
+.cut-help { font-size: 11.5px; color: var(--ink-muted); line-height: 1.45; }
+.cut-row { display: flex; align-items: center; gap: 6px; }
+.cut-row input { width: 82px; padding: 5px 7px; font-size: 12px; }
+.cut-row span { font-size: 11.5px; color: var(--ink-faint); }
+.cut-no {
+  width: 18px; flex: none; text-align: right;
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint);
+}
+.hist-more { row-gap: 4px; }
+.badge.approved { background: var(--good-wash); color: var(--good); border-color: transparent; }

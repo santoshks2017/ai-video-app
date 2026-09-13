@@ -134,6 +134,19 @@ export interface JobRecord {
   projectSnapshot?: unknown;
   /** What the vehicle checker made of each part, and whether it was made again. */
   vehicleChecks?: { part: number; same: boolean; why: string; remade?: boolean }[];
+
+  /* ---- versions of a film, after it has been made ---- */
+  /**
+   * How this video came about. A generation is the film being made; everything
+   * else is a version of one that already exists, and never replaces it.
+   */
+  kind?: 'generate' | 'retake' | 'restitch' | 'enhance' | 'upscale' | 'edit';
+  /** Signed off by the client. The one that ships, and the one versions are cut from. */
+  approved?: boolean;
+  approvedAt?: number;
+  /** Set on a version: what it was made from, and what was done to it. */
+  derivedFrom?: string;
+  derivedNote?: string;
 }
 
 /** The newest generations across every project — the history an ETA is learned from. */
@@ -190,6 +203,27 @@ export async function streamClip(
     contentType: String(meta.contentType ?? 'video/mp4'),
     size: Number(meta.size ?? 0),
   };
+}
+
+/**
+ * A time-limited public link to something in the bucket.
+ *
+ * A provider that takes a video as input has to be able to fetch it, and the
+ * app's own clip route is behind sign-in. Signing needs the service account to
+ * be allowed to sign blobs; where it is not, the caller falls back to sending
+ * the bytes inline.
+ */
+export async function signedUrlFor(storagePath: string, minutes = 120): Promise<string | null> {
+  ensure();
+  try {
+    const [url] = await getStorage()
+      .bucket(BUCKET)
+      .file(storagePath)
+      .getSignedUrl({ action: 'read', expires: Date.now() + minutes * 60_000, version: 'v4' });
+    return url;
+  } catch {
+    return null;
+  }
 }
 
 /* ---- reference images (P0.4 / P0.2): uploaded or scraped, grounded into the model ---- */

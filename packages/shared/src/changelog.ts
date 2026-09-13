@@ -18,10 +18,24 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '3.1';
+export const APP_VERSION = '3.2';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '3.2',
+    date: '2026-09-13',
+    title: 'Every photograph of a vehicle, gathered into sheets',
+    changes: [
+      'CarDekho publishes ninety-odd photographs of a model. The app kept seven — two a side, chosen by filename — so three-quarters of what the car looks like never reached the video model, and a view it has not seen is a view it invents.',
+      'A sync now takes up to thirty-six, picked round-robin across the views rather than in page order. That order matters: the page lists every exterior shot before the first cabin one, so taking the first thirty gave a set with no interior in it at all.',
+      'Every photograph is looked at and filed under what it shows, and each view is gathered into a single sheet — every front in one image, every side in another, the cabin in a third, and the close-ups in a fourth with each one named: grille, front bumper, wheel, door handle. A film is then built on five or six references carrying forty photographs between them, instead of six carrying six.',
+      'A vehicle shows its sheets above its angles, each opening full size, so what a film is built on can be seen rather than assumed.',
+      'Google joins CarDekho and the manufacturer as a source: it asks which pages carry this model\u2019s photographs and reads those, which covers a launch-week model that is on the maker\u2019s site and nowhere else.',
+      'Vehicles has "Rebuild every photo set", which walks the library doing all of this for what is already there, one vehicle at a time, and stops when you say so.',
+      'More individual photographs are kept per view as well — four of the front, four of the side, three of the rear, four of the cabin — so a single scene has a real choice to be matched to.',
+    ],
+  },
   {
     version: '3.1',
     date: '2026-09-13',

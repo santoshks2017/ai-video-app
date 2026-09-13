@@ -24,7 +24,7 @@ import { rulebookText } from './rulebook.js';
  * our overlay and show through at the edges.
  */
 const CLEAN_FRAME =
-  'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. Signage that genuinely exists in the location (a showroom fascia, a number plate) is part of the scene and is fine; invented graphics are not.';
+  'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. This includes the things a real showroom has written on it: a fascia, a banner, a poster, a price board, a number plate, a screen. Render them blank, or out of focus, or out of frame — never with letters or numbers on them. A model cannot spell, and what it writes is gibberish on the client\u2019s own building: one take came back with "Mahindri Medton" over the door.';
 
 /**
  * The rules a generation most often breaks, said first and in the same words in every part.
@@ -73,6 +73,22 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
       `- Take the ${noun}'s design from the supplied images only. The name "${brief.carModel}" is a label, not a description — do not build the ${noun} from what the name brings to mind, and do not fill in any part of it from another ${noun} of that name.`,
     );
   }
+  /*
+   * Lettering, and lamps.
+   *
+   * Two failures that keep reaching finished films. A model cannot spell, so
+   * every word it draws is a misspelling of the client's own name — "Mahindri
+   * Medton" over the showroom door, "Tangp Ind 8a 9 10" on the number plate. And
+   * a lamp it does not bother to light leaves a black hole where the car's most
+   * recognisable signature should be.
+   */
+  lines.push(
+    '- NO LETTERING ANYWHERE IN THE FRAME. Not one letter, digit or word, on anything, at any distance, in or out of focus: no signage, fascia, banner, poster, standee, price board, sticker, screen, brochure or number plate with anything written on it, no watermark, no caption, no subtitle. Where a real place would carry writing, render the surface blank or turn it away from camera or let it fall out of focus entirely. Badges moulded into the vehicle itself are part of the vehicle and stay. Every word the viewer reads is added afterwards.',
+  );
+  lines.push(
+    `- Every lamp on the ${noun} is complete and lit exactly as in the photographs — the full headlamp signature, the daytime running lamps and the connected tail bar, each one present, the right shape and the right length, and glowing. Never leave a dark panel, a blank recess or a half-drawn lamp where a light belongs.`,
+  );
+
   lines.push(
     `- The ${noun} is a real, physical, three-dimensional vehicle in the location — standing on the floor or moving on the road, lit by the scene, with real reflections and a real shadow. Never show it as a photo, poster, print, billboard, screen image, cutout or any flat picture. The reference photos show what the ${noun} looks like; they are never objects to put in the scene. Every shot is filmed in the real location — the showroom or the road — never a studio product shot, a plain white or grey backdrop, or a catalogue-style picture of the ${noun}.`,
   );

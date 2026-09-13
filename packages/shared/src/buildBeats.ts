@@ -39,9 +39,35 @@ export function buildBeats(ctx: RenderContext): Beat[] {
   // text frame (apps/api/src/post.ts), so the dealer details and CTA are always
   // legible and the video never ends on a stray model shot.
   const omitted = new Set(ctx.brief.omitScenes ?? []);
-  return (groups.length > 1 ? composeStory(groups, ctx) : groups.flatMap((g) => g.beats)).filter(
+  const film = (groups.length > 1 ? composeStory(groups, ctx) : groups.flatMap((g) => g.beats)).filter(
     (b) => !b.key || !omitted.has(b.key),
   );
+  // Scenes written by hand join the film, then the whole thing is put in the
+  // order the designer arranged. Timing and the split into parts happen after
+  // this, so moving a scene re-packs the parts on its own.
+  const written = (ctx.brief.addedScenes ?? [])
+    .filter((b) => b.key && !omitted.has(b.key))
+    .map((b) => ({ ...b, added: true }));
+  return inOrder([...film, ...written], ctx.brief.sceneOrder);
+}
+
+/**
+ * The designer's order, with anything they have not placed keeping its natural
+ * position. A use case picked after the film was arranged appears where the
+ * story put it, rather than at the end or not at all.
+ */
+export function inOrder(beats: Beat[], order: string[] | undefined): Beat[] {
+  if (!order?.length) return beats;
+  const rank = new Map(order.map((k, i) => [k, i]));
+  return beats
+    .map((b, i) => ({ b, i, r: rank.get(b.key ?? '') }))
+    .sort((x, y) => {
+      if (x.r != null && y.r != null) return x.r - y.r;
+      if (x.r != null) return -1;
+      if (y.r != null) return 1;
+      return x.i - y.i;
+    })
+    .map((x) => x.b);
 }
 
 function composeStory(groups: { cat: CategoryDef; beats: Beat[] }[], ctx: RenderContext): Beat[] {

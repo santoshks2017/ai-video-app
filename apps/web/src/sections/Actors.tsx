@@ -158,7 +158,7 @@ export function ActorsSection() {
         </div>
       </div>
 
-      <div className="browse-cols two">
+      <div className={`browse-cols${draft?.id ? ' three' : ' two'}`}>
         <div className="browse-col">
           <div className="browse-col-head">
             <span>People</span>
@@ -263,30 +263,6 @@ export function ActorsSection() {
           </Field>
 
           <div className="sec-stack">
-            {draft.id && (
-              <Section
-                sub
-                title="Where they have appeared"
-                step={appearances.length ? `${appearances.reduce((n, a) => n + a.count, 0)} films` : 'None yet'}
-                defaultOpen={appearances.length > 0}
-              >
-                {appearances.length === 0 ? (
-                  <div className="hint">Not cast in anything yet.</div>
-                ) : (
-                  <div className="campaigns">
-                    {appearances.map((a) => (
-                      <div className="campaign-row" key={a.client}>
-                        <b>{a.client}</b>
-                        <span>
-                          {a.count} film{a.count === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Section>
-            )}
-
             <Section sub title="Notes & file location" step={draft.notes?.trim() ? 'Has notes' : undefined}>
               <Field label="Full-res file location">
                 <input
@@ -316,6 +292,44 @@ export function ActorsSection() {
         </Panel>
       )}
       </div>
+
+      {/* Which dealerships this face already belongs to. A presenter seen at one
+          showroom and then another belongs to neither. */}
+      {draft?.id && (
+        <div className="browse-side">
+          <Panel
+            title="Seen at"
+            step={
+              appearances.length
+                ? `${appearances.reduce((n, a) => n + a.count, 0)} film${
+                    appearances.reduce((n, a) => n + a.count, 0) === 1 ? '' : 's'
+                  }`
+                : 'None yet'
+            }
+          >
+            {appearances.length === 0 ? (
+              <div className="hint">Not cast in anything yet.</div>
+            ) : (
+              <>
+                <div className="section-desc">
+                  The dealerships {draft.name || 'this actor'} fronts. A dealership's audience learns one face —
+                  using the same person again is what makes that work.
+                </div>
+                <div className="campaigns">
+                  {appearances.map((a) => (
+                    <div className="campaign-row" key={a.client}>
+                      <b>{a.client}</b>
+                      <span>
+                        {a.count} film{a.count === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </Panel>
+        </div>
+      )}
       </div>
     </div>
   );

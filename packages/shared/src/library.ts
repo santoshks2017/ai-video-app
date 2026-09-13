@@ -5,7 +5,7 @@
  * layer on top.
  */
 
-import type { Gender, CategoryId, NarrationKey, AspectRatio, Resolution, TextLang } from './types.js';
+import type { Beat, Gender, CategoryId, NarrationKey, AspectRatio, Resolution, TextLang } from './types.js';
 
 /** A stored image: bytes live in Cloud Storage, this is the handle. */
 export interface StoredImage {
@@ -328,6 +328,10 @@ export interface Project {
       deleted?: boolean;
     }
   >;
+  /** The order the designer put the storyboard in, by scene key. */
+  sceneOrder?: string[];
+  /** Scenes written by hand in the storyboard. */
+  addedScenes?: Beat[];
   /**
    * The creative platform the last script was written to. Kept so the designer
    * can see what the copy is arguing before judging the lines themselves.

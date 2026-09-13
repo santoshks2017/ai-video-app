@@ -270,6 +270,44 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     set({ spec, sceneEdits: { ...edits, [key]: { ...edits[key], deleted: true } } });
   };
 
+  /**
+   * The whole film in order, including the beats this length has no room for, so
+   * a scene moved while the film is short keeps its place if it grows again.
+   */
+  const orderedKeys = (): string[] =>
+    brief
+      ? buildBeats(buildContext(brief))
+          .map((b) => b.key)
+          .filter((k): k is string => Boolean(k))
+      : [];
+
+  /** Move a scene one place. Timing and the split into parts follow on their own. */
+  const moveScene = (key: string, by: -1 | 1) => {
+    const keys = orderedKeys();
+    const i = keys.indexOf(key);
+    const j = i + by;
+    if (i < 0 || j < 0 || j >= keys.length) return;
+    const next = [...keys];
+    next[i] = keys[j]!;
+    next[j] = key;
+    set({ sceneOrder: next });
+  };
+
+  /** A scene of the designer's own, written into the film where they put it. */
+  const addScene = (afterKey?: string) => {
+    if (!project) return;
+    const key = `own:${Date.now().toString(36)}`;
+    const keys = orderedKeys();
+    const at = afterKey ? keys.indexOf(afterKey) + 1 : keys.length;
+    set({
+      addedScenes: [
+        ...(project.addedScenes ?? []),
+        { key, title: 'Your scene', shot: 'Describe the shot — what is on screen, and how it is filmed.' },
+      ],
+      sceneOrder: [...keys.slice(0, at), key, ...keys.slice(at)],
+    });
+  };
+
   const restoreScene = (key: string) => {
     if (!project) return;
     const next = { ...project.sceneEdits };
@@ -1144,6 +1182,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 deletedScenes={deletedScenes}
                 onDeleteScene={deleteScene}
                 onRestoreScene={restoreScene}
+                onMoveScene={moveScene}
+                onAddScene={addScene}
               />
             </Section>
           )}

@@ -114,6 +114,8 @@ export interface Beat {
   role?: 'open' | 'setup' | 'point' | 'proof' | 'close';
   /** Set by category assembly — the category label this beat came from. */
   cat?: string;
+  /** Written by hand in the storyboard rather than produced by a use case. */
+  added?: boolean;
   isEndCard?: boolean;
 }
 
@@ -241,6 +243,14 @@ export interface Brief {
   attachedCarPhotos?: boolean;
   /** Storyboard scenes the designer deleted, by beat key. */
   omitScenes?: string[];
+  /**
+   * The order the designer put the scenes in, by beat key. A scene not named
+   * here keeps its natural place after the ones that are, so a use case added
+   * later does not vanish.
+   */
+  sceneOrder?: string[];
+  /** Scenes written by hand in the storyboard, in the order they were added. */
+  addedScenes?: Beat[];
   /** Delivery speed. 1 is a natural read; 1.1 says the same script 10% faster, in a film 10% shorter. */
   pace?: number;
   durationSec: number;

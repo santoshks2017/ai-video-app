@@ -236,6 +236,8 @@ export function Storyboard({
   onLength,
   deletedScenes = [],
   onDeleteScene,
+  onMoveScene,
+  onAddScene,
   onRestoreScene,
 }: {
   scenePlan: ScenePlan | null;
@@ -261,6 +263,10 @@ export function Storyboard({
   deletedScenes?: { key: string; title: string; cat: string }[];
   onDeleteScene?: (key: string) => void;
   onRestoreScene?: (key: string) => void;
+  /** Move a scene one place earlier or later in the film. */
+  onMoveScene?: (key: string, by: -1 | 1) => void;
+  /** Write a scene of your own, straight after this one. */
+  onAddScene?: (afterKey?: string) => void;
 }) {
   const [writing, setWriting] = useState(false);
   const [scriptNote, setScriptNote] = useState('');
@@ -519,6 +525,33 @@ export function Storyboard({
                         <br />
                         {sc.duration}s
                       </div>
+                      {/* Where this scene sits in the film. Moving one re-times the
+                          scenes and re-packs the parts: a scene that no longer fits
+                          in a part pushes the rest into the next one. */}
+                      {onMoveScene && (
+                        <div className="sb-move">
+                          <button
+                            type="button"
+                            className="btn ghost small"
+                            disabled={gi === 0}
+                            aria-label={`Move ${sc.beat.title} earlier`}
+                            title="Move earlier"
+                            onClick={() => onMoveScene(key, -1)}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="btn ghost small"
+                            disabled={gi === scenePlan.scenes.filter((x) => !x.beat.isEndCard).length - 1}
+                            aria-label={`Move ${sc.beat.title} later`}
+                            title="Move later"
+                            onClick={() => onMoveScene(key, 1)}
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      )}
                       {onDeleteScene && (
                         <button
                           type="button"
@@ -532,6 +565,16 @@ export function Storyboard({
                           onClick={() => onDeleteScene(key)}
                         >
                           Delete scene
+                        </button>
+                      )}
+                      {onAddScene && (
+                        <button
+                          type="button"
+                          className="btn ghost small sb-del"
+                          title="Write a scene of your own, straight after this one"
+                          onClick={() => onAddScene(key)}
+                        >
+                          + Scene below
                         </button>
                       )}
                     </td>
@@ -581,6 +624,16 @@ export function Storyboard({
             </tbody>
           </table>
         </div>
+        {onAddScene && (
+          <div className="toolbar">
+            <button type="button" className="btn small" onClick={() => onAddScene()}>
+              + Add a scene at the end
+            </button>
+            <span className="hint" style={{ marginTop: 0 }}>
+              A scene you write is never one of the ones dropped to make the film fit.
+            </span>
+          </div>
+        )}
         {deletedScenes.length > 0 && onRestoreScene && (
           <div className="sb-deleted">
             <span className="hint">Deleted scenes:</span>

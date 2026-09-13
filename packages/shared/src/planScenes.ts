@@ -57,6 +57,8 @@ export function fitBeats(beats: Beat[], target: number): Beat[] {
   const last = beats[beats.length - 1]!;
   keep.add(first);
   keep.add(last);
+  // A scene written by hand is never one of the ones dropped to make room.
+  for (const b of beats) if (b.added) keep.add(b);
 
   // One beat from every use case, so nothing gets silently dropped entirely.
   for (const list of byCat.values()) {

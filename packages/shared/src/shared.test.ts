@@ -22,7 +22,6 @@ import {
   VEO_31_FAST_DEFAULTS,
   runChecks,
   estimateCost,
-  planScenes,
   buildBeats,
   buildContext,
   isPromptOnly,
@@ -40,6 +39,8 @@ import {
   PROJECT_STAGES,
   ageBandOf,
   usualActorFor,
+  inOrder,
+  planScenes,
   type BriefPlan,
   type CarModelProfile,
   type ActorProfile,
@@ -840,4 +841,44 @@ test('a client has a usual actor, and ties go to the one seen last', () => {
 
   const tied = usualActorFor([p('c1', 'meera', 3), p('c1', 'riya', 9)], 'c1');
   assert.equal(tied?.actorId, 'riya', 'the dealership was last seen with Riya');
+});
+
+/* ---------------------------------------------------------------------------
+ * A storyboard the designer has rearranged.
+ * ------------------------------------------------------------------------ */
+
+test('scenes take the order they were put in, and new ones keep their place', () => {
+  const beat = (key: string): Beat => ({ key, title: key, shot: `a shot of ${key}` });
+  const film = [beat('a'), beat('b'), beat('c'), beat('d')];
+
+  assert.deepEqual(inOrder(film, undefined).map((b) => b.key), ['a', 'b', 'c', 'd'], 'no order, no change');
+  assert.deepEqual(inOrder(film, ['c', 'a', 'b', 'd']).map((b) => b.key), ['c', 'a', 'b', 'd']);
+
+  // A use case picked after the film was arranged is not in the saved order.
+  assert.deepEqual(
+    inOrder([...film, beat('new')], ['c', 'a']).map((b) => b.key),
+    ['c', 'a', 'b', 'd', 'new'],
+    'what was placed comes first, the rest keep their natural order',
+  );
+});
+
+test('moving a scene re-packs the parts to the model\u2019s clip cap', () => {
+  const beat = (key: string): Beat => ({ key, title: key, shot: `a shot of ${key}`, dialogue: 'a line' });
+  const beats = ['a', 'b', 'c', 'd', 'e', 'f'].map(beat);
+  const plan = planScenes(beats, 36, 10, { speaks: true });
+
+  // No part may run past the cap, and no scene is split across one.
+  const byPart = new Map<number, number>();
+  for (const sc of plan.scenes) byPart.set(sc.part, (byPart.get(sc.part) ?? 0) + sc.duration);
+  for (const [, len] of byPart) assert.ok(len <= 10.05, `a part ran ${len}s, over the 10s cap`);
+  assert.equal(plan.scenes.length, beats.length, 'nothing was dropped at this length');
+
+  // The same beats in another order still respect the cap — the scenes that no
+  // longer fit are pushed into the next part rather than overrunning.
+  const moved = [beats[3]!, beats[0]!, beats[1]!, beats[2]!, beats[4]!, beats[5]!];
+  const after = planScenes(moved, 36, 10, { speaks: true });
+  const lens = new Map<number, number>();
+  for (const sc of after.scenes) lens.set(sc.part, (lens.get(sc.part) ?? 0) + sc.duration);
+  for (const [, len] of lens) assert.ok(len <= 10.05, `a part ran ${len}s after the move`);
+  assert.deepEqual(after.scenes.map((s) => s.beat.key), ['d', 'a', 'b', 'c', 'e', 'f']);
 });

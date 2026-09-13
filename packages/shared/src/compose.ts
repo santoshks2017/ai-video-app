@@ -292,6 +292,12 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   // Cars are driven and bikes are ridden — decided once, from what the film shows.
   b.vehicleKind = car?.kind ?? client?.vehicleKind ?? b.lineup?.kind ?? 'car';
 
+  // The storyboard as the designer arranged it: their order, and any scene they
+  // wrote themselves. Timing and the split into parts are worked out downstream,
+  // so a scene moved into a full part pushes the rest along on its own.
+  if (project.sceneOrder?.length) b.sceneOrder = project.sceneOrder;
+  if (project.addedScenes?.length) b.addedScenes = project.addedScenes;
+
   // Reference images, most-specific first: car → client logo/photos → project extras.
   const attachments: DealerPhoto[] = [];
   // Photos attached to the project are the vehicle. They outrank the library, because

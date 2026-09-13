@@ -83,7 +83,11 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
    * recognisable signature should be.
    */
   lines.push(
-    '- NO LETTERING ANYWHERE IN THE FRAME. Not one letter, digit or word, on anything, at any distance, in or out of focus: no signage, fascia, banner, poster, standee, price board, sticker, screen, brochure or number plate with anything written on it, no watermark, no caption, no subtitle. Where a real place would carry writing, render the surface blank or turn it away from camera or let it fall out of focus entirely. Badges moulded into the vehicle itself are part of the vehicle and stay. Every word the viewer reads is added afterwards.',
+    '- NO LETTERING ANYWHERE IN THE FRAME. Not one letter, digit or word, on anything, at any distance, in or out of focus: no signage, fascia, banner, poster, standee, price board, sticker, screen, brochure, no watermark, no caption, no subtitle. Where a real place would carry writing, render the surface blank, or turn it away from camera, or let it fall out of focus entirely. Number plates are always blank — never characters on a plate. Every word the viewer reads is added afterwards.',
+    `- The only lettering allowed anywhere is a badge moulded into the ${noun} itself, and only when it is legible in the supplied photographs and you can reproduce it character for character. If you cannot, leave that panel plain — an unbadged tailgate is fine, an invented one is not. A run came back with "XUV 3OO" on the plate and a wordmark that spelled nothing.`,
+  );
+  lines.push(
+    `- Build this ${noun} only from the supplied photographs. Every panel, lamp, badge, wheel and surface is copied from them, and nothing about it comes from anywhere else — not from another ${noun} of this name, not from an earlier generation, not from anything you have seen elsewhere. If a shot would need a view of the ${noun} the photographs do not cover, film an angle they do cover, or hold the camera closer, or let the ${noun} sit out of focus — never fill the gap from memory.`,
   );
   lines.push(
     `- Every lamp on the ${noun} is complete and lit exactly as in the photographs — the full headlamp signature, the daytime running lamps and the connected tail bar, each one present, the right shape and the right length, and glowing. Never leave a dark panel, a blank recess or a half-drawn lamp where a light belongs.`,

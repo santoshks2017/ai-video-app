@@ -18,10 +18,19 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '3.3';
+export const APP_VERSION = '3.4';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '3.4',
+    date: '2026-09-13',
+    title: 'Approving a spend, from wherever the run has got to',
+    changes: [
+      'A generation over \u20b9500 needs the spend approved, and the tick that approves it rendered only while nothing had been run yet \u2014 so the moment a run failed, the approval disappeared while the button still required it, and Regenerate could not be pressed at all. It is shown now whenever there is a spend to approve and nothing is in flight, and the disabled button says which of the three things is holding it: your role, a blocking check, or the approval.',
+      'Each paid run is approved on its own. An approval that outlived the run it was given for would let the next one through without anyone looking at the figure again.',
+    ],
+  },
   {
     version: '3.3',
     date: '2026-09-13',

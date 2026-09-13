@@ -190,6 +190,9 @@ export function GenerationPanel({
       id,
     );
     setStartedAt(null);
+    // Every paid run is approved on its own. A tick that outlived the run it was
+    // for would let the next one through without anybody looking at the figure.
+    setConfirmed(false);
     void loadEta();
     if (isApiError(r)) {
       setStatus('error');
@@ -350,10 +353,21 @@ export function GenerationPanel({
           </div>
         )}
 
-        {needsCostConfirm && status === 'idle' && (
-          <label className="check-row">
+        {/*
+          * The approval, wherever the run has got to.
+          *
+          * It used to render only while the status was idle — so the moment a run
+          * failed, the tick that unblocks the button disappeared while the button
+          * still required it, and Regenerate could not be pressed at all. It is
+          * shown now whenever the spend needs approving and nothing is in flight.
+          */}
+        {needsCostConfirm && status !== 'running' && (
+          <label className={`cost-approve${confirmed ? ' on' : ''}`}>
             <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-            <span>Over ₹500 (est. ₹{costInr.toLocaleString('en-IN')}) — confirm the spend.</span>
+            <span>
+              <b>₹{costInr.toLocaleString('en-IN')}</b> is over the ₹500 threshold — approve the spend to
+              {status === 'done' || status === 'error' ? ' generate again' : ' generate'}.
+            </span>
           </label>
         )}
 
@@ -362,7 +376,15 @@ export function GenerationPanel({
             className="btn primary"
             disabled={blocked || status === 'running'}
             onClick={run}
-            title={!canGenerate ? 'Resolve the blocking pre-flight checks first' : ''}
+            title={
+              !canGenerateRole
+                ? 'Your account cannot generate videos — ask an admin to make you a creator'
+                : !canGenerate
+                  ? 'Resolve the blocking pre-flight checks first'
+                  : needsCostConfirm && !confirmed
+                    ? `Approve the ₹${costInr.toLocaleString('en-IN')} spend above first`
+                    : ''
+            }
           >
             {status === 'running'
               ? 'Generating…'

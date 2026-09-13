@@ -1430,6 +1430,25 @@ code {
 }
 .sb-angle-dl dd { margin: 0; }
 
+/* Approving a spend. It gates a paid call, so it looks like a thing to read
+   rather than a checkbox in a corner. */
+.cost-approve {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--warn);
+  border-radius: var(--radius);
+  background: var(--warn-wash);
+  font-size: 12.5px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.cost-approve input { margin: 2px 0 0; flex: none; }
+.cost-approve b { font-variant-numeric: tabular-nums; }
+.cost-approve.on { border-style: solid; border-color: var(--line-strong); background: var(--surface-2); }
+
 /* The explanation, behind a mark instead of across a line of its own. */
 .info { position: relative; display: inline-flex; vertical-align: middle; margin-left: 5px; }
 .info-mark {

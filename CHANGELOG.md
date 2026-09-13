@@ -1,10 +1,16 @@
 # Changelog
 
-Current version: **3.3**
+Current version: **3.4**
 
 Minor bumps for every shipped change; the major number moves only for an
 overhaul of how the app works. Generated from `packages/shared/src/changelog.ts`
 — edit that, then run `npm run changelog`.
+
+## 3.4 — Approving a spend, from wherever the run has got to
+_2026-09-13_
+
+- A generation over ₹500 needs the spend approved, and the tick that approves it rendered only while nothing had been run yet — so the moment a run failed, the approval disappeared while the button still required it, and Regenerate could not be pressed at all. It is shown now whenever there is a spend to approve and nothing is in flight, and the disabled button says which of the three things is holding it: your role, a blocking check, or the approval.
+- Each paid run is approved on its own. An approval that outlived the run it was given for would let the next one through without anyone looking at the figure again.
 
 ## 3.3 — Draw the scene before you film it, and keep the lines that are right
 _2026-09-13_

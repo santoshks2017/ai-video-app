@@ -723,6 +723,66 @@ export async function cardPng(
 }
 
 /**
+ * Several photographs as one labelled reference image.
+ *
+ * A video model is given a handful of reference slots, and four separate photos
+ * of a car spend four of them — with nothing to say which is which. One contact
+ * sheet spends a single slot, carries every angle at once, and names each tile,
+ * so the prompt can say "the rear is the tile marked REAR" instead of hoping.
+ *
+ * Tiles keep their own proportions on white; nothing is cropped, because a
+ * cropped car is exactly the ambiguity this is trying to remove.
+ */
+export async function contactSheet(
+  tiles: { bytes: Buffer; label: string }[],
+  opts: { cell?: number } = {},
+): Promise<Buffer | null> {
+  const items = tiles.filter((t) => t.bytes?.length).slice(0, 6);
+  if (items.length < 2) return null;
+  const CELL = opts.cell ?? 512;
+  const LABEL = Math.round(CELL * 0.1);
+  const cols = items.length <= 2 ? items.length : items.length <= 4 ? 2 : 3;
+  const rows = Math.ceil(items.length / cols);
+
+  const cells = await Promise.all(
+    items.map(async (t) => {
+      const art = await sharp(t.bytes)
+        .resize(CELL, CELL - LABEL, { fit: 'contain', background: '#ffffff' })
+        .toBuffer()
+        .catch(() => null);
+      if (!art) return null;
+      const caption = Buffer.from(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${CELL}" height="${LABEL}">
+          <rect width="${CELL}" height="${LABEL}" fill="#111111"/>
+          <text x="${CELL / 2}" y="${Math.round(LABEL * 0.74)}" text-anchor="middle" font-family="${FONT}"
+            font-size="${Math.round(LABEL * 0.58)}" font-weight="700" letter-spacing="1.5" fill="#ffffff">${esc(
+              t.label.toUpperCase(),
+            )}</text>
+        </svg>`,
+      );
+      return sharp({ create: { width: CELL, height: CELL, channels: 3, background: '#ffffff' } })
+        .composite([
+          { input: art, top: 0, left: 0 },
+          { input: caption, top: CELL - LABEL, left: 0 },
+        ])
+        .jpeg({ quality: 90 })
+        .toBuffer();
+    }),
+  );
+
+  const good = cells.filter((c): c is Buffer => Boolean(c));
+  if (good.length < 2) return null;
+  return sharp({
+    create: { width: cols * CELL, height: rows * CELL, channels: 3, background: '#ffffff' },
+  })
+    .composite(
+      good.map((input, i) => ({ input, left: (i % cols) * CELL, top: Math.floor(i / cols) * CELL })),
+    )
+    .jpeg({ quality: 88 })
+    .toBuffer();
+}
+
+/**
  * Build the finished video. Returns an MP4 buffer.
  * A single segment with no overlays short-circuits to the input untouched.
  */

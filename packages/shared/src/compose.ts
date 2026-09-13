@@ -347,6 +347,14 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
       if (first) attachments.push(toDealerPhoto(first, 'car-model'));
     }
   }
+  // The presenter's own photograph. Described in prose the look drifts — hair up
+  // in one part, down in the next — and prose is all this used to be.
+  if (actor?.photo?.storagePath) {
+    attachments.push({
+      ...toDealerPhoto(actor.photo, 'actor'),
+      label: `${actor.name || 'The presenter'} — the person on camera`,
+    });
+  }
   if (client?.logo) attachments.push(toDealerPhoto(client.logo, 'logo'));
   if (client?.brandLogo) attachments.push(toDealerPhoto(client.brandLogo, 'brand-logo'));
   for (const img of client?.photos ?? []) attachments.push(toDealerPhoto(img, 'dealer'));

@@ -39,7 +39,7 @@ export type TextLang = 'english' | 'mixed' | 'hindi';
  * Seedance tops out at 720p — so the server renders at the model's best native
  * size and upscales in post (see renderResolution in library.ts).
  */
-export type Resolution = '480p' | '720p' | '1080p';
+export type Resolution = '360p' | '480p' | '720p' | '1080p';
 
 export interface CategoryField {
   id: string;
@@ -168,7 +168,7 @@ export interface DealerPhoto {
   refId?: string;
   /** Cloud Storage path of the uploaded bytes; read at generate time to ground the model. */
   storagePath?: string;
-  kind: 'dealer' | 'car-model' | 'logo' | 'brand-logo';
+  kind: 'dealer' | 'car-model' | 'logo' | 'brand-logo' | 'actor';
   /** For a car photo, the part of the car it shows — what a scene about that part is matched to. */
   angle?: 'front' | 'side' | 'rear' | 'interior';
 }

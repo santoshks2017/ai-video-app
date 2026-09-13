@@ -47,7 +47,7 @@ import {
   listAllJobDocs,
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
-import { composeFinal, lastFrame, posterFrame, selfTest, trimClip, type BrandOverlay } from './post.js';
+import { composeFinal, contactSheet, lastFrame, posterFrame, selfTest, trimClip, type BrandOverlay } from './post.js';
 import { bearer } from './auth.js';
 import {
   resolveIdToken,
@@ -870,7 +870,9 @@ app.post<{ Body: { url?: string; query?: string } }>('/api/clients/gmb', async (
  * out at 720p — in which case post-production upscales (see renderSegment).
  */
 const wantedResolution = (brief: Brief): Resolution =>
-  brief.resolution === '1080p' || brief.resolution === '480p' ? brief.resolution : '720p';
+  brief.resolution === '1080p' || brief.resolution === '480p' || brief.resolution === '360p'
+    ? brief.resolution
+    : '720p';
 
 interface GenerateBody {
   brief: Brief;
@@ -975,8 +977,9 @@ async function renderSegment(
     /** A frame of the vehicle from the opening part — what it must keep looking like. */
     anchorFrame?: Buffer;
     /** Photos of the vehicle for this part, best first. These outrank everything. */
-    carRefs?: OmniRef[];
-    references: OmniRef[];
+    carRefs?: LabelledRef[];
+    /** Everything else in scope — the showroom, the team, project extras. */
+    references: LabelledRef[];
   },
 ): Promise<{ bytes: Buffer; interactionId: string; renderResolution: Resolution }> {
   const seeded = Boolean(req.seedFrame) && model.supportsImageToVideo;
@@ -985,15 +988,17 @@ async function renderSegment(
   if (model.provider === 'byteplus-ark') {
     const refs: SeedanceRef[] = [];
     if (seeded) refs.push({ data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', role: 'first_frame' });
-    for (const r of req.references.slice(0, Math.max(0, model.maxReferenceImages - refs.length))) {
-      if (r.data) refs.push({ data: r.data, mimeType: r.mimeType, role: 'reference_image' });
+    const all = [...(req.carRefs ?? []), ...req.references];
+    for (const r of all.slice(0, Math.max(0, model.maxReferenceImages - refs.length))) {
+      if (r.ref.data) refs.push({ data: r.ref.data, mimeType: r.ref.mimeType, role: 'reference_image' });
     }
     const clip = await generateSeedanceClip(
       {
         prompt: req.prompt,
         model: model.modelId,
         aspect: req.aspect,
-        resolution: render,
+        // Seedance renders 480p/720p/1080p; a 360p ask lands on its smallest.
+        resolution: render === '360p' ? '480p' : render,
         duration: req.duration,
         minSec: model.minClipSec,
         maxSec: model.maxClipSec,
@@ -1019,10 +1024,10 @@ async function renderSegment(
         resolution: veoRes,
         duration: req.duration,
         firstFrame: seeded ? { data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg' } : undefined,
-        references: req.references
-          .filter((r) => r.kind === 'image' && r.data)
+        references: [...(req.carRefs ?? []), ...req.references]
+          .filter((r) => r.ref.kind === 'image' && r.ref.data)
           .slice(0, Math.min(3, model.maxReferenceImages))
-          .map((r) => ({ data: r.data!, mimeType: r.mimeType })),
+          .map((r) => ({ data: r.ref.data!, mimeType: r.ref.mimeType })),
       },
       model.apiKey,
     );
@@ -1035,33 +1040,65 @@ async function renderSegment(
 
   // Google Gemini (Omni Flash): the seed frame is frame 1, so the model
   // continues the motion rather than restarting it.
-  const refs: OmniRef[] = [];
-  if (seeded) refs.push({ data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
-  // A continuation is built on the previous part's last frame. Sending the car's catalogue
-  // photos with it is how a white-backdrop product shot got cut into the middle of a film —
-  // but with nothing but one frame to go on, a later part drifted to an older generation of
-  // the car. So it gets a frame of the car from THIS film's opening part instead: the right
-  // vehicle, already in the right place, and nothing a model would mistake for a shot.
-  // Photos of the actual vehicle beat a frame of it: the frame can only be as right as
-  // the part it came from, and a film that started from the wrong photos is wrong in it.
-  const car = req.carRefs ?? [];
-  const room = () => Math.max(0, model.maxReferenceImages - refs.length);
+  const shown: LabelledRef[] = [];
   if (seeded) {
-    // Photos of the vehicle first: the seed frame carries the setting and the
-    // presenter, but only a photo can hold the model to the right vehicle.
-    refs.push(...car.slice(0, room()));
-    if (!car.length && req.anchorFrame && room() > 0) {
-      refs.push({ data: req.anchorFrame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' });
-    }
-  } else {
-    // The opening part sets the whole film up, so it keeps one slot for the
-    // showroom and the rest for the vehicle — the car is what goes wrong, but a
-    // film with no idea what the dealership looks like is its own problem.
-    refs.push(...car.slice(0, Math.max(1, model.maxReferenceImages - 1)));
-    const rest = req.references.filter((r) => !refs.includes(r));
-    refs.push(...rest.slice(0, room()));
+    shown.push({
+      ref: { data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', kind: 'image' },
+      label: 'the last frame of the previous part — this part continues from it',
+      filename: 'seed-frame.jpg',
+    });
   }
+  /*
+   * The vehicle first — it is what goes wrong — then the presenter, then the
+   * place, then the rest.
+   *
+   * A continuation used to be built on frames alone: the previous part's last
+   * frame plus one from the opening. A frame can only be as right as the part it
+   * came from, so a film that drifted stayed drifted, and no part after the first
+   * ever saw a photograph of the car. With ten slots every part now carries the
+   * lot, and each slot is named in the prompt so the model is not left guessing
+   * which image is which.
+   */
+  const car = req.carRefs ?? [];
+  const room = () => Math.max(0, model.maxReferenceImages - shown.length);
+  shown.push(...car.slice(0, room()));
+  if (!car.length && req.anchorFrame && room() > 0) {
+    shown.push({
+      ref: { data: req.anchorFrame.toString('base64'), mimeType: 'image/jpeg', kind: 'image' },
+      label: 'a frame of the vehicle from the opening part — it must keep looking like this',
+      filename: 'anchor-frame.jpg',
+    });
+  }
+  shown.push(...req.references.slice(0, room()));
+  const refs = shown.map((r) => r.ref);
 
+  /*
+   * Which image is which.
+   *
+   * Google's own examples address references as <IMAGE_REF_0>, <IMAGE_REF_1> …
+   * so the model is told what each slot holds rather than left to work out which
+   * photograph is the car, which is the showroom and which is the frame it is
+   * continuing. Ten unexplained images are ten guesses.
+   */
+  const legend = shown.length
+    ? [
+        '## REFERENCE IMAGES',
+        ...shown.map((r, i) => `<IMAGE_REF_${i}> — ${r.label}`),
+        // A grid of photographs is a thing a video model will happily render as a
+        // grid of photographs. Said once, plainly, beside the sheet it applies to.
+        ...(shown.some((r) => r.sheet)
+          ? [
+              '',
+              'A "sheet" is several separate photographs of the same subject laid out in one image, each tile labelled. It tells you what the subject looks like from every side. Never put a grid, a collage, a label or a photograph on screen — film the real subject in the real location.',
+            ]
+          : []),
+        '',
+      ].join('\n')
+    : '';
+  const promptWithLegend = legend ? `${legend}\n${req.prompt}` : req.prompt;
+
+  // Omni renders 360p, 720p, 1080p and 4K — never 480p, which renderResolution
+  // has already mapped away; this is the last guard.
   const omniRes = render === '480p' ? '720p' : render;
   /**
    * How many references the provider actually accepts is a property of the model,
@@ -1073,7 +1110,7 @@ async function renderSegment(
     try {
       return await generateClip(
         {
-          prompt: req.prompt,
+          prompt: promptWithLegend,
           aspect: req.aspect,
           resolution: omniRes,
           references: list.length ? list : undefined,
@@ -1120,16 +1157,25 @@ async function renderSegment(
  * references get grounded into the model, logos are overlay assets that post
  * composites (the model garbles any logo it tries to draw).
  */
-/** A reference image with what it is a picture of, so a part can be given the right one. */
-interface CarRef {
+/** A reference image and what it is a picture of — the legend the prompt cites. */
+interface LabelledRef {
   ref: OmniRef;
-  filename: string;
+  /** Named in the prompt beside its slot: "the vehicle, front three-quarter". */
   label: string;
+  /** The stored filename, for the run's receipt. */
+  filename: string;
+  /** A contact sheet — several photographs in one image, which must never be drawn as one. */
+  sheet?: boolean;
+}
+
+/** A photo of the vehicle, with the side of it that the photo shows. */
+interface CarRef extends LabelledRef {
   angle?: DealerPhoto['angle'];
 }
 
 async function loadBriefAssets(brief: Brief): Promise<{
-  references: OmniRef[];
+  /** Everything that is not the vehicle: the showroom, the team, project extras. */
+  references: LabelledRef[];
   /**
    * Every photo of the vehicle in scope — attached to the project or from the
    * library — each carrying the side it shows. Continuation parts are sent one of
@@ -1137,13 +1183,22 @@ async function loadBriefAssets(brief: Brief): Promise<{
    * right as the part it came from.
    */
   carRefs: CarRef[];
+  /** Every angle of the vehicle as one labelled sheet: one slot, the whole car. */
+  vehicleSheet?: LabelledRef;
+  /** The showroom in one sheet, for the same reason. */
+  placeSheet?: LabelledRef;
   dealerLogo?: Buffer;
   brandLogo?: Buffer;
 }> {
-  const references: OmniRef[] = [];
+  const references: LabelledRef[] = [];
   const carRefs: CarRef[] = [];
+  let actorRef: LabelledRef | undefined;
+  const carTiles: { bytes: Buffer; label: string }[] = [];
+  const placeTiles: { bytes: Buffer; label: string }[] = [];
   let dealerLogo: Buffer | undefined;
   let brandLogo: Buffer | undefined;
+  const noun = brief.vehicleKind === 'bike' ? 'the bike' : 'the car';
+
   for (const a of brief.attachments ?? []) {
     if (!a.storagePath) continue;
     const obj = await readObject(a.storagePath).catch(() => null);
@@ -1161,10 +1216,55 @@ async function loadBriefAssets(brief: Brief): Promise<{
       mimeType: obj.contentType || 'image/jpeg',
       kind: 'image',
     };
-    references.push(ref);
-    if (a.kind === 'car-model') carRefs.push({ ref, filename: a.filename, label: a.label, angle: a.angle });
+    if (a.kind === 'car-model') {
+      const side = a.angle ? `${noun}, ${a.angle}` : `${noun} — ${a.label}`;
+      carRefs.push({ ref, filename: a.filename, label: side, angle: a.angle });
+      carTiles.push({ bytes: obj.bytes, label: a.angle ?? 'the vehicle' });
+    } else if (a.kind === 'actor') {
+      // First of the rest: the same face, hair and clothes in every part.
+      actorRef = {
+        ref,
+        filename: a.filename,
+        label: `${a.label} — the same face, hair and clothes in every shot`,
+      };
+    } else {
+      references.push({ ref, filename: a.filename, label: `the dealership — ${a.label}` });
+      placeTiles.push({ bytes: obj.bytes, label: 'showroom' });
+    }
   }
-  return { references, carRefs, dealerLogo, brandLogo };
+
+  // One sheet each rather than one slot each: a contact sheet carries every angle
+  // in a single reference image, and names the tiles so the prompt can cite them.
+  const sheetOf = async (
+    tiles: { bytes: Buffer; label: string }[],
+    label: string,
+    filename: string,
+  ): Promise<LabelledRef | undefined> => {
+    const bytes = await contactSheet(tiles).catch(() => null);
+    if (!bytes) return undefined;
+    return {
+      ref: { data: bytes.toString('base64'), mimeType: 'image/jpeg', kind: 'image' },
+      label,
+      filename,
+      sheet: true,
+    };
+  };
+
+  const vehicleSheet = await sheetOf(
+    carTiles,
+    `every angle of ${noun} in one sheet, each tile labelled`,
+    'vehicle-sheet.jpg',
+  );
+  const placeSheet = await sheetOf(placeTiles, 'the dealership in one sheet', 'showroom-sheet.jpg');
+
+  return {
+    references: actorRef ? [actorRef, ...references] : references,
+    carRefs,
+    vehicleSheet,
+    placeSheet,
+    dealerLogo,
+    brandLogo,
+  };
 }
 
 /** Angles in the order they are worth showing when a part asks for nothing specific. */
@@ -1431,7 +1531,11 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
 
   // The music is made while the segments render, and waited for only at the stitch.
   const musicBed = makeMusicBed(brief, jobId, cost.totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0));
-  const { references, carRefs, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+  const { references: otherRefs, carRefs, vehicleSheet, placeSheet, dealerLogo, brandLogo } =
+    await loadBriefAssets(brief);
+  // The presenter leads what is left, then the showroom as one sheet, then its
+  // photos individually.
+  const references: LabelledRef[] = placeSheet ? [...otherRefs.slice(0, 1), placeSheet, ...otherRefs.slice(1)] : otherRefs;
   const scenePlan = buildPrompt(brief, { sceneOverrides: req.body?.sceneOverrides })?.scenePlan ?? null;
   /** What each part was actually shown, kept on the record so a wrong car is traceable. */
   const sentRefs: { part: number; files: string[] }[] = [];
@@ -1465,8 +1569,12 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
         !isFirst && prevBytes ? ((await lastFrame(prevBytes)) ?? undefined) : undefined;
 
       // The photos of the vehicle this part frames — the cabin shot for a cabin
-      // scene, the rear for a rear scene — rather than whatever came first.
-      const partCars = carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs);
+      // scene, the rear for a rear scene — rather than whatever came first. The
+      // sheet leads: one image holding every angle, then the angles themselves.
+      const partCars: LabelledRef[] = [
+        ...(vehicleSheet ? [vehicleSheet] : []),
+        ...carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs),
+      ];
       sentRefs.push({ part: part.partNum, files: partCars.map((r) => r.filename) });
 
       const renderStart = Date.now();
@@ -1478,7 +1586,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
           resolution: wanted,
           seedFrame,
           anchorFrame,
-          carRefs: partCars.map((r) => r.ref),
+          carRefs: partCars,
           references,
         });
       let { bytes, interactionId } = await ask();
@@ -1494,7 +1602,10 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
        */
       if (partCars.length && brief.carModel && resolved.provider === 'google-gemini') {
         const frame = await posterFrame(bytes, Math.min(2.5, part.duration * 0.5)).catch(() => null);
-        const refPhoto = partCars[0]!.ref.data ? Buffer.from(partCars[0]!.ref.data!, 'base64') : null;
+        // Checked against a single photo, never the sheet — a grid of four cars
+        // is not what one frame should look like.
+        const single = carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs)[0];
+        const refPhoto = single?.ref.data ? Buffer.from(single.ref.data, 'base64') : null;
         if (frame && refPhoto) {
           const verdict = await checkVehicleFrame(frame, refPhoto, brief.carModel, resolved.apiKey);
           if (verdict.checked) {
@@ -1841,13 +1952,23 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       : redo.length === parts.length
         ? makeMusicBed(brief, jobId, totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0))
         : Promise.resolve(null);
-    const { references, carRefs, dealerLogo, brandLogo } = await loadBriefAssets(brief);
+    const { references: otherRefs, carRefs, vehicleSheet, placeSheet, dealerLogo, brandLogo } =
+      await loadBriefAssets(brief);
+    const references: LabelledRef[] = placeSheet
+      ? [...otherRefs.slice(0, 1), placeSheet, ...otherRefs.slice(1)]
+      : otherRefs;
     const scenePlan = buildPrompt(brief, { sceneOverrides: req.body?.sceneOverrides })?.scenePlan ?? null;
     // Images attached to this retake: "the car is wrong in these frames — here is the car".
-    const attached: OmniRef[] = [];
-    for (const a of req.body?.attachments ?? []) {
+    const attached: LabelledRef[] = [];
+    for (const [i, a] of (req.body?.attachments ?? []).entries()) {
       const obj = a.storagePath ? await readObject(a.storagePath).catch(() => null) : null;
-      if (obj) attached.push({ data: obj.bytes.toString('base64'), mimeType: obj.contentType || 'image/jpeg', kind: 'image' });
+      if (obj) {
+        attached.push({
+          ref: { data: obj.bytes.toString('base64'), mimeType: obj.contentType || 'image/jpeg', kind: 'image' },
+          label: 'attached with this retake — the vehicle it must show',
+          filename: a.storagePath?.split('/').pop() ?? `retake-${i + 1}.jpg`,
+        });
+      }
     }
 
     try {
@@ -1899,7 +2020,10 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
             // An image attached to the retake outranks even the project's vehicle photos.
             carRefs: attached.length
               ? attached
-              : carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs).map((r) => r.ref),
+              : [
+                  ...(vehicleSheet ? [vehicleSheet] : []),
+                  ...carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs),
+                ],
             references: attached.length ? [...attached, ...references] : references,
           });
           bytes = rendered.bytes;

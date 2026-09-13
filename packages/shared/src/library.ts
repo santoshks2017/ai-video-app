@@ -538,17 +538,17 @@ export const OMNI_FLASH_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' 
   modelId: 'gemini-omni-1.1-flash',
   minClipSec: 3,
   maxClipSec: 10,
-  resolutions: ['720p', '1080p'],
+  resolutions: ['360p', '720p', '1080p'],
   aspects: ['9:16', '16:9'],
   supportsImageToVideo: true,
   supportsReferenceImages: true,
   /**
-   * Three, not two: a continuation part needs the frame it carries on from AND a
-   * photo of the vehicle, and with room for only two the vehicle was the one that
-   * got dropped. If the provider refuses three it is asked again with fewer, so
-   * this number can be raised without risking a run.
+   * Ten, which is what Omni 1.1 Flash accepts. The vehicle, the showroom and the
+   * presenter all reach every part, alongside the frame it continues from — and
+   * if a provider ever refuses the set, it is asked again with one fewer rather
+   * than failing the run.
    */
-  maxReferenceImages: 3,
+  maxReferenceImages: 10,
   usdPerSecond: 0.1,
   enabled: true,
   isDefault: true,
@@ -651,7 +651,7 @@ export const VEO_31_FAST_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId'
 
 /* ---- what each model can actually render ---- */
 
-const RES_ORDER: Resolution[] = ['480p', '720p', '1080p'];
+const RES_ORDER: Resolution[] = ['360p', '480p', '720p', '1080p'];
 
 /**
  * Resolutions each provider renders natively, by model id. Kept in code rather
@@ -660,7 +660,8 @@ const RES_ORDER: Resolution[] = ['480p', '720p', '1080p'];
  * video is rendered at 1080p or upscaled to it.
  */
 const NATIVE_RESOLUTIONS: { match: RegExp; native: Resolution[] }[] = [
-  { match: /^gemini-omni/, native: ['720p', '1080p'] },
+  // Omni renders 360p through 4K natively; the app delivers up to 1080p.
+  { match: /^gemini-omni/, native: ['360p', '720p', '1080p'] },
   { match: /^veo-3\.1-lite/, native: ['720p', '1080p'] },
   { match: /^veo-/, native: ['720p', '1080p'] },
   // Seedance 2.0 (standard) lists 1080p; 2.0 fast and 2.5 publish 480p/720p only.
@@ -685,12 +686,14 @@ export function renderResolution(
   const native = nativeResolutions(modelId, fallback);
   if (native.includes(wanted)) return { render: wanted, upscale: false };
   const rank = (r: Resolution): number => RES_ORDER.indexOf(r);
-  // Asked for more than the model can do: render its largest size below the
-  // request and upscale. Asked for less than it can do: render its smallest
-  // size — never a bigger, dearer one — and deliver that as it is.
-  const below = native.filter((r) => rank(r) < rank(wanted)).sort((a, b) => rank(b) - rank(a));
-  const above = native.filter((r) => rank(r) > rank(wanted)).sort((a, b) => rank(a) - rank(b));
-  const render = below[0] ?? above[0] ?? '720p';
+  // The model's nearest size to what was asked for, and on a tie the larger of
+  // the two: rendering 360p to deliver 480p when 720p costs the same and looks
+  // better is a downgrade nobody asked for. Anything rendered below the request
+  // is upscaled in post, which is what the designer is told.
+  const render =
+    [...native].sort(
+      (a, b) => Math.abs(rank(a) - rank(wanted)) - Math.abs(rank(b) - rank(wanted)) || rank(b) - rank(a),
+    )[0] ?? '720p';
   return { render, upscale: rank(wanted) > rank(render) };
 }
 
@@ -704,7 +707,8 @@ export function priceFor(
 }
 
 /** The short side, in pixels, of a delivered resolution. */
-export const shortSideFor = (r: Resolution): number => (r === '1080p' ? 1080 : r === '480p' ? 480 : 720);
+export const shortSideFor = (r: Resolution): number =>
+  r === '1080p' ? 1080 : r === '480p' ? 480 : r === '360p' ? 360 : 720;
 
 export const PROVIDER_LABELS: Record<ProviderKind, string> = {
   'google-gemini': 'Google — Gemini / Veo',

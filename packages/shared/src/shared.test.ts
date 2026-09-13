@@ -397,8 +397,10 @@ test('1080p renders natively where a model can and upscales where it cannot', ()
   assert.deepEqual(renderResolution(OMNI_FLASH_DEFAULTS.modelId, '1080p'), { render: '1080p', upscale: false });
   assert.deepEqual(renderResolution(SEEDANCE_25_DEFAULTS.modelId, '1080p'), { render: '720p', upscale: true });
   assert.deepEqual(renderResolution(VEO_31_FAST_DEFAULTS.modelId, '1080p'), { render: '1080p', upscale: false });
-  // Asking for less than a model's smallest size never buys a bigger render.
+  // A size the model does not render goes to its nearest, and on a tie the larger:
+  // 360p upscaled to 480p would be worse than 720p and costs the same.
   assert.deepEqual(renderResolution(OMNI_FLASH_DEFAULTS.modelId, '480p'), { render: '720p', upscale: false });
+  assert.deepEqual(renderResolution(OMNI_FLASH_DEFAULTS.modelId, '360p'), { render: '360p', upscale: false });
 
   // Priced at what is rendered: Veo Fast charges more at 1080p, an upscaled Seedance does not.
   assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '1080p'), 0.12);

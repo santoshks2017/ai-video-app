@@ -1968,3 +1968,7 @@ textarea.guide {
 /* A vehicle photo and the side of the vehicle it shows. */
 .veh-photo { display: grid; gap: 4px; width: 92px; }
 .veh-photo select { padding: 3px 5px; font-size: 11px; }
+
+/* The segment being browsed sits with the columns, not in the toolbar. */
+.browse-switch { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.browse-switch .hint { margin: 0; }

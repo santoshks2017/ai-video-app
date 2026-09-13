@@ -273,7 +273,10 @@ export function Storyboard({
   }
 
   // Logos are overlay furniture, never something a shot is framed on.
-  const refOptions = attachments.filter((a) => a.kind !== 'logo' && a.kind !== 'brand-logo');
+  // Logos are composited, and the presenter is not a shot — neither is a scene's visual.
+  const refOptions = attachments.filter(
+    (a) => a.kind !== 'logo' && a.kind !== 'brand-logo' && a.kind !== 'actor',
+  );
 
   // Every scene's photo, worked out once: the table shows it per row, and the scenes
   // that will get a generic visual are called out together above it.

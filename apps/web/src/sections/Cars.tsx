@@ -200,24 +200,6 @@ export function CarsSection() {
               placeholder="Search every brand and model…"
               aria-label="Search vehicles"
             />
-            <div className="seg">
-              {(['car', 'bike'] as const).map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  className={kind === k ? 'on' : ''}
-                  onClick={() => {
-                    setKind(k);
-                    setBrand(null);
-                    setPreview(null);
-                    setSyncLog([]);
-                    setPickedBrand(null);
-                  }}
-                >
-                  {k === 'car' ? 'Cars' : 'Bikes & scooters'}
-                </button>
-              ))}
-            </div>
           </div>
 
           <div className="sec-stack" style={{ marginTop: 10 }}>
@@ -326,6 +308,32 @@ export function CarsSection() {
             </Section>
           </div>
         </div>
+      </div>
+
+      {/* What is being browsed, right above the thing being browsed. */}
+      <div className="browse-switch">
+        <div className="seg">
+          {(['car', 'bike'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={kind === k ? 'on' : ''}
+              onClick={() => {
+                setKind(k);
+                setBrand(null);
+                setPreview(null);
+                setSyncLog([]);
+                setPickedBrand(null);
+              }}
+            >
+              {k === 'car' ? 'Cars' : 'Bikes & scooters'}
+            </button>
+          ))}
+        </div>
+        <span className="hint">
+          {brandRows.reduce((n, b) => n + b.models.length, 0)} {kind === 'bike' ? 'bikes & scooters' : 'cars'} in the
+          library
+        </span>
       </div>
 
       {/* Brand, then model, then the vehicle — each column narrowing the last. */}

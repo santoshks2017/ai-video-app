@@ -920,6 +920,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                       <option value="1080p">1080p — Full HD</option>
                       <option value="720p">720p</option>
                       <option value="480p">480p</option>
+                      <option value="360p">360p — cheap test render</option>
                     </select>
                   </Field>
                   <Field

@@ -618,7 +618,13 @@ export function GenerationPanel({
                 History — {history.length} generation{history.length > 1 ? 's' : ''}
               </span>
               <span className="history-total">
-                {formatInr(history.reduce((sum, h) => sum + (h.costInr ?? 0), 0))} total
+                {formatInr(history.filter((h) => !h.hidden).reduce((sum, h) => sum + (h.costInr ?? 0), 0))} total
+                {history.some((h) => h.hidden) && (
+                  <em title="Hidden runs are not counted in this total">
+                    {' '}
+                    · {history.filter((h) => h.hidden).length} hidden
+                  </em>
+                )}
               </span>
             </div>
             {versionNote && <div className="check bad" style={{ marginBottom: 8 }}><span className="icon">✕</span><span>{versionNote}</span></div>}
@@ -626,7 +632,7 @@ export function GenerationPanel({
               const on = (viewing ?? result?.jobId ?? history.find((x) => x.finalUrl)?.jobId) === h.jobId;
               const detail = runDetail[h.jobId];
               return (
-                <div key={h.jobId} className="hist-item">
+                <div key={h.jobId} className={`hist-item${h.hidden ? ' hidden-run' : ''}`}>
                 <button
                   type="button"
                   className={`hist-row${on ? ' on' : ''}`}
@@ -675,11 +681,29 @@ export function GenerationPanel({
                 {/* The receipt for this run: what it was made from, and what the
                     model was actually shown. It is also how an older version is
                     put back — the video is kept, so nothing is ever overwritten. */}
-                {on && (
+                {/* The actions belong to the run being watched — and to a run an admin
+                    may need to hide, which is often a failed one with no video to
+                    select in the first place. */}
+                {(on || h.hidden || (h.canHide && !h.finalUrl)) && (
                 <div className="hist-more">
                   <button type="button" className="btn ghost small" onClick={() => void showRun(h.jobId)}>
                     {openRun === h.jobId ? 'Hide details' : 'Details'}
                   </button>
+                  {h.canHide && (
+                    <button
+                      type="button"
+                      className="btn ghost small"
+                      disabled={versionBusy === `${h.jobId}:hide`}
+                      title={
+                        h.hidden
+                          ? 'Count this run again and show it to everyone'
+                          : 'Take this run out of history and out of the spend. Nothing is deleted.'
+                      }
+                      onClick={() => void runVersion(h.jobId, 'hide', () => api.hide(h.jobId, !h.hidden))}
+                    >
+                      {h.hidden ? 'Unhide' : 'Hide'}
+                    </button>
+                  )}
                   {h.finalUrl && canGenerateRole && (
                     <>
                       <button

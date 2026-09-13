@@ -54,6 +54,10 @@ export interface GenerationHistoryItem {
   kind?: 'generate' | 'retake' | 'restitch' | 'enhance' | 'upscale' | 'edit';
   /** The cut the client signed off. One per project. */
   approved?: boolean;
+  /** Taken out of history and out of the spend. Only an admin is shown these. */
+  hidden?: boolean;
+  /** Whether the person looking may hide or restore this run. */
+  canHide?: boolean;
   derivedFrom?: string;
   derivedNote?: string;
 }
@@ -172,6 +176,14 @@ export const api = {
   },
 
   /** Every generation for a project, newest first — nothing is overwritten. */
+  /** Take a run out of history and out of the spend, or put it back. Admin only. */
+  async hide(jobId: string, hidden: boolean) {
+    return await req<{ ok: true; hidden: boolean }>(`/api/generations/${jobId}/hide`, {
+      method: 'POST',
+      body: JSON.stringify({ hidden }),
+    });
+  },
+
   /** Mark (or unmark) the cut the client signed off. */
   async approve(jobId: string, approved: boolean) {
     return await req<{ ok: true; approved: boolean }>(`/api/generations/${jobId}/approve`, {

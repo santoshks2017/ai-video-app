@@ -2146,3 +2146,8 @@ textarea.guide {
 }
 .sb-move { display: flex; gap: 4px; margin-top: 8px; }
 .sb-move .btn { padding: 2px 8px; font-size: 12px; line-height: 1.2; }
+
+/* A run an admin has taken out of history and out of the spend. */
+.hist-item.hidden-run { opacity: 0.55; }
+.hist-item.hidden-run .hist-row { border-style: dashed; }
+.history-total em { font-style: normal; font-weight: 400; color: var(--ink-faint); }

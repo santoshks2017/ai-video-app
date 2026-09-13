@@ -80,6 +80,30 @@ export async function recordActivity(caller: Caller, a: Omit<Activity, 'uid' | '
   }
 }
 
+/**
+ * Take a run back off a person's running totals.
+ *
+ * Hiding a generation is how an admin keeps a bad or duplicated run out of what
+ * the team is told it has spent. The log itself is never edited — the entry
+ * stays, the totals stop counting it.
+ */
+export async function uncountRun(uid: string | undefined, costInr: number, runs = 1): Promise<void> {
+  if (!uid || uid === PREVIEW_UID) return;
+  ensureFirebase();
+  await getFirestore()
+    .collection(COLLECTION)
+    .doc(uid)
+    .set(
+      {
+        generations: FieldValue.increment(-runs),
+        spendInr: FieldValue.increment(-Math.round(costInr || 0)),
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    )
+    .catch(() => {});
+}
+
 export async function listActivity(limit = 200, uid?: string): Promise<Activity[]> {
   ensureFirebase();
   let q = getFirestore().collection(ACTIVITY).orderBy('at', 'desc').limit(limit);

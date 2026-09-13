@@ -77,6 +77,7 @@ import {
   removeUser,
   recordActivity,
   listActivity,
+  uncountRun,
   allows,
   PREVIEW_UID,
   type Caller,
@@ -205,6 +206,8 @@ function requiredRole(method: string, url: string): Role | null {
   // API credentials and roles are the keys to the kingdom — admin only.
   if (url.startsWith('/api/credentials') || url.startsWith('/api/users')) return 'admin';
   if (url.startsWith('/api/activity')) return 'admin';
+  // Hiding a run changes what the team is told it has spent: admin only.
+  if (/^\/api\/generations\/[^/]+\/hide$/.test(url)) return 'admin';
   if (url.startsWith('/api/brands') && method !== 'GET') return 'creator';
   if (url.startsWith('/api/models/seed')) return 'admin';
   if (url.startsWith('/api/models') && method !== 'GET') return 'admin';
@@ -2244,6 +2247,45 @@ async function saveDerived(
   return record;
 }
 
+/**
+ * Take a run out of history, and out of what the team has spent.
+ *
+ * Nothing is deleted: the record, its video and its receipt all stay, and an
+ * admin can put it back. What changes is what is counted — the project's spend,
+ * the person's running total, and whether anyone but an admin sees the run at
+ * all. A failed run on depleted credits is the case this exists for.
+ */
+app.post<{ Params: { jobId: string }; Body: { hidden?: boolean } }>(
+  '/api/generations/:jobId/hide',
+  async (req, reply) => {
+    const job = await getJob(req.params.jobId);
+    if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such generation' });
+    const hidden = req.body?.hidden !== false;
+    if (Boolean(job.hidden) === hidden) return { ok: true, hidden };
+
+    await updateJob(req.params.jobId, {
+      hidden,
+      hiddenAt: hidden ? Date.now() : undefined,
+      hiddenBy: hidden ? req.caller?.email : undefined,
+    });
+
+    // The counters the app reads without scanning the log follow it.
+    const cost = Math.round(job.costInr ?? 0);
+    const sign = hidden ? -1 : 1;
+    if (job.projectId) {
+      const proj = await getOne<{ generationCount?: number; totalCostInr?: number }>('projects', job.projectId);
+      if (proj) {
+        await patch('projects', job.projectId, {
+          generationCount: Math.max(0, (proj.generationCount ?? 0) + sign),
+          totalCostInr: Math.max(0, (proj.totalCostInr ?? 0) + sign * cost),
+        }).catch(() => {});
+      }
+    }
+    await uncountRun(job.userId, hidden ? cost : -cost, hidden ? 1 : -1).catch(() => {});
+    return { ok: true, hidden };
+  },
+);
+
 /** The film the client signed off. Only one version of a project holds it. */
 app.post<{ Params: { jobId: string }; Body: { approved?: boolean } }>(
   '/api/generations/:jobId/approve',
@@ -2530,7 +2572,11 @@ async function repairOrphanedJobs(): Promise<void> {
 repairOrphanedJobs().catch((e) => app.log.warn({ err: (e as Error).message }, 'generation repair failed'));
 
 app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req) => {
-  const jobs = await listJobsForProject(req.params.id);
+  const all = await listJobsForProject(req.params.id);
+  // A hidden run is still there; only an admin is shown it, and only so it can
+  // be put back.
+  const admin = allows(req.caller ?? null, 'admin');
+  const jobs = admin ? all : all.filter((j) => !j.hidden);
   return {
     items: jobs.map((j) => ({
       jobId: j.jobId,
@@ -2561,6 +2607,8 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req)
       vehicle: j.vehicle,
       kind: j.kind ?? (j.parentJobId ? 'retake' : 'generate'),
       approved: j.approved === true,
+      hidden: j.hidden === true,
+      canHide: admin,
       derivedFrom: j.derivedFrom,
       derivedNote: j.derivedNote,
       /** Whether this run can be re-opened — older runs were saved before the receipt existed. */

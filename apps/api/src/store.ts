@@ -153,6 +153,16 @@ export interface JobRecord {
   /** Set on a version: what it was made from, and what was done to it. */
   derivedFrom?: string;
   derivedNote?: string;
+  /**
+   * Taken out of history and out of what the team has spent.
+   *
+   * A run that failed on someone else's billing, or was made twice by mistake,
+   * is still a real record — it is not deleted, it stops being counted. Only an
+   * admin can do it, and only an admin can see what has been done.
+   */
+  hidden?: boolean;
+  hiddenAt?: number;
+  hiddenBy?: string;
 }
 
 /** The newest generations across every project — the history an ETA is learned from. */

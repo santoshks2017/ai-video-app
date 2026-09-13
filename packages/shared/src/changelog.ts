@@ -18,10 +18,33 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '2.7';
+export const APP_VERSION = '3.0';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '3.0',
+    date: '2026-09-13',
+    title: 'A board to work from, the right car in every part, and versions of a finished film',
+    changes: [
+      'Projects opens on a board — Open, In progress, In review, Delivered — and a card drags between the columns. Projects you already had start in the column their history puts them in: nothing generated yet is Open, a render in flight is In progress, a film that exists is In review. There is a Board / List switch if you want the old grid, and a Stage control inside each project.',
+      'The wrong car, found and fixed. Omni was being sent two reference images per part, and a continuation part spent both on frames of the film — so no part after the first was ever shown a photograph of the vehicle, and it drew the car the name brought to mind. For "XUV 3XO" that is the XUV300 it has seen far more of. Omni takes ten reference images, not two: every part now carries the vehicle, the presenter, the showroom and the frame it continues from, and each one is named in the prompt so the model is not left guessing which image is which.',
+      'Several photographs now travel as one. Front, side, rear and interior go as a single labelled contact sheet, with the tiles named, and the prompt says plainly that a sheet is a set of photographs and never something to draw on screen. The showroom gets the same treatment.',
+      'The presenter\u2019s photograph is sent to the model at all now. It used to travel as prose only — "fitted maroon polo, hair tied back" — which is how the hair changed between parts.',
+      'Every part is checked before the rest of the film is built on it: one frame is compared against the reference photograph by a vision model, and a clear mismatch is made again, once. The verdict is kept either way.',
+      'Photos of this exact vehicle takes several files at once, and each one says which side it shows, so a scene about the cabin is built on the cabin photo. When any are attached the library is ignored completely, and a warning names the sides nobody attached — because a side the model has no photo of is a side it invents.',
+      'Reference videos: up to three per project — the real showroom, the real vehicle moving — sent to the models that accept video.',
+      'Every run keeps its receipt: the brief it was made from, the prompt each part was given, the photographs each part was shown, and the project exactly as it stood. Open Details on any run to read it, or put those settings back with one button. The videos you already have are never touched.',
+      'A film that has been approved never has to be made again to be delivered. Approve marks the cut the client signed off; Upscale enlarges that exact cut to 1080p with no model involved; and the premium pass re-renders it through Seedance for finish — the same shots, people, vehicle and sound, in 29-second passes because that is Seedance\u2019s limit, joined again after. Omni writes and speaks; Seedance renders.',
+      'A cutting room, in the browser. Play to where a bad stretch starts, mark it out, drop the sound if you want, join other films from the project onto the end, and export — as a new version, leaving the original alone. It is ffmpeg, not a model: it costs nothing and cannot change what the film shows.',
+      'The joins between parts are measured now instead of asked for. On real runs one part ended with a second of dead air while the next began speaking inside its first 200ms — two seconds of nothing at one join, phrases colliding at another. Each join is cut back to a breath at the end of one part and a moment before the next speaks, and captions follow.',
+      '360p renders, for a cheap look at a film before it is made properly.',
+      'The libraries are navigable. Vehicles is brand, then model, then the vehicle, with search at the top and the sync tools folded above it. Clients and Actors have search and filters — brand, cars or bikes, city, state; gender, age range, attire.',
+      'Every client shows the films made for them, with the actor and use case on each, and names the presenter the dealership\u2019s audience knows: "Riya fronts 4 of 6 films for this client." A project offers that presenter when there is one.',
+      'What a use case needs answered now opens under the use case you picked, closed until you want it, with a count of what is still missing. Narration, on-screen text and Advanced are folds inside the Video card. Short fields sit four to a row.',
+      'A new look throughout: warm paper, hairline rules, one soft red, names set in a serif and the controls around them in Inter, and every step of the brief marked with a scene slate.',
+    ],
+  },
   {
     version: '2.7',
     date: '2026-09-11',

@@ -1,10 +1,85 @@
 # Changelog
 
-Current version: **2.1**
+Current version: **3.0**
 
 Minor bumps for every shipped change; the major number moves only for an
 overhaul of how the app works. Generated from `packages/shared/src/changelog.ts`
 — edit that, then run `npm run changelog`.
+
+## 3.0 — A board to work from, the right car in every part, and versions of a finished film
+_2026-09-13_
+
+- Projects opens on a board — Open, In progress, In review, Delivered — and a card drags between the columns. Projects you already had start in the column their history puts them in: nothing generated yet is Open, a render in flight is In progress, a film that exists is In review. There is a Board / List switch if you want the old grid, and a Stage control inside each project.
+- The wrong car, found and fixed. Omni was being sent two reference images per part, and a continuation part spent both on frames of the film — so no part after the first was ever shown a photograph of the vehicle, and it drew the car the name brought to mind. For "XUV 3XO" that is the XUV300 it has seen far more of. Omni takes ten reference images, not two: every part now carries the vehicle, the presenter, the showroom and the frame it continues from, and each one is named in the prompt so the model is not left guessing which image is which.
+- Several photographs now travel as one. Front, side, rear and interior go as a single labelled contact sheet, with the tiles named, and the prompt says plainly that a sheet is a set of photographs and never something to draw on screen. The showroom gets the same treatment.
+- The presenter’s photograph is sent to the model at all now. It used to travel as prose only — "fitted maroon polo, hair tied back" — which is how the hair changed between parts.
+- Every part is checked before the rest of the film is built on it: one frame is compared against the reference photograph by a vision model, and a clear mismatch is made again, once. The verdict is kept either way.
+- Photos of this exact vehicle takes several files at once, and each one says which side it shows, so a scene about the cabin is built on the cabin photo. When any are attached the library is ignored completely, and a warning names the sides nobody attached — because a side the model has no photo of is a side it invents.
+- Reference videos: up to three per project — the real showroom, the real vehicle moving — sent to the models that accept video.
+- Every run keeps its receipt: the brief it was made from, the prompt each part was given, the photographs each part was shown, and the project exactly as it stood. Open Details on any run to read it, or put those settings back with one button. The videos you already have are never touched.
+- A film that has been approved never has to be made again to be delivered. Approve marks the cut the client signed off; Upscale enlarges that exact cut to 1080p with no model involved; and the premium pass re-renders it through Seedance for finish — the same shots, people, vehicle and sound, in 29-second passes because that is Seedance’s limit, joined again after. Omni writes and speaks; Seedance renders.
+- A cutting room, in the browser. Play to where a bad stretch starts, mark it out, drop the sound if you want, join other films from the project onto the end, and export — as a new version, leaving the original alone. It is ffmpeg, not a model: it costs nothing and cannot change what the film shows.
+- The joins between parts are measured now instead of asked for. On real runs one part ended with a second of dead air while the next began speaking inside its first 200ms — two seconds of nothing at one join, phrases colliding at another. Each join is cut back to a breath at the end of one part and a moment before the next speaks, and captions follow.
+- 360p renders, for a cheap look at a film before it is made properly.
+- The libraries are navigable. Vehicles is brand, then model, then the vehicle, with search at the top and the sync tools folded above it. Clients and Actors have search and filters — brand, cars or bikes, city, state; gender, age range, attire.
+- Every client shows the films made for them, with the actor and use case on each, and names the presenter the dealership’s audience knows: "Riya fronts 4 of 6 films for this client." A project offers that presenter when there is one.
+- What a use case needs answered now opens under the use case you picked, closed until you want it, with a count of what is still missing. Narration, on-screen text and Advanced are folds inside the Video card. Short fields sit four to a row.
+- A new look throughout: warm paper, hairline rules, one soft red, names set in a serif and the controls around them in Inter, and every step of the brief marked with a scene slate.
+
+## 2.7 — Long 1080p videos finish instead of dropping the connection
+_2026-09-11_
+
+- A long 1080p video (45 seconds, five clips, ten captions) could fail with "network: Failed to fetch". The server was running out of memory while stitching the clips together and was shut down mid-run. The crossfades between clips made the video encoder hold every later clip in memory while each fade waited its turn; clips are now joined from short slices at each crossfade, which cut that stitch from about 1.6 GB to under 1 GB, and the server has four times the memory on top.
+- If an Omni video is ready but Google’s file store is briefly unavailable, the download is retried instead of the whole run failing.
+- A run cut off partway through now shows in History as interrupted, instead of staying "running" forever.
+- A dropped connection says so in plain words instead of "network: Failed to fetch".
+
+## 2.6 — The colour you picked, and offers in your own words
+_2026-09-11_
+
+- Offers are free text now. Type them the way the dealer says them — "Benefits up to ₹1.5 lakh", "Free 5-year service pack" — instead of squeezing them into cash discount, down payment, interest rate and warranty boxes. Two to start, add more (up to eight), and each one becomes its own on-screen caption.
+- Product features work the same way: two to start, add more, each with an optional line on why it matters. Only the first feature is required.
+- Projects saved with the old offer boxes open with those offers already filled in as free text.
+- Picking a colour and a variant together silently dropped the colour: it was looked up on the variant, which never has its own colour list. The colour image now reaches the model whether or not a variant is chosen.
+- The prompt now names the paint outright — "Paint colour: Stealth Black" — and tells the model to take only shape from the other car photos, which are usually all one launch colour.
+- With a colour chosen, the car reference set is the colour image plus one photo per angle, instead of every photo in the library outvoting the one colour image.
+- Colour names drop CarDekho’s paint codes: "Stealth Black", not "226_Stealth Black".
+
+## 2.5 — Omni videos survive a failed file on Google’s side
+_2026-09-10_
+
+- Omni runs were failing with "The file failed to be processed". That message comes from Google after the video has already been made — only Google’s downloadable copy of it failed. The app now reads the finished video back from the run itself, so the video is kept instead of lost, and nothing is generated or paid for twice.
+- The generated video is now taken from the model’s output, never from inputs Google echoes back in the same response.
+
+## 2.4 — Captions fit, Veo generates, and failures say why
+_2026-09-10_
+
+- Captions and the footer no longer run out of their boxes. The server draws text in a wider font than the layout assumed, so long lines were cut off; every line is now measured exactly as it is drawn and shrunk until it fits. A caption that wraps is split into two even lines, and every caption in a video shares one size, so the text does not jump between scenes.
+- Google Veo 3.1 and Veo 3.1 Fast failed every run that carried a reference image. The images were sent in the format Google uses for its chat models, which its video endpoint rejects. They now go in the format Google’s own SDK sends.
+- Typing a space in a storyboard caption no longer vanishes — the box was showing the tidied-up caption instead of what you typed, so a trailing space was removed before the next word.
+- When Omni fails while Google is finishing the video, the error now gives Google’s actual reason instead of "Generated file processing failed", and every failed generation is logged so it can be diagnosed.
+- Reference images with spaces or brackets in their names — WhatsApp photos, for one — showed a broken thumbnail. They load again, including ones already uploaded.
+
+## 2.3 — Veo 3.1, 1080p, editable captions and a generation timer
+_2026-09-10_
+
+- On-screen text is editable in the storyboard: change a caption, add one to a scene that had none, remove one, or reset to the template. What you type is exactly what is composited over the video.
+- Words no longer get spoken twice. "six airbags airbags" came from the prompt’s own rules quoting the same phrase the line used — the spoken line is now the only place a phrase appears, and the model is told to say each word once and never voice a shot direction.
+- 1080p for every model. Omni and Veo render it natively; Seedance renders 720p and the finished video is upscaled in post — the editor and the history both say which. Cost is priced at the resolution actually rendered.
+- Google Veo 3.1 and Veo 3.1 Fast, on the same Gemini key as Omni. Omni is now listed as Gemini Omni 1.1 Flash so it is clear which one it is. Veo renders only 4, 6 or 8 seconds, so each clip is trimmed to its planned length.
+- A live timer while a video generates, with an estimate of what is left learned from this app’s own past runs on that model — no provider reports progress, so history is the only honest source. Before you start, it says roughly how long a video usually takes.
+- The generation history shows how long each video took to make.
+- Clips that came back at different frame sizes are now scaled to match before stitching, instead of failing the whole compose.
+
+## 2.2 — A storyboard you can read, and scripts written like an agency would
+_2026-09-10_
+
+- Scripts are written in three passes instead of one: first the angle — who is watching, the one idea, how the film builds and the facts it will spend its seconds on — then the draft, then an edit that reads every line back and rewrites anything generic, unfinished or disconnected.
+- The angle is shown above the storyboard, so you can judge what the script is arguing before judging the lines.
+- Stock phrases that made scripts sound naive — शानदार, बेहतरीन, "city हो या highway", "families की पसंद" — are banned outright, and a line may no longer stop mid-sentence to fit its word budget.
+- Every storyboard field grows to fit its text. Nothing is clipped inside a box, including after the column is resized.
+- The columns are restructured: scene, timing and duration in one column, then the visual reference, shot direction, the script with its pronunciation, and on-screen text.
+- Each scene shows the reference image its shot is built on, and you can change it. The chosen image is named in that scene of the prompt, so the model frames the headlamp macro on the headlamp photo rather than the showroom.
 
 ## 2.1 — On-screen text is composited, not generated
 _2026-09-10_

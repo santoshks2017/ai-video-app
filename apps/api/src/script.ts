@@ -18,7 +18,7 @@
  * rupee against Rs 100+ for a video segment.
  */
 
-import { plainSpoken } from '@ava/shared';
+import { plainSpoken, speechRate, DEFAULT_WPM } from '@ava/shared';
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -36,6 +36,11 @@ export interface ScriptScene {
   words: number;
   /** Exact on-screen card text for this scene, if any. */
   card?: string;
+  /**
+   * A line the designer has locked. It is not up for rewriting — it is here so the
+   * lines around it are written to flow with it rather than past it.
+   */
+  fixed?: string;
 }
 
 /** What the film is actually selling, and to whom. */
@@ -95,6 +100,8 @@ export interface ScriptRequest {
   direction?: string;
   /** A two-wheeler film says "test ride"; a car film says "test drive". */
   vehicleKind?: 'car' | 'bike';
+  /** How fast this film speaks, in words a minute. The budgets were worked out at it. */
+  wpm?: number;
 }
 
 export interface ScriptLine {
@@ -277,11 +284,12 @@ function subjectBlock(req: ScriptRequest): string[] {
 
 /** The scene list as the writer sees it: what each moment is FOR, and how long. */
 function sceneBlock(req: ScriptRequest): string[] {
-  return req.scenes.map(
-    (sc) =>
-      `Scene ${sc.index} — ${sc.title} · ${sc.seconds}s · at most ${sc.words} words${
-        sc.card ? ` · an on-screen card already reads "${sc.card}", so do not say it aloud` : ''
-      }\n  The moment's job: ${sc.direction}`,
+  return req.scenes.map((sc) =>
+    sc.fixed
+      ? `Scene ${sc.index} — ${sc.title} · ${sc.seconds}s · ALREADY WRITTEN, and staying exactly as it is:\n  "${sc.fixed}"\n  Do not return a line for this scene. Write the scenes around it so they lead into and out of this one.`
+      : `Scene ${sc.index} — ${sc.title} · ${sc.seconds}s · at most ${sc.words} words${
+          sc.card ? ` · an on-screen card already reads "${sc.card}", so do not say it aloud` : ''
+        }\n  The moment's job: ${sc.direction}`,
   );
 }
 
@@ -377,7 +385,9 @@ function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string
       : []),
     '',
     '## THE SCENES',
-    'One line per scene, in order, each within its word budget at an unhurried speaking pace.',
+    `One line per scene, in order, each within its word budget — the budgets are worked out at about ${
+      req.wpm ?? DEFAULT_WPM
+    } words a minute, which is ${speechRate(req.wpm).delivery}.`,
     ...sceneBlock(req),
     '',
     'Return JSON only: an array of {"index": <scene index>, "line": "<the spoken line>"}. One object per scene, in order. No commentary.',

@@ -3,20 +3,57 @@ import { createPortal } from 'react-dom';
 import { isApiError, uploadRef } from '../lib/client.js';
 import type { StoredImage } from '@ava/shared';
 
+/**
+ * The explanation, out of the way until it is wanted.
+ *
+ * Every field here had a sentence under it saying what it does. Read once, they
+ * are useful; read for the hundredth time they are the reason a brief runs three
+ * screens and the storyboard is below the fold. So the sentence moves behind a
+ * mark you hover — still one glance away, no longer taking a line each.
+ *
+ * Hover and keyboard focus both open it and nothing has to close it: leaving with
+ * the mouse or the tab key is enough, which is the behaviour to want for something
+ * you open by accident a hundred times a day.
+ */
+export function Info({
+  children,
+  wide,
+  /** Off inside a section header, where the mark sits within a button and may not take focus. */
+  focusable = true,
+}: {
+  children: ReactNode;
+  wide?: boolean;
+  focusable?: boolean;
+}) {
+  if (!children) return null;
+  return (
+    <span className={`info${wide ? ' wide' : ''}`} tabIndex={focusable ? 0 : undefined} role="note">
+      <span className="info-mark" aria-hidden>
+        i
+      </span>
+      <span className="info-pop">{children}</span>
+    </span>
+  );
+}
+
 export function Field({
   label,
   hint,
   children,
 }: {
   label?: string;
-  hint?: string;
+  hint?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="field">
-      {label && <label>{label}</label>}
+      {(label || hint) && (
+        <label>
+          {label}
+          <Info>{hint}</Info>
+        </label>
+      )}
       {children}
-      {hint && <div className="hint">{hint}</div>}
     </div>
   );
 }
@@ -25,6 +62,7 @@ export function Panel({
   num,
   title,
   step,
+  note,
   actions,
   children,
 }: {
@@ -32,6 +70,8 @@ export function Panel({
   num?: string;
   title: string;
   step?: string;
+  /** What this panel is for. Behind the mark, not spread across the top of it. */
+  note?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
 }) {
@@ -41,6 +81,7 @@ export function Panel({
         <div className="head-left">
           {num && <span className="slate">{num}</span>}
           <h2>{title}</h2>
+          <Info wide>{note}</Info>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {step && <span className="step">{step}</span>}
@@ -65,6 +106,7 @@ export function Section({
   title,
   step,
   need,
+  note,
   sub,
   defaultOpen = false,
   open,
@@ -76,6 +118,8 @@ export function Section({
   step?: string;
   /** A short count of what is still missing, shown instead of `step`. */
   need?: string;
+  /** What this section is for. Behind the mark, not spread across the top of it. */
+  note?: ReactNode;
   /** Nested inside another section — quieter chrome. */
   sub?: boolean;
   defaultOpen?: boolean;
@@ -104,6 +148,13 @@ export function Section({
         </span>
         {num && <span className="slate">{num}</span>}
         <h2>{title}</h2>
+        {note && (
+          <span onClick={(e) => e.stopPropagation()}>
+            <Info wide focusable={false}>
+              {note}
+            </Info>
+          </span>
+        )}
         {need ? <span className="sec-need">{need}</span> : step ? <span className="sec-step">{step}</span> : null}
       </button>
       {isOpen && (

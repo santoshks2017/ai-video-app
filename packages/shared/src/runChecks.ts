@@ -246,7 +246,7 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
       const words = (o?.phonetic?.trim() || o?.dialogue?.trim() || '')
         .split(/\s+/)
         .filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
-      return words > Math.ceil(wordBudget(speakingSeconds(plan, sc)) * 1.25);
+      return words > Math.ceil(wordBudget(speakingSeconds(plan, sc), 1, brief.speechWpm) * 1.25);
     });
     if (spills.length) {
       const names = spills.map((sc) => `scene ${plan.scenes.indexOf(sc) + 1}`).join(', ');

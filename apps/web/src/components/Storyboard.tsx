@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
+import type React from 'react';
 import {
   fmtTime,
   wordBudget,
@@ -14,6 +15,32 @@ import {
   type SceneVisual,
 } from '@ava/shared';
 import type { NarrationKey } from '@ava/shared';
+import { Section, Info } from './ui.js';
+
+/** A field a rewrite must leave alone. */
+export type LockField = 'dialogue' | 'shot' | 'card';
+
+/**
+ * The padlock beside a field.
+ *
+ * Locked means a rewrite leaves it exactly as it is. Typing in a field locks it
+ * on its own — a line you wrote yourself is by definition one you meant — and
+ * this is how you take the lock off again when you do want it rewritten.
+ */
+function Lock({ on, what, onToggle }: { on: boolean; what: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`sb-lock${on ? ' on' : ''}`}
+      aria-pressed={on}
+      title={on ? `Locked — a rewrite leaves this ${what} alone. Click to unlock.` : `Lock this ${what} so a rewrite cannot change it`}
+      aria-label={on ? `Unlock this ${what}` : `Lock this ${what}`}
+      onClick={onToggle}
+    >
+      {on ? '\u{1F512}' : '\u{1F513}'}
+    </button>
+  );
+}
 
 /** The still a scene is framed on, drawn by the image model. */
 export type SceneFrame = {
@@ -29,6 +56,7 @@ type SceneEdit = {
   /** Legacy: the pronunciation respelling, on projects written before Omni said the copy correctly. */
   phonetic?: string;
   frame?: SceneFrame;
+  locked?: LockField[];
   shot?: string;
   ref?: string;
   card?: string;
@@ -286,6 +314,71 @@ function RefPicker({
   );
 }
 
+/** The columns, and the share of the table each takes by default. */
+const COLUMNS = ['shot', 'vo', 'card', 'frame'] as const;
+const DEFAULT_WIDTHS = [30, 24, 17, 29];
+const MIN_WIDTH = 10;
+
+/**
+ * Column widths a designer can drag, that always add up to the same table.
+ *
+ * A storyboard is read across, so the table has to fit the screen — but which
+ * column needs the room changes by the hour: the shot direction while blocking it,
+ * the line while writing it. So a drag moves width from one column to the one
+ * beside it and the total never changes, which means it never starts scrolling
+ * sideways. Remembered on this device.
+ */
+function useColumnWidths(): [number[], (i: number, e: React.PointerEvent) => void, () => void] {
+  const [widths, setWidths] = useState<number[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ava.sbcols') ?? 'null') as number[] | null;
+      return saved?.length === COLUMNS.length ? saved : DEFAULT_WIDTHS;
+    } catch {
+      return DEFAULT_WIDTHS;
+    }
+  });
+  const live = useRef(widths);
+  live.current = widths;
+
+  const save = (next: number[]): void => {
+    setWidths(next);
+    try {
+      localStorage.setItem('ava.sbcols', JSON.stringify(next));
+    } catch {
+      /* storage unavailable — the choice lasts this session */
+    }
+  };
+
+  const startDrag = (i: number, e: React.PointerEvent): void => {
+    e.preventDefault();
+    const table = (e.currentTarget as HTMLElement).closest('table');
+    const total = table?.clientWidth ?? 1000;
+    const from = [...live.current];
+    const startX = e.clientX;
+
+    const move = (ev: PointerEvent): void => {
+      // Whatever one column gains, the one beside it gives up.
+      const delta = ((ev.clientX - startX) / total) * 100;
+      const room = from[i]! + from[i + 1]!;
+      const left = Math.min(room - MIN_WIDTH, Math.max(MIN_WIDTH, from[i]! + delta));
+      const next = [...from];
+      next[i] = Math.round(left * 10) / 10;
+      next[i + 1] = Math.round((room - left) * 10) / 10;
+      setWidths(next);
+      live.current = next;
+    };
+    const up = (): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      save(live.current);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return [widths, startDrag, () => save(DEFAULT_WIDTHS)];
+}
+
 /**
  * Editable storyboard (PRD P0.5): scene by scene, with timing, the reference
  * image the shot is built on, the shot direction and the spoken line. Edits are
@@ -302,7 +395,10 @@ export function Storyboard({
   onWriteScript,
   languageName,
   onDrawScenes,
+  onLockScene,
+  onLockAll,
   vehicle = 'car',
+  speechWpm,
   length,
   onLength,
   deletedScenes = [],
@@ -330,8 +426,14 @@ export function Storyboard({
    * the references are read once for the whole storyboard rather than per scene.
    */
   onDrawScenes?: (keys: string[]) => Promise<string>;
+  /** Lock or unlock one field on one scene, so a rewrite leaves it alone. */
+  onLockScene?: (key: string, field: LockField, lock: boolean) => void;
+  /** Take every lock off, or put one on every written field. */
+  onLockAll?: (lock: boolean) => void;
   /** Cars and bikes name their parts differently. */
   vehicle?: 'car' | 'bike';
+  /** How fast this film speaks — the rate every scene's word budget is worked out at. */
+  speechWpm?: number;
   /** The film's length — auto, or set by hand at 1x — and the pace it is played at. */
   length?: { auto: boolean; seconds: number; suggested: number; pace: number; endCard: number };
   onLength?: (patch: { durationAuto?: boolean; durationSec?: number; pace?: number }) => void;
@@ -353,6 +455,7 @@ export function Storyboard({
 }) {
   const [writing, setWriting] = useState(false);
   const [scriptNote, setScriptNote] = useState('');
+  const [widths, startDrag, resetWidths] = useColumnWidths();
   /** Scenes the image model is drawing right now, by key. */
   const [drawing, setDrawing] = useState<string[]>([]);
   const [drawNote, setDrawNote] = useState('');
@@ -411,6 +514,13 @@ export function Storyboard({
     setDrawNote(note);
   };
 
+  /** Lines a rewrite would leave alone, and the ones it would actually write. */
+  const lockedLines = scenePlan.scenes.filter((sc) =>
+    sceneEditFor(sceneEdits, scenePlan, sc)?.locked?.includes('dialogue'),
+  ).length;
+  const anyLock = scenePlan.scenes.some((sc) => (sceneEditFor(sceneEdits, scenePlan, sc)?.locked ?? []).length);
+  const toRewrite = Math.max(0, spokenScenes - lockedLines);
+
   const runScriptAction = async (fn: () => Promise<string>) => {
     setWriting(true);
     setScriptNote('');
@@ -428,7 +538,7 @@ export function Storyboard({
   }
   const skippedRow = (sk: SkippedScene): ReactElement => (
     <tr className="sb-skipped-row" key={`skip-${sk.key}`}>
-      <td colSpan={5}>
+      <td colSpan={4}>
         <span className="sb-skipped-tag">Skipped</span>
         <b>{sk.title}</b>
         {sk.cat ? <span className="hint"> · {sk.cat}</span> : null}
@@ -451,71 +561,180 @@ export function Storyboard({
         </span>
       </div>
       <div className="body tight">
-        {mode.speaks && onWriteScript && (
-          <div className={`script-bar${scripted >= spokenScenes && spokenScenes > 0 ? ' done' : ''}`}>
-            <div>
-              <b>
-                {scripted}/{spokenScenes} scenes have a written line
-              </b>
-              <span>
-                {scripted >= spokenScenes && spokenScenes > 0
-                  ? `The model says each line exactly as it is written here, in ${languageName ?? 'the chosen language'}. Edit any of them.`
-                  : 'Written in three passes: the angle, the draft, then an edit that cuts anything generic.'}
-              </span>
-              {scriptNote && <span className="script-note">{scriptNote}</span>}
+        {/*
+          * One bar, not three.
+          *
+          * Writing the script, drawing the scenes, and how long the film runs were
+          * three stacked panels of prose, and between them they pushed the actual
+          * storyboard off the screen. They are four controls; they fit on a line.
+          * What each one does is behind its mark, a hover away.
+          */}
+        <div className="sb-bar">
+          {mode.speaks && onWriteScript && (
+            <div className="sb-bar-group">
+              <label>
+                Script
+                <Info>
+                  {scripted}/{spokenScenes} scenes have a line. Written in three passes — the angle, the draft,
+                  then an edit that cuts anything generic. The model says each line exactly as written, in{' '}
+                  {languageName ?? 'the chosen language'}. Editing a line locks it, so the next rewrite leaves it
+                  alone; the padlock beside any field takes the lock off again.
+                </Info>
+              </label>
+              <div className="sb-bar-row">
+                <span className={`sb-tally${scripted >= spokenScenes && spokenScenes > 0 ? ' done' : ''}`}>
+                  {scripted}/{spokenScenes}
+                </span>
+                <button
+                  className="btn primary small"
+                  type="button"
+                  disabled={writing || (scripted > 0 && toRewrite === 0)}
+                  title={
+                    scripted > 0 && toRewrite === 0
+                      ? 'Every line is locked — unlock the ones you want rewritten'
+                      : 'Write every unlocked line'
+                  }
+                  onClick={() => runScriptAction(onWriteScript)}
+                >
+                  {writing
+                    ? 'Working…'
+                    : !scripted
+                      ? 'Write script'
+                      : toRewrite === 0
+                        ? 'All locked'
+                        : lockedLines
+                          ? `Rewrite ${toRewrite}`
+                          : 'Rewrite script'}
+                </button>
+                {onLockAll && scripted > 0 && (
+                  <button
+                    className="btn ghost small"
+                    type="button"
+                    disabled={writing}
+                    onClick={() => onLockAll(!anyLock)}
+                    title={
+                      anyLock
+                        ? 'Take every lock off, so a rewrite is free to change anything'
+                        : 'Lock everything written so far — a rewrite would then change nothing'
+                    }
+                  >
+                    {anyLock ? '🔓' : '🔒'}
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="script-bar-actions">
-              <button
-                className="btn primary small"
-                type="button"
-                disabled={writing}
-                onClick={() => runScriptAction(onWriteScript)}
-              >
-                {writing ? 'Working…' : scripted ? 'Rewrite script' : 'Write the script'}
-              </button>
+          )}
+
+          {onDrawScenes && (
+            <div className="sb-bar-group">
+              <label>
+                Scenes drawn
+                <Info>
+                  A still of each scene, drawn from the same photographs the film is built on. It settles the
+                  camera, the framing and where everyone stands before any video is paid for — and it is sent as
+                  the first reference for the part its scene falls in.
+                </Info>
+              </label>
+              <div className="sb-bar-row">
+                <span className={`sb-tally${!unframed.length ? ' done' : ''}`}>
+                  {framed.length}/{scenePlan.scenes.length}
+                </span>
+                <button
+                  className="btn small"
+                  type="button"
+                  disabled={drawing.length > 0 || !unframed.length}
+                  onClick={() => void draw(unframed)}
+                  title={unframed.length ? 'Draw the scenes that have no frame yet' : 'Every scene has a frame'}
+                >
+                  {drawing.length ? `Drawing ${drawing.length}…` : !unframed.length ? 'All drawn' : `Draw ${unframed.length}`}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+
+          {length && onLength && (
+            <>
+              <div className="sb-bar-group">
+                <label>
+                  Length at 1x
+                  <Info>
+                    Auto sizes the film to the scenes at a natural read. Set by hand and deleting a scene takes
+                    its seconds off instead.
+                  </Info>
+                </label>
+                <div className="sb-bar-row">
+                  <div className="seg">
+                    <button
+                      type="button"
+                      className={length.auto ? 'on' : ''}
+                      onClick={() => onLength({ durationAuto: true })}
+                    >
+                      Auto · {length.suggested}s
+                    </button>
+                    <button
+                      type="button"
+                      className={length.auto ? '' : 'on'}
+                      onClick={() =>
+                        onLength({ durationAuto: false, durationSec: length.auto ? length.suggested : length.seconds })
+                      }
+                    >
+                      By hand
+                    </button>
+                  </div>
+                  {!length.auto && (
+                    <input
+                      className="sb-bar-num"
+                      type="number"
+                      min={6}
+                      max={120}
+                      value={length.seconds}
+                      onChange={(e) => onLength({ durationSec: Number(e.target.value) })}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="sb-bar-group">
+                <label>
+                  Pace
+                  <Info>
+                    The finished film is played at this speed after generation — the same script in a shorter or
+                    longer film. It is not how fast the voice speaks; that is Speaking pace, in Video.
+                  </Info>
+                </label>
+                <div className="sb-bar-row">
+                  <div className="seg">
+                    {PACES.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className={Math.abs(length.pace - p) < 0.001 ? 'on' : ''}
+                        onClick={() => onLength({ pace: p })}
+                      >
+                        {p}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="sb-bar-result">
+                ≈ {filmSeconds}s{length.endCard ? ` + ${length.endCard}s card` : ''}
+              </div>
+            </>
+          )}
+        </div>
+
+        {(scriptNote || drawNote) && (
+          <div className="sb-bar-note">{[scriptNote, drawNote].filter(Boolean).join(' · ')}</div>
         )}
 
-        {onDrawScenes && (
-          <div className={`script-bar${framed.length >= scenePlan.scenes.length ? ' done' : ''}`}>
-            <div>
-              <b>
-                {framed.length}/{scenePlan.scenes.length} scenes have been drawn
-              </b>
-              <span>
-                A still of each scene, drawn from the same photographs the film is built on. It settles the camera,
-                the framing and where everyone stands before any video is paid for — and it is sent as the first
-                reference for the part its scene falls in.
-              </span>
-              {drawNote && <span className="script-note">{drawNote}</span>}
-            </div>
-            <div className="script-bar-actions">
-              <button
-                className="btn small"
-                type="button"
-                disabled={drawing.length > 0 || !unframed.length}
-                onClick={() => void draw(unframed)}
-                title={unframed.length ? 'Draw the scenes that have no frame yet' : 'Every scene has a frame'}
-              >
-                {drawing.length
-                  ? `Drawing ${drawing.length}…`
-                  : !unframed.length
-                    ? 'All drawn'
-                    : framed.length
-                      ? `Draw the remaining ${unframed.length}`
-                      : `Draw all ${unframed.length}`}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* The idea the copy is arguing. Judge this before judging the lines —
-            a good line serving a weak idea is still a weak film. */}
+        {/* The idea the copy is arguing. Judge this before judging the lines — a
+            good line serving a weak idea is still a weak film — but it is read
+            once and then in the way, so it folds. */}
         {angle?.idea && (
-          <div className="sb-angle">
-            <div className="sb-angle-head">The angle this script is written to</div>
-            <dl>
+          <Section sub title="The angle this script is written to" step={angle.idea.slice(0, 72)}>
+            <dl className="sb-angle-dl">
               <dt>Idea</dt>
               <dd>{angle.idea}</dd>
               {angle.viewer && (
@@ -537,67 +756,7 @@ export function Storyboard({
                 </>
               )}
             </dl>
-          </div>
-        )}
-
-        {length && onLength && (
-          <div className="sb-length">
-            <div className="sb-length-group">
-              <label>Length at 1x</label>
-              <div className="seg">
-                <button type="button" className={length.auto ? 'on' : ''} onClick={() => onLength({ durationAuto: true })}>
-                  Auto · {length.suggested}s
-                </button>
-                <button
-                  type="button"
-                  className={length.auto ? '' : 'on'}
-                  onClick={() =>
-                    onLength({ durationAuto: false, durationSec: length.auto ? length.suggested : length.seconds })
-                  }
-                >
-                  Set by hand
-                </button>
-              </div>
-              {!length.auto && (
-                <input
-                  type="number"
-                  min={6}
-                  max={120}
-                  value={length.seconds}
-                  onChange={(e) => onLength({ durationSec: Number(e.target.value) })}
-                />
-              )}
-            </div>
-            <div className="sb-length-group">
-              <label>Pace</label>
-              <div className="seg">
-                {PACES.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    className={Math.abs(length.pace - p) < 0.001 ? 'on' : ''}
-                    onClick={() => onLength({ pace: p })}
-                  >
-                    {p}x
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="sb-length-result">
-              <b>
-                ≈ {filmSeconds}s video{length.endCard ? ` + ${length.endCard}s end card` : ''}
-              </b>
-              <span className="hint">
-                {length.pace > 1.001
-                  ? 'Same script, played faster after generation — a shorter film.'
-                  : length.pace < 0.999
-                    ? 'Same script, played slower after generation — a longer film.'
-                    : length.auto
-                      ? 'Sized to the scenes below at a natural read.'
-                      : 'Set by hand. Deleting a scene takes its seconds off.'}
-              </span>
-            </div>
-          </div>
+          </Section>
         )}
 
         {generic.length > 0 && (
@@ -614,36 +773,45 @@ export function Storyboard({
           </div>
         )}
 
-        <div className="section-desc">
-          Edit any scene’s script, shot or reference image below — changes flow straight into the master prompt on
-          the right, no full rebuild of the brief. On-screen text is deliberately absent from that prompt: it is
-          composited over the finished video in post, like the logos and the end card, so a price is never
-          misspelled by the model.
-          {editCount > 0 && (
-            <>
-              {' '}
-              <button className="btn ghost small" onClick={clearSceneEdits}>
-                Reset {editCount} edit{editCount > 1 ? 's' : ''}
-              </button>
-            </>
-          )}
-        </div>
+        {editCount > 0 && (
+          <div className="sb-bar-note">
+            <button className="btn ghost small" onClick={clearSceneEdits}>
+              Reset {editCount} edit{editCount > 1 ? 's' : ''}
+            </button>
+          </div>
+        )}
         <div className="sb-scroll">
           <table className="sb-table">
             <colgroup>
-              <col className="c-scene" />
-              <col className="c-shot" />
-              <col className="c-vo" />
-              <col className="c-card" />
-              <col className="c-frame" />
+              {COLUMNS.map((c, i) => (
+                <col key={c} style={{ width: `${widths[i]}%` }} />
+              ))}
             </colgroup>
             <thead>
               <tr>
-                <th>Scene</th>
-                <th>Shot direction</th>
-                <th>{mode.speaks ? 'Voiceover' : 'Story beat (no speech)'}</th>
-                <th>On-screen text</th>
-                <th>Scene image</th>
+                {[
+                  'Shot direction',
+                  mode.speaks ? 'Voiceover' : 'Story beat (no speech)',
+                  'On-screen text',
+                  'Scene image',
+                ].map((label, i) => (
+                  <th key={label}>
+                    {label}
+                    {/* Drag to give this column room; the one beside it gives it up,
+                        so the table never grows past the screen. */}
+                    {i < COLUMNS.length - 1 && (
+                      <span
+                        className="sb-grip"
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label={`Resize ${label}`}
+                        onPointerDown={(e) => startDrag(i, e)}
+                        onDoubleClick={resetWidths}
+                        title="Drag to resize · double-click to reset"
+                      />
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -654,7 +822,7 @@ export function Storyboard({
                   lastPart = sc.part;
                   rows.push(
                     <tr className="sb-part-row" key={`p${sc.part}`}>
-                      <td colSpan={5}>
+                      <td colSpan={4}>
                         Part {sc.part + 1} of {scenePlan.parts}
                         {sc.part === 0 ? ' — create' : ' — extend'}
                       </td>
@@ -663,97 +831,142 @@ export function Storyboard({
                 }
                 const key = sc.beat.key ?? String(gi);
                 const ov = sceneEditFor(sceneEdits, scenePlan, sc) ?? {};
+                const locked = ov.locked ?? [];
                 const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
+                /*
+                 * The scene's own header strip, across the whole table.
+                 *
+                 * All of this used to be stacked down a narrow first column, where
+                 * "Skip" wrapped to three letters on three lines and the buttons ate
+                 * more height than the writing beside them. It is one line now — who
+                 * the scene is on the left, when it runs and what you can do to it on
+                 * the right — and the column it used to occupy went to the writing.
+                 */
+                const lastMovable = scenePlan.scenes.filter((x) => !x.beat.isEndCard).length - 1;
+                rows.push(
+                  <tr className="sb-scene-row" key={`h-${key}`}>
+                    <td colSpan={4}>
+                      <div className="sb-scene-head">
+                        <span className="sb-scene-no">{gi + 1}</span>
+                        <b className="sb-scene-title">{sc.beat.title}</b>
+                        {sc.beat.cat && <span className="sb-scene-cat">{sc.beat.cat}</span>}
+                        <span className="sb-scene-time">
+                          {fmtTime(sc.start)}–{fmtTime(sc.end)} · {sc.duration}s
+                        </span>
+                        <span className="sb-scene-acts">
+                          {/* Moving a scene re-times the film and re-packs the parts:
+                              one that no longer fits pushes the rest along. */}
+                          {onMoveScene && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn ghost small"
+                                disabled={gi === 0}
+                                aria-label={`Move ${sc.beat.title} earlier`}
+                                title="Move earlier"
+                                onClick={() => onMoveScene(key, -1)}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className="btn ghost small"
+                                disabled={gi === lastMovable}
+                                aria-label={`Move ${sc.beat.title} later`}
+                                title="Move later"
+                                onClick={() => onMoveScene(key, 1)}
+                              >
+                                ↓
+                              </button>
+                            </>
+                          )}
+                          {onSkipScene && (
+                            <label className="sb-skip" title="Leave this scene out of the film without losing it">
+                              <input type="checkbox" checked={false} onChange={() => onSkipScene(key, true)} />
+                              Skip
+                            </label>
+                          )}
+                          {onAddScene && (
+                            <button
+                              type="button"
+                              className="btn ghost small"
+                              title="Write a scene of your own, straight after this one"
+                              onClick={() => onAddScene(key)}
+                            >
+                              + Scene below
+                            </button>
+                          )}
+                          {onDeleteScene && (
+                            <button
+                              type="button"
+                              className="btn ghost small"
+                              disabled={scenePlan.scenes.length <= 2}
+                              title={
+                                scenePlan.scenes.length <= 2
+                                  ? 'A film needs at least two scenes'
+                                  : 'Take this scene out of the film — it can be restored below'
+                              }
+                              onClick={() => onDeleteScene(key)}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>,
+                );
                 rows.push(
                   <tr key={key}>
-                    <td className="sb-scene">
-                      <div className="sb-scene-no">{gi + 1}</div>
-                      <div className="sb-scene-title">{sc.beat.title}</div>
-                      <div className="hint">{sc.beat.cat}</div>
-                      <div className="sb-scene-time">
-                        {fmtTime(sc.start)}–{fmtTime(sc.end)}
-                        <br />
-                        {sc.duration}s
-                      </div>
-                      {/* Where this scene sits in the film. Moving one re-times the
-                          scenes and re-packs the parts: a scene that no longer fits
-                          in a part pushes the rest into the next one. */}
-                      {onMoveScene && (
-                        <div className="sb-move">
-                          <button
-                            type="button"
-                            className="btn ghost small"
-                            disabled={gi === 0}
-                            aria-label={`Move ${sc.beat.title} earlier`}
-                            title="Move earlier"
-                            onClick={() => onMoveScene(key, -1)}
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            className="btn ghost small"
-                            disabled={gi === scenePlan.scenes.filter((x) => !x.beat.isEndCard).length - 1}
-                            aria-label={`Move ${sc.beat.title} later`}
-                            title="Move later"
-                            onClick={() => onMoveScene(key, 1)}
-                          >
-                            ↓
-                          </button>
-                        </div>
-                      )}
-                      {onSkipScene && (
-                        <label className="sb-skip" title="Leave this scene out of the film without losing it">
-                          <input type="checkbox" checked={false} onChange={() => onSkipScene(key, true)} />
-                          Skip
-                        </label>
-                      )}
-                      {onDeleteScene && (
-                        <button
-                          type="button"
-                          className="btn ghost small sb-del"
-                          disabled={scenePlan.scenes.length <= 2}
-                          title={
-                            scenePlan.scenes.length <= 2
-                              ? 'A film needs at least two scenes'
-                              : 'Take this scene out of the film — it can be restored below'
-                          }
-                          onClick={() => onDeleteScene(key)}
-                        >
-                          Delete scene
-                        </button>
-                      )}
-                      {onAddScene && (
-                        <button
-                          type="button"
-                          className="btn ghost small sb-del"
-                          title="Write a scene of your own, straight after this one"
-                          onClick={() => onAddScene(key)}
-                        >
-                          + Scene below
-                        </button>
-                      )}
-                    </td>
                     <td>
-                      <AutoTextarea
-                        value={ov.shot ?? baseShot ?? ''}
-                        onChange={(v) => editScene(key, { shot: v })}
-                      />
+                      <div className="sb-field">
+                        <AutoTextarea
+                          value={ov.shot ?? baseShot ?? ''}
+                          onChange={(v) => editScene(key, { shot: v })}
+                        />
+                        {onLockScene && (
+                          <Lock
+                            on={locked.includes('shot')}
+                            what="shot direction"
+                            onToggle={() => onLockScene(key, 'shot', !locked.includes('shot'))}
+                          />
+                        )}
+                      </div>
                     </td>
                     <td>
                       {/* One line, and the model says it as written. A project from
                           before that was true carries a respelling; it is shown here
                           because it is what has been performed, and editing replaces it. */}
-                      <AutoTextarea
-                        value={ov.phonetic ?? ov.dialogue ?? sc.beat.dialogue ?? ''}
-                        onChange={(v) => editScene(key, { dialogue: v, phonetic: undefined })}
-                      />
+                      <div className="sb-field">
+                        <AutoTextarea
+                          value={ov.phonetic ?? ov.dialogue ?? sc.beat.dialogue ?? ''}
+                          onChange={(v) => editScene(key, { dialogue: v, phonetic: undefined })}
+                        />
+                        {onLockScene && (
+                          <Lock
+                            on={locked.includes('dialogue')}
+                            what="line"
+                            onToggle={() => onLockScene(key, 'dialogue', !locked.includes('dialogue'))}
+                          />
+                        )}
+                      </div>
                       {mode.speaks && (
-                        <div className="hint">~{wordBudget(speakingSeconds(scenePlan, sc))} words max</div>
+                        <div className="hint">
+                          ~{wordBudget(speakingSeconds(scenePlan, sc), 1, speechWpm)} words max
+                        </div>
                       )}
                     </td>
                     <td>
-                      <CaptionEditor beat={sc.beat} ov={ov} onChange={(patch) => editScene(key, patch)} />
+                      <div className="sb-field">
+                        <CaptionEditor beat={sc.beat} ov={ov} onChange={(patch) => editScene(key, patch)} />
+                        {onLockScene && (
+                          <Lock
+                            on={locked.includes('card')}
+                            what="on-screen text"
+                            onToggle={() => onLockScene(key, 'card', !locked.includes('card'))}
+                          />
+                        )}
+                      </div>
                     </td>
                     <td>
                       <SceneFrameCell

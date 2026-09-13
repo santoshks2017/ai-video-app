@@ -38,6 +38,9 @@ import {
   projectStage,
   PROJECT_STAGES,
   referencePlan,
+  speechRate,
+  DEFAULT_WPM,
+  type CarModelProfile,
   type DealerPhoto,
   type ClientProfile,
   ageBandOf,
@@ -983,4 +986,80 @@ test('a skipped scene is out of the film, and what was written in it is kept', (
     'a line worth keeping',
     'and leaves the writing alone',
   );
+});
+
+/* ---------------------------------------------------------------------------
+ * How fast the film speaks, and what the prompt is allowed to say.
+ * ------------------------------------------------------------------------ */
+
+test('the speaking rate sets both the budget and the instruction', () => {
+  assert.equal(speechRate(undefined).wpm, DEFAULT_WPM, 'no choice means the natural read');
+  assert.equal(speechRate(168).label, 'Urgent', 'a stored number lands on the nearest named rate');
+
+  // A faster read buys more words in the same seconds — that is the point of it.
+  assert.ok(wordBudget(10, 1, 170) > wordBudget(10, 1, 110));
+  assert.equal(wordBudget(60, 1, 120), 120, '120 words a minute is 120 words in a minute');
+
+  const speaking = (wpm?: number): string => {
+    const b: Brief = { ...base({ categories: ['offer'], narration: 'presenter', durationSec: 15, maxChunkSec: 15 }), speechWpm: wpm };
+    return buildPrompt(b)!.parts[0]!.text;
+  };
+  assert.match(speaking(170), /170 words a minute/);
+  assert.match(speaking(170), /high-energy/);
+  assert.match(speaking(110), /unhurried, measured/);
+  assert.doesNotMatch(speaking(170), /unhurried/, 'an urgent film is never told to take its time');
+});
+
+test('the prompt never spells out a mangled name for the model to copy', () => {
+  const b = base({ categories: ['walkaround'], narration: 'presenter', durationSec: 24, maxChunkSec: 10 });
+  b.carModel = 'Mahindra XUV 3XO';
+  const every = buildPrompt(b)!.parts.map((p) => `${p.text}\n${p.continuationText}`).join('\n');
+
+  // Naming a misspelling in the prompt is handing the model the misspelling.
+  for (const bad of ['XUV 3OO', 'XUV300', 'Mahindri', 'Medton']) {
+    assert.ok(!every.includes(bad), `the prompt still contains "${bad}"`);
+  }
+  // The rule itself survives: lettering only where the photographs show it.
+  assert.match(every, /already moulded into the car in the supplied photographs/);
+  assert.match(every, /Number plates stay blank/);
+});
+
+test('the car is named, not specified — the variant picks photos, not words', () => {
+  const car: CarModelProfile = {
+    id: 'c1',
+    brand: 'Mahindra',
+    model: 'XUV 3XO',
+    slug: 'mahindra/xuv-3xo',
+    images: {},
+    colours: [],
+    variants: [{ name: 'XUV 3XO AX7 L Turbo AT', colours: [] }],
+    syncStatus: 'ok',
+    createdAt: 0,
+    updatedAt: 0,
+  };
+  const project = { ...emptyProject(), carId: 'c1', carIds: ['c1'], carVariant: 'XUV 3XO AX7 L Turbo AT' };
+  const brief = composeBrief(project, { car });
+  assert.equal(brief.carModel, 'Mahindra XUV 3XO', 'no repeated model, no trim, no gearbox');
+});
+
+test('a locked line is not up for rewriting', () => {
+  const plan = buildPrompt(
+    base({ categories: ['offer'], narration: 'presenter', durationSec: 24, maxChunkSec: 10 }),
+  )!.scenePlan;
+  const keys = plan.scenes.map((sc) => sc.beat.key!).filter(Boolean);
+  assert.ok(keys.length >= 2);
+
+  // What the editor stores when a line is typed by hand: the line, and the lock
+  // that follows from having typed it.
+  const edits: Record<string, { dialogue?: string; locked?: ('dialogue' | 'shot' | 'card')[] }> = {
+    [keys[0]!]: { dialogue: 'a line that is exactly right', locked: ['dialogue'] },
+    [keys[1]!]: { dialogue: 'a line that is not' },
+  };
+  const locked = (k: string): boolean => Boolean(edits[k]?.locked?.includes('dialogue'));
+  assert.ok(locked(keys[0]!));
+  assert.ok(!locked(keys[1]!), 'a line the writer produced stays open to a rewrite');
+
+  // A lock is per field, so locking the line leaves the shot and the card free.
+  assert.ok(!edits[keys[0]!]!.locked!.includes('shot'));
+  assert.ok(!edits[keys[0]!]!.locked!.includes('card'));
 });

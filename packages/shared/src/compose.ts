@@ -243,6 +243,7 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
     .filter(([, e]) => e?.deleted || e?.skipped)
     .map(([key]) => key);
   b.pace = clampPace(s.pace);
+  b.speechWpm = s.speechWpm;
 
   if (client) {
     b.dealer = {
@@ -276,7 +277,15 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   if (car) {
     b.modelSpecific = true;
     b.carColour = colourName(project.carColour) || undefined;
-    b.carModel = [car.brand, car.model, vehicles.length === 1 ? project.carVariant : ''].filter(Boolean).join(' ');
+    /*
+     * The name, not the specification.
+     *
+     * The variant decides which photographs the library sends; it is not what the
+     * car is called. CarDekho's variant strings repeat the model and then add the
+     * trim and the gearbox — "XUV 3XO AX7 L Turbo AT" — so a prompt built from
+     * brand + model + variant named the car twice and read out a transmission.
+     */
+    b.carModel = [car.brand, car.model].filter(Boolean).join(' ');
     if (vehicles.length > 1) {
       b.alsoFeatured = vehicles.slice(1).map((v) => `${v.brand} ${v.model}`);
     }

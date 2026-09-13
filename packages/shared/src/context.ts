@@ -45,6 +45,8 @@ export interface RenderContext {
   trial: string;
   /** Delivery speed; 1 is a natural read. */
   pace: number;
+  /** Words a minute the voice speaks at — the designer's choice for this film. */
+  speechWpm?: number;
 }
 
 export function buildContext(brief: Brief): RenderContext {
@@ -86,6 +88,7 @@ export function buildContext(brief: Brief): RenderContext {
     vehicle,
     trial: vehicle === 'bike' ? 'test ride' : 'test drive',
     pace: clampPace(brief.pace),
+    speechWpm: brief.speechWpm,
   };
 }
 

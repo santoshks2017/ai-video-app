@@ -7,7 +7,7 @@
  */
 
 import type { Brief, PromptPart } from './types.js';
-import { WORDS_PER_SECOND } from './constants.js';
+import { WORDS_PER_SECOND, speechRate } from './constants.js';
 import { buildContext, type RenderContext } from './context.js';
 import { buildBeats, collectStrings, storyGuidance, storyTheme, themeDirection } from './buildBeats.js';
 import { planScenes, fmtTime, speakingSeconds } from './planScenes.js';
@@ -24,7 +24,21 @@ import { rulebookText } from './rulebook.js';
  * our overlay and show through at the edges.
  */
 const CLEAN_FRAME =
-  'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. This includes the things a real showroom has written on it: a fascia, a banner, a poster, a price board, a number plate, a screen. Render them blank, or out of focus, or out of frame — never with letters or numbers on them. A model cannot spell, and what it writes is gibberish on the client\u2019s own building: one take came back with "Mahindri Medton" over the door.';
+  'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. This includes the things a real showroom has written on it: a fascia, a banner, a poster, a price board, a number plate, a screen. Render them blank, or out of focus, or out of frame — never with letters or numbers on them. A model cannot spell, and what it writes is gibberish on the client\u2019s own building.';
+
+/**
+ * The film's hard rules, for anything else that draws from the same brief.
+ *
+ * The storyboard's scene stills are drawn by a different model on a different
+ * call, and a still that breaks the film's rules is worse than no still — the
+ * video is then built on it, and a presenter who was never in the film arrives in
+ * the reference. So it is handed exactly this text rather than a paraphrase of it
+ * that drifts a little further with every edit.
+ */
+export function sceneRules(brief: Brief): string[] {
+  const ctx = buildContext(brief);
+  return [CLEAN_FRAME, ...continuityLock(brief, ctx.mode, ctx.vehicle)];
+}
 
 /**
  * The rules a generation most often breaks, said first and in the same words in every part.
@@ -84,7 +98,7 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
    */
   lines.push(
     '- NO LETTERING ANYWHERE IN THE FRAME. Not one letter, digit or word, on anything, at any distance, in or out of focus: no signage, fascia, banner, poster, standee, price board, sticker, screen, brochure, no watermark, no caption, no subtitle. Where a real place would carry writing, render the surface blank, or turn it away from camera, or let it fall out of focus entirely. Number plates are always blank — never characters on a plate. Every word the viewer reads is added afterwards.',
-    `- The only lettering allowed anywhere is a badge moulded into the ${noun} itself, and only when it is legible in the supplied photographs and you can reproduce it character for character. If you cannot, leave that panel plain — an unbadged tailgate is fine, an invented one is not. A run came back with "XUV 3OO" on the plate and a wordmark that spelled nothing.`,
+    `- The one exception is lettering already moulded into the ${noun} in the supplied photographs, and only where you can read it there and copy it character for character. Nothing is added from what you believe a badge on this ${noun} ought to say. Where a panel's lettering is not legible in the photographs, leave that panel plain — an unbadged tailgate is fine, an invented one is not. Number plates stay blank whatever the photographs show.`,
   );
   lines.push(
     `- Build this ${noun} only from the supplied photographs. Every panel, lamp, badge, wheel and surface is copied from them, and nothing about it comes from anywhere else — not from another ${noun} of this name, not from an earlier generation, not from anything you have seen elsewhere. If a shot would need a view of the ${noun} the photographs do not cover, film an angle they do cover, or hold the camera closer, or let the ${noun} sit out of focus — never fill the gap from memory.`,
@@ -104,7 +118,7 @@ function spokenLock(brief: Brief): string {
   const respelled = brief.language?.needsPhonetics !== false;
   const lines = [
     '## SPOKEN LINES — SAY THESE EXACTLY',
-    `Anything in {curly braces} above is the presenter's exact wording, in ${lang}. Speak it word for word. Do not translate it, re-word it, shorten it, extend it or "correct" it, and never read the scene descriptions aloud. Lip movement must match these words, at ${paceDelivery(brief.pace ?? 1)}.`,
+    `Anything in {curly braces} above is the presenter's exact wording, in ${lang}. Speak it word for word. Do not translate it, re-word it, shorten it, extend it or "correct" it, and never read the scene descriptions aloud. Lip movement must match these words, at ${paceDelivery(brief.pace ?? 1, brief.speechWpm)}.`,
     'Say every number and price once, in full — never restart it or repeat any part of it.',
   ];
   if (respelled) {
@@ -124,22 +138,31 @@ function spokenLock(brief: Brief): string {
   return lines.join('\n');
 }
 
-/** Words that fit in a stretch of speech. A quicker pace fits more words into the same seconds. */
-export function wordBudget(seconds: number, pace = 1): number {
-  return Math.max(3, Math.round(seconds * WORDS_PER_SECOND * pace));
+/**
+ * Words that fit in a stretch of speech, at the rate this film speaks at.
+ *
+ * The rate is the designer's choice per film — a walkaround and a three-day offer
+ * are not read at the same speed — so it decides the budget as well as the
+ * instruction. A faster read really does buy more to say.
+ */
+export function wordBudget(seconds: number, pace = 1, wpm?: number): number {
+  const perSecond = wpm ? wpm / 60 : WORDS_PER_SECOND;
+  return Math.max(3, Math.round(seconds * perSecond * pace));
 }
 
 /**
- * How the delivery is described to the model. The storyboard's pace is applied to
- * the finished film in post: asking a model to talk faster only crams the same words
- * into less clip, and a line that runs out of clip spills across the cut and is said
- * twice. So the model always gets room for a natural read; a faster pace only asks
- * for more energy.
+ * How the delivery is described to the model.
+ *
+ * Two different things meet here. The speaking rate is what the designer chose,
+ * and the word budgets were worked out at that rate, so the model can be told it
+ * plainly. The storyboard's `pace` is something else — it is applied to the
+ * finished film in post, and asking a model to talk faster only crams the same
+ * words into less clip, where the tail of a line spills across the cut and is said
+ * twice. So a quick pace asks for energy, never for hurry.
  */
-export function paceDelivery(pace: number): string {
-  return pace > 1.05
-    ? 'an energetic, upbeat delivery at a natural speaking speed'
-    : 'a natural unhurried pace with real pauses';
+export function paceDelivery(pace: number, wpm?: number): string {
+  const rate = speechRate(wpm);
+  return pace > 1.05 ? `${rate.delivery}, with extra energy` : rate.delivery;
 }
 
 function textLangLine(textLang: Brief['textLang']): string {
@@ -197,6 +220,15 @@ export interface SceneOverride {
   deleted?: boolean;
   /** Held out of this cut, but still written and still on the storyboard. */
   skipped?: boolean;
+  /**
+   * Fields on this scene that a rewrite must leave exactly as they are.
+   *
+   * A line you wrote yourself, or kept because it was right, is not something a
+   * rewrite should be free to improve. Editing a field by hand locks it — you
+   * typed it, you meant it — and the padlock beside it takes the lock off again
+   * when you do want it rewritten.
+   */
+  locked?: ('dialogue' | 'shot' | 'card')[];
 }
 
 /**
@@ -246,7 +278,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     const partEnd = scenes[scenes.length - 1]!.end;
     const partDuration = Math.round((partEnd - partStart) * 10) / 10;
     const partWordBudget = mode.speaks
-      ? scenes.reduce((sum, s) => sum + wordBudget(speakingSeconds(plan, s)), 0)
+      ? scenes.reduce((sum, s) => sum + wordBudget(speakingSeconds(plan, s), 1, brief.speechWpm), 0)
       : 0;
     const L: string[] = [];
 
@@ -388,7 +420,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         `Spoken language: ${brief.language?.name ?? 'Hindi/Hinglish'}, following the Pronunciation & Delivery Rules at the end of this prompt.`,
       );
       L.push(
-        `Dialogue budget for this clip: about ${partWordBudget} words in total across ${scenes.length} scene${scenes.length > 1 ? 's' : ''}. Do not exceed it. Speak at a natural, unhurried pace with real pauses — if a line will not fit its scene, shorten the line rather than speeding up the delivery.`,
+        `Dialogue budget for this clip: about ${partWordBudget} words in total across ${scenes.length} scene${scenes.length > 1 ? 's' : ''}, worked out at about ${speechRate(brief.speechWpm).wpm} words a minute. Do not exceed it. Speak at ${paceDelivery(1, brief.speechWpm)} — if a line will not fit its scene, shorten the line rather than speeding up the delivery.`,
       );
       L.push('No subtitles and no captions burned over the speech.');
     } else {
@@ -470,7 +502,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         L.push(`Says, word for word: {${scripted}}`);
       } else if (mode.speaks && dialogue) {
         L.push(
-          `Speaks in ${brief.language?.name ?? 'Hindi/Hinglish'}, at most ~${wordBudget(speakingSeconds(plan, sc))} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it naturally: ${dialogue}`,
+          `Speaks in ${brief.language?.name ?? 'Hindi/Hinglish'}, at most ~${wordBudget(speakingSeconds(plan, sc), 1, brief.speechWpm)} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it naturally: ${dialogue}`,
         );
       } else if (dialogue) {
         L.push(`Story beat, told visually with no speech: ${dialogue}`);
@@ -538,7 +570,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         L.push(
           `${brief.language?.name ?? 'Hindi/Hinglish'}, ${
             actor.gender === 'male' ? 'masculine' : 'feminine'
-          } verb forms, ${paceDelivery(ctx.pace)}. The words and their pronunciation are fixed above — do not restyle, re-order or re-pronounce them.`,
+          } verb forms, ${paceDelivery(ctx.pace, ctx.speechWpm)}. The words and their pronunciation are fixed above — do not restyle, re-order or re-pronounce them.`,
         );
       } else {
         L.push('## PRONUNCIATION & DELIVERY RULES (apply to every spoken word in this clip)');
@@ -609,8 +641,8 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push(
         `Spoken language: ${brief.language?.name ?? 'Hindi/Hinglish'}, in the same ${actor.gender === 'male' ? 'male' : 'female'} voice as the earlier parts, ${
           actor.gender === 'male' ? 'masculine' : 'feminine'
-        } verb forms, ${paceDelivery(ctx.pace)}, about ${
-          scenes.reduce((s, x) => s + wordBudget(speakingSeconds(plan, x)), 0)
+        } verb forms, ${paceDelivery(ctx.pace, ctx.speechWpm)}, about ${
+          scenes.reduce((s, x) => s + wordBudget(speakingSeconds(plan, x), 1, brief.speechWpm), 0)
         } words total across this segment.`,
       );
     } else {
@@ -644,7 +676,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
             ? `  Told visually, no speech: ${d}`
             : scriptedC
               ? `  Says, word for word: {${scriptedC}}`
-              : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(speakingSeconds(plan, sc))} words, composed from this intent: ${d}`,
+              : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(speakingSeconds(plan, sc), 1, brief.speechWpm)} words, composed from this intent: ${d}`,
         );
       }
       if (sceneCard(sc.beat, ov)) {

@@ -12,7 +12,7 @@
  * travels to the renderer as the first reference for the part its scene falls in.
  */
 
-import type { AspectRatio, Brief } from '@ava/shared';
+import { narrationMode, sceneRules, type AspectRatio, type Brief } from '@ava/shared';
 
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -72,9 +72,16 @@ export interface SceneImageRequest {
   shot: string;
   /** What the scene is called, for the model's sense of where it sits. */
   title?: string;
-  /** The line spoken over it, when there is one — it says what the person is doing. */
-  line?: string;
   aspect: AspectRatio;
+  /**
+   * The film's own rules, verbatim from the prompt every part is generated with.
+   *
+   * A still drawn to its own private set of rules is how a presenter who is not in
+   * the film ends up in the reference the film is then built on.
+   */
+  rules: string[];
+  /** Who may appear. Named, because a model with nobody named invents a family. */
+  cast?: string;
   /** The look the whole film is graded to. */
   style?: string;
   vehicle: string;
@@ -96,33 +103,38 @@ export interface SceneImageRequest {
  */
 function instruction(req: SceneImageRequest): string {
   const noun = req.vehicleKind === 'bike' ? 'bike' : 'car';
-  const lines = [
+  return [
     'Draw one photographic still — a single frame from a television commercial, not an illustration, not a poster, not a collage.',
     '',
     `THE SHOT: ${req.shot.trim()}`,
-  ];
-  if (req.title?.trim()) lines.push(`It is the scene called "${req.title.trim()}".`);
-  if (req.line?.trim()) lines.push(`Over it, someone says: "${req.line.trim()}" — draw what they are doing as they say it.`);
-  lines.push(
+    ...(req.title?.trim() ? [`It is the scene called "${req.title.trim()}".`] : []),
     '',
-    `THE ${noun.toUpperCase()}: ${req.vehicle}. Build it only from the supplied photographs — every panel, lamp, badge, wheel and surface copied from them, and nothing from anywhere else. If this shot needs a view of the ${noun} the photographs do not cover, move the camera to an angle they do cover, or come closer, or let the ${noun} sit out of focus. Never fill the gap from memory.`,
-    `Every lamp is complete and lit exactly as in the photographs — the full headlamp signature, the daytime running lamps, the connected tail bar.`,
-  );
-  if (req.onCameraPerson) {
-    lines.push(
-      'THE PERSON: exactly the face, hair, build and clothes in the supplied photograph of them. Not a lookalike.',
-    );
-  }
-  lines.push(
-    'THE PLACE: the dealership in the supplied photographs — its floor, its walls, its light.',
+    /*
+     * The film's rules, word for word.
+     *
+     * They already say everything a still needs about the presenter, the vehicle,
+     * the place and the lettering — and saying it in the same words is the point:
+     * a still drawn to a paraphrase is a still the film cannot be built on.
+     */
+    ...req.rules,
     '',
-    'NO LETTERING ANYWHERE IN THE FRAME. Not one letter, digit or word, on anything, at any distance, in or out of focus: no signage, fascia, banner, poster, standee, price board, sticker, screen, brochure, no watermark, no caption. Where a real place would carry writing, leave the surface blank, turn it away from camera, or let it fall out of focus. Number plates are always blank.',
-    'The supplied images are records of what the subjects look like. They are never things to put in the picture: do not draw a photograph, a grid of photographs, a contact sheet or a screen showing one. Draw the real scene.',
-    '',
-    `Framing: ${req.aspect}. Real lens, real depth of field, real light.`,
-  );
-  if (req.style?.trim()) lines.push(`Look: ${req.style.trim()}`);
-  return lines.join('\n');
+    '## THIS FRAME',
+    /*
+     * Who is in the picture.
+     *
+     * Left unsaid, an image model populates a showroom: a salesman who is not the
+     * presenter, a family who are not in the film, a couple at a desk. Every one of
+     * them then arrives in the video, because this still is the video's first
+     * reference.
+     */
+    req.cast
+      ? `- The only person who may appear is ${req.cast} Nobody else is in the frame — no second salesperson, no family, no couple, no children, no passers-by, no crowd — unless the shot above names them. If the shot describes no person, there is no person in the picture at all.`
+      : '- NO people in this frame at all. No presenter, no salesperson, no customers, no family, no children, no passers-by. The shot is the vehicle and the place, and nothing else, unless the shot above names a person.',
+    `- Build the ${noun} only from the supplied photographs. If this shot needs a view of the ${noun} they do not cover, move the camera to an angle they do cover, or come closer, or let the ${noun} sit out of focus. Never fill the gap from memory.`,
+    '- The supplied images are records of what the subjects look like. Never draw a photograph, a grid of photographs, a contact sheet, a poster or a screen showing one. Draw the real scene.',
+    `- Framing: ${req.aspect}. A real lens, real depth of field, real light.`,
+    ...(req.style?.trim() ? [`- Look: ${req.style.trim()}`] : []),
+  ].join('\n');
 }
 
 /** Draw one frame. Returns the bytes and what they are. */
@@ -200,12 +212,25 @@ export async function drawSceneFrame(
   );
 }
 
-/** Everything a frame needs from the brief, in one place. */
-export function sceneImageContext(brief: Brief): Pick<SceneImageRequest, 'aspect' | 'style' | 'vehicle' | 'vehicleKind'> {
+/**
+ * Everything a frame needs from the brief, worked out once for the whole storyboard.
+ *
+ * The rules come straight from the prompt the film is generated with, so a still
+ * and the video it seeds are held to the same thing.
+ */
+export function sceneImageContext(
+  brief: Brief,
+): Pick<SceneImageRequest, 'aspect' | 'style' | 'vehicle' | 'vehicleKind' | 'rules' | 'cast'> {
+  const mode = narrationMode(brief.narration);
+  const who = brief.actor?.name?.trim();
   return {
     aspect: brief.aspect,
     style: brief.visualStyle,
     vehicle: brief.carModel || brief.lineup?.models.join(' / ') || brief.dealer.brandModel || 'the vehicle',
     vehicleKind: brief.vehicleKind ?? 'car',
+    rules: sceneRules(brief),
+    cast: mode.onCameraPerson
+      ? `${who || 'the presenter'} — exactly the face, hair, build and clothes in the supplied photograph of them, never a lookalike and never a different person.`
+      : undefined,
   };
 }

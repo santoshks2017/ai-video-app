@@ -260,6 +260,12 @@ export interface Brief {
   addedScenes?: Beat[];
   /** Delivery speed. 1 is a natural read; 1.1 says the same script 10% faster, in a film 10% shorter. */
   pace?: number;
+  /**
+   * How fast the voice speaks, in words a minute. Decides both how the delivery is
+   * described to the model and how many words a scene's seconds are worth, so a
+   * faster read genuinely buys more to say. See SPEECH_RATES.
+   */
+  speechWpm?: number;
   durationSec: number;
   /** Per-generation-call cap in seconds (Omni Flash: 3–10s). */
   maxChunkSec: number;

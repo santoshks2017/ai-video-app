@@ -982,6 +982,28 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     const rawDurations = metas.map((m) => m.duration);
     if (speed !== 1) for (const m of metas) m.duration /= speed;
 
+    /*
+     * A beat at the end, so the film does not cut on a word.
+     *
+     * The last part is the one clip whose tail is never tightened, and the model
+     * uses every second it is given — so its speech routinely runs to the final
+     * frame. Cut there, the last two or three words go with it, and at 1.5x they
+     * are two or three words the viewer needed. So the last frame is held for
+     * however long the speech is short of a proper ending, capped at a beat, and
+     * the end card follows that instead of interrupting it.
+     */
+    const lastBody = files.length - 1;
+    const TAIL_ROOM = 0.45;
+    let tailPad = 0;
+    if (files[lastBody]) {
+      const e = await speechEdges(files[lastBody]!).catch(() => null);
+      if (e && e.end > 0) {
+        const roomLeft = Math.max(0, e.duration - e.end) / speed;
+        tailPad = Math.round(Math.max(0, Math.min(0.6, TAIL_ROOM - roomLeft)) * 1000) / 1000;
+        metas[lastBody]!.duration += tailPad;
+      }
+    }
+
     // --- the parts, joined whole ---
     // Every part plays in full, cut to cut. The crossfade that used to join them
     // blended the last half-second of one part into the first half-second of the
@@ -1020,7 +1042,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       // a part whose audio stops a few milliseconds short leaves no gap and none can
       // drift out of sync over five joins. The end card eases in from black.
       parts.push(
-        `[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,${isEndCard || speed === 1 ? '' : `setpts=(PTS-STARTPTS)/${speed},`}fps=${fps},format=yuv420p,tpad=stop_mode=clone:stop_duration=0.25,trim=end=${d},setpts=N/FRAME_RATE/TB,settb=AVTB${
+        `[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,${isEndCard || speed === 1 ? '' : `setpts=(PTS-STARTPTS)/${speed},`}fps=${fps},format=yuv420p,tpad=stop_mode=clone:stop_duration=${(0.25 + (i === lastBody ? tailPad : 0)).toFixed(3)},trim=end=${d},setpts=N/FRAME_RATE/TB,settb=AVTB${
           isEndCard ? ',fade=t=in:st=0:d=0.35' : ''
         }[c${i}v]`,
       );
@@ -1063,10 +1085,27 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       // level it plays at when nobody is speaking; then it dips under every line.
       const open = Math.max(-40, Math.min(-14, overlay.musicLoudness ?? -20));
       const duck = Math.min(0, overlay.musicDuckDb ?? 0);
+      /*
+       * Where the music stays down.
+       *
+       * Under every spoken line, and then across the end card — which has no speech
+       * of its own, so without this the bed came back up to full level for the last
+       * three seconds. After a film spent ducked under a voice, that reads as a
+       * stray burst of music over the dealership's contact details.
+       */
       const spans =
         duck < 0
           ? (await speechSpans(files, rawDurations)).map(([a, b]): [number, number] => [a / speed, b / speed])
           : [];
+      if (spans.length && endCardFile) {
+        const cardSeconds = overlay.endCard?.seconds ?? 0;
+        const from = Math.max(0, filmSeconds - cardSeconds - DUCK_ATTACK);
+        const last = spans[spans.length - 1]!;
+        // Merged rather than appended when it lands close to the final line, so the
+        // spans stay MIN_MUSIC_PAUSE apart — the spacing duckVolume's ramps rely on.
+        if (from - last[1] < MIN_MUSIC_PAUSE) last[1] = filmSeconds;
+        else spans.push([from, filmSeconds]);
+      }
       parts.push(
         `[bedraw]atrim=end=${filmSeconds.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${open}:TP=-2:LRA=11,${norm},` +
           `afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, filmSeconds - 1.5).toFixed(3)}:d=1.5` +

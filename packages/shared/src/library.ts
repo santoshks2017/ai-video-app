@@ -302,6 +302,11 @@ export interface GlobalInstruction {
 /* ---------- Projects ---------- */
 
 export interface ProjectVideoSpec {
+  /**
+   * How fast the voice speaks, in words a minute. Unset means the natural read —
+   * see SPEECH_RATES for the named speeds behind the numbers.
+   */
+  speechWpm?: number;
   /** Which VideoModelProfile generates this video. Blank = the default model. */
   modelId?: string;
   /** Which LanguageProfile the video is spoken and written in. Blank = the default. */
@@ -387,6 +392,15 @@ export interface Project {
        * It is the switch you flick twice while deciding, which is most of them.
        */
       skipped?: boolean;
+      /**
+       * Fields on this scene that a rewrite must leave exactly as they are.
+       *
+       * A line you wrote yourself, or kept because it was right, is not something a
+       * rewrite should be free to improve. Editing a field by hand locks it — you
+       * typed it, you meant it — and the padlock beside it takes the lock off again
+       * when you do want it rewritten.
+       */
+      locked?: ('dialogue' | 'shot' | 'card')[];
     }
   >;
   /** The order the designer put the storyboard in, by scene key. */

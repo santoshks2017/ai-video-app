@@ -27,6 +27,9 @@ import {
   categoryValues,
   storyGuidance,
   narrationMode,
+  SPEECH_RATES,
+  speechRate,
+  DEFAULT_WPM,
   storyTheme,
   listRows,
   usualActorFor,
@@ -44,7 +47,7 @@ import { ListField } from '../components/ListField.js';
 import { isApiError, abs } from '../lib/client.js';
 // `api` above is the library CRUD client; this one owns generation + scripting.
 import { api as genApi } from '../lib/api.js';
-import { Storyboard } from '../components/Storyboard.js';
+import { Storyboard, type LockField } from '../components/Storyboard.js';
 import { OutputPanel } from '../components/OutputPanel.js';
 import { GenerationPanel } from '../components/GenerationPanel.js';
 
@@ -344,19 +347,35 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   /** Fill every spoken scene with a real line, then let the designer edit them. */
   const writeScript = async (): Promise<string> => {
     if (!brief || !project) return 'Fill in the brief first.';
-    const r = await genApi.script(brief, language?.id, project.id);
+    const edits = keyedEdits(project.sceneEdits);
+    // The storyboard travels with the request: a locked line is not rewritten, and
+    // the writer is shown it anyway so the lines around it are written to flow with it.
+    const r = await genApi.script(brief, language?.id, project.id, edits);
     if (isApiError(r)) return `${r.code}: ${r.message}`;
-    if (!r.lines.length) return 'No spoken scenes to write for.';
-    const next = { ...keyedEdits(project.sceneEdits) };
+    if (!r.lines.length) return 'Every line is locked — unlock the ones you want rewritten.';
+    const next = { ...edits };
+    let kept = 0;
     for (const { index, key, line } of r.lines) {
       const k = key ?? built?.scenePlan.scenes[index]?.beat.key ?? String(index);
+      // Locked is locked, whatever came back.
+      if (next[k]?.locked?.includes('dialogue')) {
+        kept += 1;
+        continue;
+      }
       // One line, said as written. Any respelling an older script left behind goes.
       next[k] = { ...next[k], dialogue: line, phonetic: undefined };
     }
     // The angle is saved with the copy: it is what the lines are arguing, and
     // judging a line without it is judging half the work.
     set({ sceneEdits: next, scriptAngle: r.angle });
-    return `Wrote ${r.lines.length} line${r.lines.length > 1 ? 's' : ''} with ${r.model} — angle, draft, then an edit pass. Read them through and fix anything that sounds off.`;
+    const written = r.lines.length - kept;
+    return [
+      `Wrote ${written} line${written === 1 ? '' : 's'} with ${r.model} — angle, draft, then an edit pass.`,
+      kept ? `${kept} locked line${kept === 1 ? ' was' : 's were'} left exactly as written.` : '',
+      'Read them through and fix anything that sounds off.',
+    ]
+      .filter(Boolean)
+      .join(' ');
   };
 
   /**
@@ -487,6 +506,75 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     }
     return out;
   }, [brief, project, built]);
+
+  /**
+   * Which lock a storyboard edit belongs to. Everything else on a scene — the
+   * reference photo, the frame, skipping it — is not writing, so it locks nothing.
+   */
+  const LOCK_OF: Record<string, LockField> = {
+    dialogue: 'dialogue',
+    shot: 'shot',
+    card: 'card',
+    cardSub: 'card',
+  };
+
+  /**
+   * A storyboard edit made by hand, with the lock that follows from it.
+   *
+   * Typing in a field locks it: a line you wrote yourself is by definition one you
+   * meant, and a rewrite that quietly replaces it is the thing worth preventing.
+   * Clearing a field back to the template's own words unlocks it again — that is
+   * not writing, it is giving the field back.
+   */
+  const editScene = (key: string, patch: Record<string, unknown>): void => {
+    if (!project) return;
+    const edits = keyedEdits(project.sceneEdits);
+    const was = edits[key] ?? {};
+    let locked = [...(was.locked ?? [])];
+    for (const [field, value] of Object.entries(patch)) {
+      const lock = LOCK_OF[field];
+      if (!lock) continue;
+      const given = value === undefined || value === '';
+      if (given) locked = locked.filter((l) => l !== lock);
+      else if (!locked.includes(lock)) locked.push(lock);
+    }
+    const next = { ...was, ...patch, ...(locked.length ? { locked } : { locked: undefined }) };
+    set({ sceneEdits: { ...edits, [key]: next } });
+  };
+
+  /** Lock or unlock one field on one scene. */
+  const lockScene = (key: string, field: LockField, lock: boolean): void => {
+    if (!project) return;
+    const edits = keyedEdits(project.sceneEdits);
+    const was = edits[key] ?? {};
+    const locked = lock
+      ? [...new Set([...(was.locked ?? []), field])]
+      : (was.locked ?? []).filter((l) => l !== field);
+    set({ sceneEdits: { ...edits, [key]: { ...was, locked: locked.length ? locked : undefined } } });
+  };
+
+  /** Every lock on, or every lock off. */
+  const lockAll = (lock: boolean): void => {
+    if (!project || !built) return;
+    const edits = keyedEdits(project.sceneEdits);
+    const next = { ...edits };
+    for (const sc of built.scenePlan.scenes) {
+      const key = sc.beat.key;
+      if (!key) continue;
+      const was = next[key];
+      if (!lock) {
+        if (was?.locked) next[key] = { ...was, locked: undefined };
+        continue;
+      }
+      // Locking all locks what has actually been written, not empty boxes.
+      const fields: LockField[] = [];
+      if ((was?.phonetic ?? was?.dialogue ?? '').trim()) fields.push('dialogue');
+      if ((was?.shot ?? '').trim()) fields.push('shot');
+      if (was?.card !== undefined || was?.cardSub !== undefined) fields.push('card');
+      if (fields.length) next[key] = { ...was, locked: fields };
+    }
+    set({ sceneEdits: next });
+  };
 
   /** Hold a scene out of this cut, or put it back. Nothing written in it is lost. */
   const skipScene = (key: string, skip: boolean) => {
@@ -847,10 +935,10 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             {...fold('usecase')}
           >
             {project.useCases.length > 1 && brief && (
-              <div className="section-desc">
+              <Banner kind="ok">
                 Written as one ad — {storyGuidance(brief).useCase}: one opening, one close, and the points in between
                 told as a single story{storyTheme(brief) ? ', with the festival as the look of every shot' : ''}.
-              </div>
+              </Banner>
             )}
             {topicCount >= 3 && (
               <Banner kind="warn">
@@ -1078,6 +1166,33 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     />
                   </Field>
                 </div>
+                {/* How fast the voice speaks. It settles the instruction to the model
+                    and the words each scene's seconds are worth at the same time, so
+                    a faster read genuinely buys more to say rather than asking for
+                    hurry. A walkaround and a three-day offer are not read alike. */}
+                {narrationMode(project.spec.narration).speaks && (
+                  <Field
+                    label="Speaking pace"
+                    hint={`${speechRate(project.spec.speechWpm).hint} — about ${
+                      speechRate(project.spec.speechWpm).wpm
+                    } words a minute. Every scene's word budget is worked out at this speed.`}
+                  >
+                    <div className="seg">
+                      {SPEECH_RATES.map((r) => (
+                        <button
+                          key={r.id}
+                          type="button"
+                          className={(project.spec.speechWpm ?? DEFAULT_WPM) === r.wpm ? 'on' : ''}
+                          onClick={() => setSpec({ speechWpm: r.wpm })}
+                          title={`${r.hint} — ${r.wpm} words a minute`}
+                        >
+                          {r.label}
+                          <em>{r.wpm}</em>
+                        </button>
+                      ))}
+                    </div>
+                  </Field>
+                )}
               </Section>
 
               <Section
@@ -1175,14 +1290,15 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             </div>
           </Section>
 
-          <Section num="04" title="References" step="What the model is handed" {...fold('refs')}>
-            <div className="section-desc">
-              The vehicle, the presenter and the dealership come in on their own — there is nothing to pick. Below is
-              the whole list, in the order {activeModel?.name ?? 'the model'} is given it, numbered the way the
-              prompt numbers it. Cross one out to leave it out of the next run: it stays on the list, struck through,
-              until you put it back.
-            </div>
-
+          <Section
+            num="04"
+            title="References"
+            step="What the model is handed"
+            note={`The vehicle, the presenter and the dealership come in on their own — there is nothing to pick. The list below is everything in scope, in the order ${
+              activeModel?.name ?? 'the model'
+            } is given it and numbered the way the prompt numbers it. Cross one out to leave it out of the next run: it stays on the list, struck through, until you put it back.`}
+            {...fold('refs')}
+          >
             {refPlan &&
               (() => {
                 const heldBack = refPlan.spare.filter((e) => e.held);
@@ -1471,17 +1587,17 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 scenePlan={built.scenePlan}
                 sceneEdits={project.sceneEdits}
                 narration={project.spec.narration}
-                onEditScene={(key, patch) => {
-                  const edits = keyedEdits(project.sceneEdits);
-                  set({ sceneEdits: { ...edits, [key]: { ...edits[key], ...patch } } });
-                }}
+                onEditScene={editScene}
                 onClearEdits={() => set({ sceneEdits: {} })}
                 attachments={brief?.attachments ?? []}
                 angle={project.scriptAngle}
                 onWriteScript={writeScript}
                 languageName={language?.name}
                 onDrawScenes={drawScenes}
+                onLockScene={lockScene}
+                onLockAll={lockAll}
                 vehicle={brief?.vehicleKind ?? 'car'}
+                speechWpm={project.spec.speechWpm}
                 length={{
                   auto: project.spec.durationAuto === true,
                   seconds: project.spec.durationSec,

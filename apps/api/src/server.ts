@@ -104,6 +104,7 @@ import {
   type VehicleKind,
   type VehicleDataSource,
   speakingSeconds,
+  wordBudget,
   sceneEditFor,
   DEFAULT_USD_TO_INR,
   clampPace,
@@ -498,7 +499,15 @@ app.post<{ Body: { prompt?: string; clientId?: string } }>('/api/projects/plan',
   }
 });
 
-app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
+app.post<{
+  Body: {
+    brief?: Brief;
+    languageId?: string;
+    projectId?: string;
+    /** The storyboard as it stands — locked lines stay, and the rest is written around them. */
+    sceneOverrides?: Record<string, SceneOverride>;
+  };
+}>(
   '/api/script',
   async (req, reply) => {
   const brief = req.body?.brief;
@@ -514,18 +523,27 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
     });
   }
   const plan = planScenes(buildBeats(ctx), ctx.totalDuration, ctx.maxChunk, { speaks: true });
+  const overrides = req.body?.sceneOverrides ?? {};
   const scenes: ScriptScene[] = plan.scenes
-    .map((sc, index) => ({
-      index,
-      title: sc.beat.title,
-      direction: sc.beat.dialogue ?? '',
-      seconds: sc.duration,
-      // Measured without the silences at a part's edges, so no line spills across a cut.
-      words: Math.max(3, Math.round(speakingSeconds(plan, sc) * 2.2)),
-      card: sc.beat.card,
-    }))
-    .filter((sc) => sc.direction);
-  if (!scenes.length) return { lines: [], model: '' };
+    .map((sc, index) => {
+      // A line the designer locked is not up for rewriting. It still goes to the
+      // writer, marked as fixed, so the scenes around it are written to flow with
+      // it — a rewrite that cannot see the kept lines writes past them.
+      const ov = sceneEditFor(overrides, plan, sc);
+      const kept = ov?.locked?.includes('dialogue') ? (ov.phonetic ?? ov.dialogue ?? '').trim() : '';
+      return {
+        index,
+        title: sc.beat.title,
+        direction: sc.beat.dialogue ?? '',
+        seconds: sc.duration,
+        // Measured without the silences at a part's edges, so no line spills across a cut.
+        words: wordBudget(speakingSeconds(plan, sc), 1, brief.speechWpm),
+        card: sc.beat.card,
+        fixed: kept || undefined,
+      };
+    })
+    .filter((sc) => sc.direction || sc.fixed);
+  if (!scenes.some((sc) => !sc.fixed)) return { lines: [], model: '' };
 
   // Whatever the designer filled into the category fields is quotable fact.
   const facts: Record<string, string> = {};
@@ -613,6 +631,7 @@ app.post<{ Body: { brief?: Brief; languageId?: string; projectId?: string } }>(
         facts,
         direction: (brief.extraDirection ?? []).join(' '),
         vehicleKind: brief.vehicleKind,
+        wpm: brief.speechWpm,
       },
       apiKey,
     );
@@ -2965,7 +2984,16 @@ app.post<{
       if (!ref.ref.data || out.some((x) => x.data === ref.ref.data)) continue;
       out.push({ data: ref.ref.data, mimeType: ref.ref.mimeType, label: ref.label });
     }
-    if (onCameraPerson && actorRef?.ref.data) {
+    /*
+     * The presenter, whenever there is one.
+     *
+     * This used to be sent only when the narration puts a person on camera — and a
+     * voiceover film whose shot direction still mentions a presenter got no
+     * photograph of anyone, so the model drew whoever it liked. A man appeared in a
+     * film cast with a woman, and then in the video, because this still is what the
+     * video is built from.
+     */
+    if (actorRef?.ref.data) {
       out.push({ data: actorRef.ref.data, mimeType: actorRef.ref.mimeType, label: actorRef.label });
     }
     if (placeRef?.ref.data) {
@@ -2990,7 +3018,6 @@ app.post<{
               ...ctx,
               shot: String(sc.shot),
               title: sc.title,
-              line: sc.line,
               onCameraPerson,
               references: shot(sc),
             },

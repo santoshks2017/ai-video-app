@@ -6,10 +6,12 @@
  * plates on a navy end card. So every logo is cleaned before it is used: the
  * background is taken off, and a white version is made for dark backgrounds.
  *
- * The background is found, not assumed: it is the colour most of the border is,
- * and only what is connected to the border is removed. White inside the logo — the
- * oval in Toyota's red square, the ground of Hyundai's H — is part of the logo and
- * stays.
+ * The background is found, not assumed: it is the colour most of the border is.
+ * Everything in that colour connected to the border is removed, and so is every
+ * patch of it enclosed inside the logo — the counters of the letters, the inside of
+ * an emblem's rings, the white of the emblem on Toyota's red square. Left in, those
+ * read on video as scraps of the paper the logo was printed on. A logo that is
+ * mostly that colour — a white logo made for dark grounds — keeps it.
  *
  * The white version is a knockout, not a fill. Painting every visible pixel white
  * turned the Toyota emblem into a blank square and filled Hyundai's H in; instead,
@@ -25,6 +27,14 @@ import { BRAND_CATALOGUE, brandMatches } from '@ava/shared';
 const HARD = 42;
 const SOFT = 90;
 const MAX_SIDE = 1200;
+/**
+ * Inside the logo, a pixel whose strongest channel is within this share of the way
+ * from the background colour is background. Stronger than that it is ink, or an edge
+ * mixed from ink and background, which is unmixed rather than cut.
+ */
+const KEY_LO = 0.08;
+/** The weakest neighbour that still counts as the ink an edge pixel was mixed from. */
+const INK_FLOOR = 0.3;
 /**
  * A descriptive agent with a way to reach whoever runs it, as Wikimedia's policy
  * asks. Without the contact, requests after the first few in a row were refused —
@@ -70,7 +80,14 @@ export async function cleanLogo(input: Buffer): Promise<CleanedLogo> {
     edge(at(0, y));
     edge(at(w - 1, y));
   }
-  const alreadyClear = border > 0 && clear / border > 0.9;
+  // A logo that was cut out and trimmed has its ink touching the edge of the image, so
+  // even a fifth of the edge being transparent means the background is already gone.
+  // Reading the rest of that edge as background mistook the red of Toyota's square for
+  // paper, and left the white emblem inside it untouched.
+  const alreadyClear = border > 0 && clear / border >= 0.2;
+  // A logo that arrives already transparent was, almost always, cut from white.
+  let key: [number, number, number] = [255, 255, 255];
+  const keyed = new Uint8Array(w * h);
 
   if (!alreadyClear) {
     const counts = new Map<string, number>();
@@ -90,6 +107,7 @@ export async function cleanLogo(input: Buffer): Promise<CleanedLogo> {
     const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
     if (top) {
       const [br, bg, bb] = top[0].split(',').map((v) => (Number(v) << 4) + 8) as [number, number, number];
+      key = [br, bg, bb];
       const seen = new Uint8Array(w * h);
       const stack: number[] = [];
       for (let x = 0; x < w; x++) stack.push(x, 0, x, h - 1);
@@ -110,10 +128,13 @@ export async function cleanLogo(input: Buffer): Promise<CleanedLogo> {
         if (d > SOFT) continue;
         const alpha = d <= HARD ? 0 : Math.round((255 * (d - HARD)) / (SOFT - HARD));
         data[i + 3] = Math.min(data[i + 3]!, alpha);
+        keyed[j] = 1;
         if (d <= HARD) stack.push(x + 1, y, x - 1, y, x, y + 1, x, y - 1);
       }
     }
   }
+
+  keyEnclosed(data, w, h, key, keyed);
 
   let colour = await sharp(data, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
   try {
@@ -124,30 +145,147 @@ export async function cleanLogo(input: Buffer): Promise<CleanedLogo> {
   return { colour, white: await whiteKnockout(colour), removedBackground: !alreadyClear };
 }
 
-/** White ink from darkness or colour strength; light pixels inside the logo become transparent. */
+/**
+ * The background inside the logo, as well as around it.
+ *
+ * A patch of the background colour that is enclosed by the logo — touching neither
+ * transparency nor the edge of the image — is paper the logo was printed on: the
+ * counters of letters, the inside of an emblem's rings, the white of the emblem on
+ * Toyota's red square. It goes. A light part that does touch transparency is ink
+ * drawn on it — the white wing of Mahindra's EV mark, TC Motors' white lettering —
+ * and stays. The edge around a removed patch is ink mixed with paper, so it is
+ * unmixed against the strongest ink beside it: the letter keeps its colour and a
+ * soft edge rather than a pale fringe or a jagged cut.
+ */
+function keyEnclosed(data: Buffer, w: number, h: number, key: [number, number, number], keyed: Uint8Array): void {
+  const n = w * h;
+  const strength = new Float32Array(n);
+  let opaque = 0;
+  let nearKey = 0;
+  for (let j = 0, i = 0; j < n; j++, i += 4) {
+    if (data[i + 3]! < 128) continue;
+    let st = 0;
+    for (let c = 0; c < 3; c++) {
+      const v = data[i + c]!;
+      const k = key[c]!;
+      // Measured against the widest the channel can swing from the background, so a
+      // background sampled as 248 still reads pure 255 as background, not as ink.
+      st = Math.max(st, Math.abs(v - k) / Math.max(k, 255 - k, 1));
+    }
+    strength[j] = st;
+    opaque++;
+    if (st < KEY_LO) nearKey++;
+  }
+  // Mostly the background colour: a white logo for dark grounds is white on purpose.
+  if (!opaque || nearKey / opaque >= 0.5) return;
+
+  const light = (j: number): boolean => data[j * 4 + 3]! >= 128 && strength[j]! < KEY_LO;
+  // Everything light that can be reached from transparency or from the image's edge.
+  const reached = new Uint8Array(n);
+  const queue = new Int32Array(n);
+  let head = 0;
+  let tail = 0;
+  const seed = (j: number): void => {
+    if (reached[j]) return;
+    reached[j] = 1;
+    queue[tail++] = j;
+  };
+  for (let j = 0; j < n; j++) if (data[j * 4 + 3]! < 128) seed(j);
+  for (let x = 0; x < w; x++) {
+    if (light(x)) seed(x);
+    if (light((h - 1) * w + x)) seed((h - 1) * w + x);
+  }
+  for (let y = 0; y < h; y++) {
+    if (light(y * w)) seed(y * w);
+    if (light(y * w + w - 1)) seed(y * w + w - 1);
+  }
+  while (head < tail) {
+    const j = queue[head++]!;
+    const x = j % w;
+    if (x > 0 && !reached[j - 1] && light(j - 1)) seed(j - 1);
+    if (x < w - 1 && !reached[j + 1] && light(j + 1)) seed(j + 1);
+    if (j >= w && !reached[j - w] && light(j - w)) seed(j - w);
+    if (j + w < n && !reached[j + w] && light(j + w)) seed(j + w);
+  }
+
+  const hole = new Uint8Array(n);
+  let holes = 0;
+  for (let j = 0; j < n; j++) {
+    if (light(j) && !reached[j]) {
+      hole[j] = 1;
+      holes++;
+    }
+  }
+  if (!holes) return;
+
+  // Within two pixels of a hole, with the strongest ink within two pixels: what an edge is a mix of.
+  const R = 2;
+  const acrossHole = new Uint8Array(n);
+  const acrossInk = new Float32Array(n);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let hh = 0;
+      let ink = 0;
+      for (let dx = -R; dx <= R; dx++) {
+        const xx = x + dx;
+        if (xx < 0 || xx >= w) continue;
+        const k = y * w + xx;
+        hh |= hole[k]!;
+        ink = Math.max(ink, strength[k]!);
+      }
+      acrossHole[y * w + x] = hh;
+      acrossInk[y * w + x] = ink;
+    }
+  }
+  for (let j = 0, i = 0; j < n; j++, i += 4) {
+    if (keyed[j] || data[i + 3]! < 128) continue;
+    if (hole[j]) {
+      data[i + 3] = 0;
+      continue;
+    }
+    const x = j % w;
+    const y = (j - x) / w;
+    let nearHole = 0;
+    let near = 0;
+    for (let dy = -R; dy <= R; dy++) {
+      const yy = y + dy;
+      if (yy < 0 || yy >= h) continue;
+      nearHole |= acrossHole[yy * w + x]!;
+      near = Math.max(near, acrossInk[yy * w + x]!);
+    }
+    if (!nearHole) continue;
+    const st = strength[j]!;
+    const full = 0.85 * Math.max(near, INK_FLOOR);
+    const a = Math.min(1, Math.max(0, (st - KEY_LO) / Math.max(0.01, full - KEY_LO)));
+    if (a >= 1) continue;
+    if (a <= 0) {
+      data[i + 3] = 0;
+      continue;
+    }
+    for (let c = 0; c < 3; c++) {
+      data[i + c] = Math.max(0, Math.min(255, Math.round(key[c]! + (data[i + c]! - key[c]!) / a)));
+    }
+    data[i + 3] = Math.round(data[i + 3]! * a);
+  }
+}
+
+/**
+ * The same logo in white, for dark grounds: every part of it that is left turns white,
+ * at its own edges.
+ *
+ * This used to be a knockout by lightness — dark and strongly coloured pixels became
+ * white ink, light ones turned transparent — because the white paper inside a logo was
+ * still in it, and painting everything white filled the Toyota emblem in. That paper is
+ * now taken out when the logo is cleaned, so what is left is all ink, and a light part
+ * is ink too: the knockout had erased TC Motors' white lettering and the white wing of
+ * Mahindra's EV mark on every end card.
+ */
 async function whiteKnockout(colourPng: Buffer): Promise<Buffer> {
   const { data, info } = await sharp(colourPng).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const ink = new Float32Array(info.width * info.height);
-  let strongest = 0;
-  for (let p = 0, i = 0; i < data.length; i += 4, p++) {
-    const r = data[i]!;
-    const g = data[i + 1]!;
-    const b = data[i + 2]!;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const dark = (255 - (0.2126 * r + 0.7152 * g + 0.0722 * b)) / 255;
-    const saturation = max === 0 ? 0 : (max - min) / max;
-    ink[p] = Math.max(dark, saturation) * (data[i + 3]! / 255);
-    if (data[i + 3]! > 16) strongest = Math.max(strongest, ink[p]!);
-  }
-  const gain = strongest > 0 ? 1 / strongest : 1;
-  for (let p = 0, i = 0; i < data.length; i += 4, p++) {
-    // A small floor, so the grey haze a JPG leaves inside a logo does not show as a veil.
-    const a = Math.max(0, Math.min(1, (ink[p]! * gain - 0.06) / 0.94));
+  for (let i = 0; i < data.length; i += 4) {
     data[i] = 255;
     data[i + 1] = 255;
     data[i + 2] = 255;
-    data[i + 3] = Math.round(a * 255);
   }
   return sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
 }

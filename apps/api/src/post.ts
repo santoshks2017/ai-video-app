@@ -90,7 +90,7 @@ export interface BrandOverlay {
  * two-vCPU instance. (It did not change peak memory — measured; the crossfade
  * chain did, see composeFinal.)
  */
-const FF_THREADS = String(Math.max(1, Number(process.env.FFMPEG_THREADS) || 2));
+export const FF_THREADS = String(Math.max(1, Number(process.env.FFMPEG_THREADS) || 2));
 
 const DEFAULT_ACCENT = '#e2600a';
 const DEFAULT_INK = '#0f1e33';
@@ -100,12 +100,12 @@ const DEFAULT_INK = '#0f1e33';
  * it leads the stack so a local render looks like the real one wherever it can.
  * POST_FONT overrides it, which is how the layout is tested against a wide face.
  */
-const FONT = process.env.POST_FONT || 'DejaVu Sans, Noto Sans, Helvetica, Arial, sans-serif';
+export const FONT = process.env.POST_FONT || 'DejaVu Sans, Noto Sans, Helvetica, Arial, sans-serif';
 
-const esc = (s: string): string =>
+export const esc = (s: string): string =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-function run(cmd: string, args: string[]): Promise<string> {
+export function run(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { maxBuffer: 1 << 28 }, (err, stdout, stderr) => {
       if (err) reject(new Error(`${cmd} failed: ${stderr || err.message}`));
@@ -114,14 +114,14 @@ function run(cmd: string, args: string[]): Promise<string> {
   });
 }
 
-interface ClipMeta {
+export interface ClipMeta {
   duration: number;
   width: number;
   height: number;
   fps: number;
 }
 
-async function probe(file: string): Promise<ClipMeta> {
+export async function probe(file: string): Promise<ClipMeta> {
   const out = await run('ffprobe', [
     '-v', 'error',
     '-select_streams', 'v:0',
@@ -1314,7 +1314,7 @@ export async function splitVideo(clip: Buffer, maxSeconds: number): Promise<Buff
 }
 
 /** Whether a file carries a sound track at all. */
-async function hasAudio(file: string): Promise<boolean> {
+export async function hasAudio(file: string): Promise<boolean> {
   const out = await run('ffprobe', [
     '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file,
   ]).catch(() => '');

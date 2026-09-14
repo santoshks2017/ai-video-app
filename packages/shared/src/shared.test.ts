@@ -49,6 +49,22 @@ import {
   OMNI_FLASH_LEGACY_DEFAULTS,
   VEO_31_LITE_DEFAULTS,
   DAILY_LIMITS,
+  EDIT_MAIN_TRACK,
+  newEditProject,
+  addEditClip,
+  removeEditClip,
+  splitEditClip,
+  updateEditClip,
+  packEditTrack,
+  trimEditClip,
+  duplicateEditClip,
+  editClipLength,
+  editProjectLength,
+  editTimecode,
+  editSnap,
+  validateEditProject,
+  type EditProject,
+  type EditSource,
   type CarModelProfile,
   type ActorProfile,
   type DealerPhoto,
@@ -1192,4 +1208,88 @@ test('the earlier Omni and Veo 3.1 Lite ship with honest defaults', () => {
   assert.equal(VEO_31_LITE_DEFAULTS.maxReferenceImages, 0, 'sends nothing it might refuse until it has been tried');
   assert.equal(DAILY_LIMITS['gemini-omni-1.1-flash'], 100);
   assert.equal(renderResolution('veo-3.1-lite-generate-preview', '360p').render, '720p');
+});
+
+/* ---------------------------------------------------------------------------
+ * The video editor's timeline.
+ * ------------------------------------------------------------------------ */
+
+const film = (label: string, duration: number): EditSource => ({ type: 'video', label, url: `https://x/${label}.mp4`, duration, jobId: label });
+const put = (p: EditProject, label: string, duration: number, start = 0) =>
+  addEditClip(p, { trackId: EDIT_MAIN_TRACK, start, in: 0, out: duration, source: film(label, duration), speed: 1, volume: 1, fadeIn: 0, fadeOut: 0 }, { magnet: true });
+
+test('the main track closes up behind a cut, and parts to let a clip in', () => {
+  let p = newEditProject('9:16');
+  p = put(p, 'a', 10).project;
+  const b = put(p, 'b', 6, 99);
+  p = b.project;
+  assert.equal(p.clips.find((c) => c.id === b.id)?.start, 10, 'appended straight after the first, not at 99s');
+  assert.equal(editProjectLength(p), 16);
+
+  const first = p.clips.find((c) => c.source?.label === 'a')!;
+  p = removeEditClip(p, first.id, { magnet: true });
+  assert.equal(p.clips[0]?.start, 0, 'the gap closed');
+  assert.equal(editProjectLength(p), 6);
+});
+
+test('splitting keeps every second, and a sliver is refused', () => {
+  const r = put(newEditProject(), 'a', 10);
+  const cut = splitEditClip(r.project, r.id, 4);
+  const halves = cut.project.clips.sort((x, y) => x.start - y.start);
+  assert.equal(halves.length, 2);
+  assert.equal(editClipLength(halves[0]!), 4);
+  assert.equal(editClipLength(halves[1]!), 6);
+  assert.equal(halves[1]!.in, 4, 'the second half plays on from where the first stopped');
+  assert.equal(splitEditClip(r.project, r.id, 0.05).project, r.project, 'too close to the edge');
+});
+
+test('speed changes a clip’s length, not what it plays', () => {
+  const r = put(newEditProject(), 'a', 10);
+  const fast = updateEditClip(r.project, r.id, { speed: 2 });
+  assert.equal(editClipLength(fast.clips[0]!), 5);
+  assert.equal(fast.clips[0]!.out - fast.clips[0]!.in, 10);
+});
+
+test('a transition overlaps its clip onto the one before, and the film is shorter by it', () => {
+  let p = put(newEditProject(), 'a', 8).project;
+  const b = put(p, 'b', 8);
+  p = updateEditClip(b.project, b.id, { transition: { id: 'superposition', duration: 1 } });
+  p = packEditTrack(p, EDIT_MAIN_TRACK);
+  assert.equal(p.clips.find((c) => c.id === b.id)?.start, 7);
+  assert.equal(editProjectLength(p), 15);
+});
+
+test('a video cannot be trimmed past what was recorded; a still can run as long as you like', () => {
+  const r = put(newEditProject(), 'a', 10);
+  const longer = trimEditClip(r.project, r.id, 'out', 25, { magnet: true });
+  assert.equal(editClipLength(longer.clips[0]!), 10, 'held at the recording');
+
+  const still = addEditClip(newEditProject(), { trackId: EDIT_MAIN_TRACK, start: 0, in: 0, out: 3, source: { type: 'image', label: 's', url: 'https://x/s.png' }, speed: 1, volume: 1, fadeIn: 0, fadeOut: 0 }, { magnet: true });
+  const stretched = trimEditClip(still.project, still.id, 'out', 9, { magnet: true });
+  assert.equal(editClipLength(stretched.clips[0]!), 9);
+});
+
+test('duplicating inserts the copy straight after, and what followed moves along', () => {
+  let p = put(newEditProject(), 'a', 5).project;
+  p = put(p, 'b', 4).project;
+  const a = p.clips.find((c) => c.source?.label === 'a')!;
+  const d = duplicateEditClip(p, a.id, { magnet: true });
+  const order = d.project.clips.sort((x, y) => x.start - y.start).map((c) => `${c.source?.label}@${c.start}`);
+  assert.deepEqual(order, ['a@0', 'a@5', 'b@10']);
+});
+
+test('the timecode reads like the player, and an edge snaps to what is near it', () => {
+  assert.equal(editTimecode(29.7), '00:00:29:70');
+  assert.equal(editTimecode(3725.5), '01:02:05:50');
+  assert.equal(editSnap(9.93, [0, 10, 20], 0.1), 10);
+  assert.equal(editSnap(9.5, [0, 10, 20], 0.1), 9.5, 'nothing within reach, so it stays');
+});
+
+test('the server refuses an edit it cannot render', () => {
+  assert.equal(validateEditProject(null), 'No edit was sent.');
+  assert.match(String(validateEditProject({ ...newEditProject(), version: 2 })), /different version/);
+  const ok = put(newEditProject(), 'a', 5).project;
+  assert.equal(validateEditProject(ok), null);
+  const broken = { ...ok, clips: [{ ...ok.clips[0]!, out: Number.NaN }] };
+  assert.match(String(validateEditProject(broken)), /not a number/);
 });

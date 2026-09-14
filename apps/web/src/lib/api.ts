@@ -4,7 +4,7 @@
  * clip URLs served back through /api/clips/:jobId/:part.
  */
 
-import type { Brief, PromptPart, DealerPhoto, BriefPlan } from '@ava/shared';
+import type { Brief, PromptPart, DealerPhoto, BriefPlan, EditProject } from '@ava/shared';
 import { apiBase as BASE, req, isApiError as sharedIsApiError, type ApiError as SharedApiError } from './client.js';
 
 export interface ClipView {
@@ -216,6 +216,14 @@ export const api = {
     return await req<{ jobId: string; finalUrl: string }>(`/api/generations/${jobId}/edit`, {
       method: 'POST',
       body: JSON.stringify(body),
+    });
+  },
+
+  /** Render a video editor project on the server and save it as a new version. */
+  async renderEdit(project: EditProject, label?: string) {
+    return await req<{ jobId: string; finalUrl: string }>('/api/edits/render', {
+      method: 'POST',
+      body: JSON.stringify({ project, label }),
     });
   },
 

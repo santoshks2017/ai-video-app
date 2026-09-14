@@ -13,7 +13,7 @@ import {
 import { getModelUsage, type ModelUsageItem } from '../lib/client.js';
 import { useApp } from '../state/appStore.js';
 import { ImageUpload, Thumb } from './ui.js';
-import { CutRoom } from './CutRoom.js';
+import { VideoEditor } from './VideoEditor.js';
 import {
   api,
   isApiError,
@@ -363,8 +363,9 @@ export function GenerationPanel({
   return (
     <>
     {editing?.finalUrl && (
-      <CutRoom
+      <VideoEditor
         run={editing}
+        brief={brief}
         others={history.filter((h) => h.jobId !== editing.jobId && h.finalUrl)}
         onClose={() => setEditingRun(null)}
         onExported={(jobId) => {

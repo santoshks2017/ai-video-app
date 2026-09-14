@@ -22,6 +22,10 @@ import {
   VEO_31_FAST_DEFAULTS,
   VEO_31_LITE_DEFAULTS,
   OMNI_FLASH_LEGACY_DEFAULTS,
+  validateEditProject,
+  EDIT_MAIN_TRACK,
+  type EditProject,
+  type EditSource,
   DAILY_LIMITS,
   nextPacificMidnight,
   resetTimeLabel,
@@ -46,6 +50,7 @@ import {
 } from './seedance.js';
 import { generateVeoClip, VeoError } from './veo.js';
 import { countRequest, markExhausted, usageToday } from './usage.js';
+import { renderEditProject } from './editRender.js';
 import { checkVehicleFrame } from './vehicleCheck.js';
 import {
   saveJob,
@@ -2726,6 +2731,62 @@ app.post<{
     }
   },
 );
+
+/**
+ * Export a video editor project.
+ *
+ * Rendered with ffmpeg on this server and saved as a new version of the first of
+ * the project's films on the main track, so it lands in that project's history
+ * beside the film it was cut from — which is untouched. Only the project's own
+ * films and this app's own uploads can be read into an edit, never an arbitrary
+ * path in the bucket.
+ */
+app.post<{ Body: { project?: EditProject; label?: string } }>('/api/edits/render', async (req, reply) => {
+  const problem = validateEditProject(req.body?.project);
+  if (problem) return reply.code(400).send({ code: 'bad-request', message: problem });
+  const project = req.body!.project!;
+
+  const firstFilm = project.clips
+    .filter((c) => c.trackId === EDIT_MAIN_TRACK)
+    .sort((a, b) => a.start - b.start)
+    .map((c) => c.source)
+    .find((src): src is Extract<EditSource, { type: 'video' }> => src?.type === 'video' && Boolean(src.jobId));
+  const base = firstFilm?.jobId ? await getJob(firstFilm.jobId) : null;
+  if (!base) {
+    return reply.code(400).send({
+      code: 'no-film',
+      message: "Put at least one of this project's films on the main track — the edit is saved as a version of it.",
+    });
+  }
+
+  const load = async (src: EditSource): Promise<Buffer | null> => {
+    if (src.type === 'video' && src.jobId) {
+      const job = await getJob(src.jobId);
+      return job?.finalStoragePath ? ((await readObject(job.finalStoragePath))?.bytes ?? null) : null;
+    }
+    if (src.storagePath && /^refs\/[\w-]+\/[^/]+$/.test(src.storagePath)) {
+      return (await readObject(src.storagePath))?.bytes ?? null;
+    }
+    return null;
+  };
+
+  try {
+    const started = Date.now();
+    const { bytes, seconds } = await renderEditProject(project, load);
+    const count = (kind: string) => project.clips.filter((c) => (kind === 'text' ? c.text : c.source?.type === kind)).length;
+    const saved = await saveDerived(base, bytes, {
+      kind: 'edit',
+      label: req.body?.label?.trim().slice(0, 120) || 'Edited cut',
+      note: `Edited in the video editor: ${count('video')} video, ${count('image')} still, ${count('text')} text and ${count('audio')} sound clip(s) — ${seconds.toFixed(1)}s at ${project.aspect}, rendered in ${Math.round((Date.now() - started) / 1000)}s.`,
+      caller: req.caller,
+      resolution: base.resolution,
+    });
+    return { jobId: saved.jobId, finalUrl: `/api/clips/${saved.jobId}/final` };
+  } catch (err) {
+    app.log.error({ err: (err as Error).message }, 'edit render failed');
+    return reply.code(400).send({ code: 'edit-failed', message: (err as Error).message.slice(0, 600) });
+  }
+});
 
 app.get<{ Params: { jobId: string } }>('/api/generations/:jobId', async (req, reply) => {
   const job = await getJob(req.params.jobId);

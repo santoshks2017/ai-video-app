@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
-import { logoLayout,
+import { LOGO_CLEAN_VERSION, logoLayout,
   brandMatches,
   isPromptOnly,
   estimateCost,
@@ -3306,7 +3306,7 @@ app.post<{
  * or when asked for again, and where it came from is kept on the record so a
  * designer can see it and replace it with the dealership's own file.
  */
-app.post<{ Params: { id: string }; Body?: { pullBrand?: boolean } }>('/api/clients/:id/logos', async (req, reply) => {
+app.post<{ Params: { id: string }; Body?: { pullBrand?: boolean; cleanOnly?: boolean } }>('/api/clients/:id/logos', async (req, reply) => {
   const client = await getOne<ClientProfile>('clients', req.params.id);
   if (!client) return reply.code(404).send({ code: 'not-found', message: 'No such client' });
 
@@ -3328,7 +3328,7 @@ app.post<{ Params: { id: string }; Body?: { pullBrand?: boolean } }>('/api/clien
     };
   };
 
-  const fields: Partial<ClientProfile> = {};
+  const fields: Partial<ClientProfile> = { logoCleanVersion: LOGO_CLEAN_VERSION };
   const notes: string[] = [];
   if (client.logo?.storagePath) {
     const obj = await readObject(client.logo.storagePath).catch(() => null);
@@ -3342,7 +3342,8 @@ app.post<{ Params: { id: string }; Body?: { pullBrand?: boolean } }>('/api/clien
 
   const brand = (client.brands?.find((x) => x.trim()) ?? client.brand ?? '').trim();
   let pulled = false;
-  if (req.body?.pullBrand === true || !client.brandLogo) {
+  // Cleaning again only — as when a client is opened — never goes looking for a brand logo.
+  if (!req.body?.cleanOnly && (req.body?.pullBrand === true || !client.brandLogo)) {
     const found = brand ? await findBrandLogo(brand).catch(() => null) : null;
     if (found) {
       const k = await keep(found.bytes, `${client.id}-brand-logo`, `${brand} logo`);

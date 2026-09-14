@@ -279,6 +279,8 @@ export interface ClientProfile {
    * brand top-left and the dealership top-right.
    */
   logoPlacement?: Partial<LogoPlacement>;
+  /** The LOGO_CLEAN_VERSION the stored logos were last cleaned with. Unset: before versions were kept. */
+  logoCleanVersion?: number;
   /** Showroom / delivery / team photos, each filed under the part of the place it shows. */
   photos: StoredImage[];
   /**

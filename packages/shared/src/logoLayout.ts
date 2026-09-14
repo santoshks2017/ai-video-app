@@ -29,3 +29,11 @@ export function logosOn(
 ): ('brand' | 'dealer')[] {
   return (['brand', 'dealer'] as const).filter((k) => has[k] && layout[k] === side);
 }
+
+/**
+ * Which logo cleaner a client's stored logos were last put through. Bump it when the
+ * cleaning changes: a client whose stored logos are older is cleaned again when it is
+ * opened, so the copies Clients shows match what the films draw. 2 is the cleaner
+ * that also takes out the background enclosed inside a logo.
+ */
+export const LOGO_CLEAN_VERSION = 2;

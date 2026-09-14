@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { LOGO_SLOTS, logoLayout, logosOn,
+import { useEffect, useMemo, useState } from 'react';
+import { LOGO_CLEAN_VERSION, LOGO_SLOTS, logoLayout, logosOn,
   suggestDisplayName,
   defaultFooterText,
   usualActorFor,
@@ -225,6 +225,45 @@ export function ClientsSection() {
     if (!isApiError(fresh)) setDraft(fresh);
     setLogoNote(r.notes.length ? `${r.notes.join('; ')}.` : 'Nothing to tidy.');
   };
+
+  /*
+   * Logos cleaned by an older cleaner are cleaned again when the client is opened.
+   * Films clean every logo as they render, but the stored copies — the thumbnails and
+   * the placement preview here — stay as they were cleaned, so white left inside a
+   * logo by the old cleaner kept showing until someone pressed Clean up logos. Only the
+   * logo fields are taken back, so nothing being typed into the client is lost.
+   */
+  const canEdit = useApp((s) => s.can('creator'));
+  useEffect(() => {
+    const d = draft;
+    if (!d?.id || !canEdit || !(d.logo || d.brandLogo) || (d.logoCleanVersion ?? 1) >= LOGO_CLEAN_VERSION) return;
+    let alive = true;
+    void (async () => {
+      setLogoBusy(true);
+      const r = await cleanClientLogos(d.id, false, true);
+      setLogoBusy(false);
+      if (!alive || isApiError(r)) return;
+      await refresh();
+      const fresh = await get<ClientProfile>(`/api/clients/${d.id}`);
+      if (!alive || isApiError(fresh)) return;
+      setDraft((cur) =>
+        cur?.id === fresh.id
+          ? {
+              ...cur,
+              logo: fresh.logo,
+              logoWhite: fresh.logoWhite,
+              brandLogo: fresh.brandLogo,
+              brandLogoWhite: fresh.brandLogoWhite,
+              logoCleanVersion: fresh.logoCleanVersion,
+            }
+          : cur,
+      );
+      setLogoNote('Logos cleaned again, inside as well as around them.');
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [draft?.id]);
 
   /** A stored logo's link, made absolute: records written by the server carry the path. */
   const logoView = (img: StoredImage): StoredImage => ({ ...img, url: abs(img.url ?? null) ?? img.url });

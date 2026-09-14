@@ -161,8 +161,8 @@ export async function buildClientSheets(id: string, relabel = false) {
  * Clean a client's saved logos — background off, a white version made — and pull the
  * brand's logo when it has none, or when asked for again.
  */
-export async function cleanClientLogos(id: string, pullBrand = false) {
-  return await post<{ ok: true; notes: string[]; pulled: boolean }>(`/api/clients/${id}/logos`, { pullBrand });
+export async function cleanClientLogos(id: string, pullBrand = false, cleanOnly = false) {
+  return await post<{ ok: true; notes: string[]; pulled: boolean }>(`/api/clients/${id}/logos`, { pullBrand, cleanOnly });
 }
 
 /* ---------------- reference-image upload ---------------- */

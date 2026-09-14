@@ -42,6 +42,8 @@ export interface SeedanceInput {
   references?: SeedanceRef[];
   /** Seedance renders speech and sound in the same pass. */
   generateAudio?: boolean;
+  /** Called once for the request sent, so a day's spend is counted alongside Google's. */
+  onAttempt?: () => void;
 }
 
 export interface SeedanceClip {
@@ -123,6 +125,7 @@ export async function generateSeedanceClip(
   // stops the model reading a shot description as an edit or extend request.
   if (!hasFirstFrame && refs.length) body.omni_reference_task_type = 'reference';
 
+  input.onAttempt?.();
   const created = await fetch(`${ARK_BASE}/contents/generations/tasks`, {
     method: 'POST',
     headers: authHeaders(apiKey),

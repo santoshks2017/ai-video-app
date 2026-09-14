@@ -322,6 +322,7 @@ export function ModelsSection() {
                   </b>
                   <span>
                     {credName(m.credentialId)} · {m.minClipSec}–{m.maxClipSec}s · ${m.usdPerSecond}/s
+                    {m.dailyRequestLimit ? ` · ${m.dailyRequestLimit}/day` : ''}
                     {m.enabled === false ? ' · disabled' : ''}
                   </span>
                 </>
@@ -422,13 +423,32 @@ export function ModelsSection() {
                   />
                 </Field>
               </div>
-              <Field label="Max reference images per call" hint="Omni Flash image-to-video accepts 2.">
-                <input
-                  type="number"
-                  value={model.maxReferenceImages}
-                  onChange={(e) => setModel({ ...model, maxReferenceImages: Number(e.target.value) })}
-                />
-              </Field>
+              <div className="row2">
+                <Field label="Max reference images per call" hint="Omni 1.1 Flash takes 10. A set the provider refuses is retried with one fewer — and each retry is a request counted against the day.">
+                  <input
+                    type="number"
+                    value={model.maxReferenceImages}
+                    onChange={(e) => setModel({ ...model, maxReferenceImages: Number(e.target.value) })}
+                  />
+                </Field>
+                <Field
+                  label="Daily request limit"
+                  hint="Requests a day the provider allows this model on your account — read it off Google's rate-limit page (RPD). Each part of a film is one request. Leave empty if you do not know it; usage is still counted."
+                >
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Not set"
+                    value={model.dailyRequestLimit ?? ''}
+                    onChange={(e) =>
+                      setModel({
+                        ...model,
+                        dailyRequestLimit: e.target.value === '' ? undefined : Math.max(0, Number(e.target.value)),
+                      })
+                    }
+                  />
+                </Field>
+              </div>
               <div className="check-row">
                 <input
                   type="checkbox"

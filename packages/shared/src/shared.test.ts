@@ -40,6 +40,15 @@ import {
   referencePlan,
   speechRate,
   DEFAULT_WPM,
+  pacificDay,
+  nextPacificMidnight,
+  resetTimeLabel,
+  isDailyQuotaError,
+  requestsForRun,
+  remainingLabel,
+  OMNI_FLASH_LEGACY_DEFAULTS,
+  VEO_31_LITE_DEFAULTS,
+  DAILY_LIMITS,
   type CarModelProfile,
   type ActorProfile,
   type DealerPhoto,
@@ -1141,4 +1150,46 @@ test('the card-length warning names the scene, and follows the edits', () => {
 
   // The end card is a whole frame with its own lines, never a caption panel.
   assert.ok(!/end card/i.test(warn!.text));
+});
+
+/* ---------------------------------------------------------------------------
+ * A model's day: when it turns, and what counts as running out of it.
+ * ------------------------------------------------------------------------ */
+
+test('the day turns at midnight Pacific, which is half past noon in India', () => {
+  // 14 September, 2:30 PM in India — still the small hours of the 14th in California.
+  const now = Date.UTC(2026, 8, 14, 9, 0, 0);
+  assert.equal(pacificDay(now), '2026-09-14');
+  const reset = nextPacificMidnight(now);
+  assert.equal(new Date(reset).toISOString(), '2026-09-15T07:00:00.000Z', 'midnight PDT is 07:00 UTC');
+  assert.equal(resetTimeLabel(reset), '12:30 PM IST');
+});
+
+test('a refusal is the day’s cap only when it says so, or reports the daily number', () => {
+  // The refusal on screen, as Google wrote it.
+  const real =
+    'You exceeded your current quota, please check your plan and billing details. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_paid_tier_2_requests, limit: 100, model: gemini-omni-1.1-flash Please retry in 1.58s';
+  assert.ok(isDailyQuotaError(real, 100), 'limit 100 on a model allowed 100 a day is the day’s cap');
+  // The same wording with the per-minute number is the minute's cap, and worth a retry.
+  assert.ok(!isDailyQuotaError(real.replace('limit: 100', 'limit: 8'), 100));
+  // Named as a per-day quota, it is the day's cap whatever the numbers.
+  assert.ok(isDailyQuotaError('Quota exceeded: GenerateRequestsPerDayPerProjectPerModel-PaidTier2'));
+  // "Retry in 1.58s" is not evidence of anything.
+  assert.ok(!isDailyQuotaError('Resource exhausted. Please retry in 1.58s'));
+});
+
+test('a film is a request per part, and up to two more on Google’s models', () => {
+  assert.deepEqual(requestsForRun(5, 'gemini-omni-1.1-flash'), { base: 5, worst: 7 });
+  assert.deepEqual(requestsForRun(4, 'veo-3.1-lite-generate-preview'), { base: 4, worst: 6 });
+  assert.deepEqual(requestsForRun(1, 'dreamina-seedance-2-5-260628'), { base: 1, worst: 1 }, 'no vehicle check off Google');
+  assert.equal(remainingLabel({ requests: 94, limit: 100, exhausted: false }, 0), '6 of 100 left today');
+  assert.match(remainingLabel({ requests: 106, limit: 100, exhausted: true }, Date.UTC(2026, 8, 15, 7)), /used up · back at 12:30 PM IST/);
+});
+
+test('the earlier Omni and Veo 3.1 Lite ship with honest defaults', () => {
+  assert.equal(OMNI_FLASH_LEGACY_DEFAULTS.modelId, 'gemini-omni-flash');
+  assert.equal(OMNI_FLASH_LEGACY_DEFAULTS.isDefault, false, 'never takes over as the default');
+  assert.equal(VEO_31_LITE_DEFAULTS.maxReferenceImages, 0, 'sends nothing it might refuse until it has been tried');
+  assert.equal(DAILY_LIMITS['gemini-omni-1.1-flash'], 100);
+  assert.equal(renderResolution('veo-3.1-lite-generate-preview', '360p').render, '720p');
 });

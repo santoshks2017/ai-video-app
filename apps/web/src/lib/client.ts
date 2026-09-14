@@ -120,6 +120,20 @@ export async function recheckCarPhotos(id: string) {
   );
 }
 
+/** One model's day: what the app has sent it, its limit, and whether it is spent. */
+export interface ModelUsageItem {
+  id: string;
+  modelId: string;
+  requests: number;
+  limit: number | null;
+  exhausted: boolean;
+}
+
+/** How much of today each model has left, and when the day turns (midnight Pacific). */
+export async function getModelUsage() {
+  return await get<{ resetsAt: number; items: ModelUsageItem[] }>('/api/models/usage');
+}
+
 /**
  * Read a vehicle's colours again without touching its photographs. The sync once
  * stopped at ten colours; this puts back what it cut and keeps every photo as filed.

@@ -18,6 +18,8 @@
  * Docs: https://ai.google.dev/gemini-api/docs/veo
  */
 
+
+import { isDailyQuotaError, nextPacificMidnight, resetTimeLabel } from '@ava/shared';
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const POLL_MS = 10_000;
 /** Google quotes 11 seconds to 6 minutes at peak; leave room for a long queue. */
@@ -39,6 +41,10 @@ export interface VeoInput {
   /** The previous segment's closing frame, for a seamless cut. */
   firstFrame?: VeoImage;
   references?: VeoImage[];
+  /** Called once for every request actually sent, retries included — Google counts those. */
+  onAttempt?: () => void;
+  /** The model's requests-a-day, so a refusal can be recognised as the day's cap. */
+  dailyLimit?: number;
 }
 
 export interface VeoClip {
@@ -128,6 +134,7 @@ export async function generateVeoClip(input: VeoInput, apiKey: string): Promise<
   let name = '';
   // Preview models rate-limit tightly — retry 429 / 5xx with backoff, as Omni does.
   for (let attempt = 0; attempt < 4; attempt++) {
+    input.onAttempt?.();
     const res = await fetch(`${BASE}/models/${input.model}:predictLongRunning`, {
       method: 'POST',
       headers: headers(apiKey),
@@ -135,11 +142,21 @@ export async function generateVeoClip(input: VeoInput, apiKey: string): Promise<
     });
     const json = (await res.json().catch(() => ({}))) as {
       name?: string;
-      error?: { status?: string; message?: string };
+      error?: { status?: string; message?: string; details?: unknown };
     };
     if (res.ok && json.name) {
       name = json.name;
       break;
+    }
+    // The day's cap is not worth a retry: it spends a counted request and clears
+    // at midnight Pacific either way. The minute's cap still is.
+    const said = json.error?.message ?? `Veo returned ${res.status} starting the generation.`;
+    if (res.status === 429 && isDailyQuotaError(`${said} ${JSON.stringify(json.error?.details ?? '')}`, input.dailyLimit)) {
+      throw new VeoError(
+        'daily-limit',
+        `Today's request limit for ${input.model}${input.dailyLimit ? ` (${input.dailyLimit} a day)` : ''} is used up. It comes back at ${resetTimeLabel(nextPacificMidnight())}. Pick another model in Video to generate now.`,
+        429,
+      );
     }
     const retryable = res.status === 429 || res.status >= 500;
     if (retryable && attempt < 3) {

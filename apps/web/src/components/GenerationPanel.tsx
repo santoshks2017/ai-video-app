@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fmtTime, formatInr, type Brief, type PromptPart, type ScenePlan, type StoredImage, clampPace } from '@ava/shared';
+import {
+  fmtTime,
+  formatInr,
+  type Brief,
+  type PromptPart,
+  type ScenePlan,
+  type StoredImage,
+  clampPace,
+  requestsForRun,
+  resetTimeLabel,
+} from '@ava/shared';
+import { getModelUsage, type ModelUsageItem } from '../lib/client.js';
 import { useApp } from '../state/appStore.js';
 import { ImageUpload, Thumb } from './ui.js';
 import { CutRoom } from './CutRoom.js';
@@ -75,6 +86,30 @@ export function GenerationPanel({
   const cutVideo = useRef<HTMLVideoElement>(null);
   const models = useApp((s) => s.models);
   const seedance = models.find((m) => m.enabled !== false && /seedance/i.test(m.modelId));
+
+  /**
+   * Today's usage, for the model this run would spend.
+   *
+   * A film is several requests, not one — a part each, and up to two more when a
+   * part is made again — and a model's day runs out on requests, not on films. So
+   * the cost is said in requests beside the cost in rupees, and a model with none
+   * left stops the button before a single request fails into the wall.
+   */
+  const [usage, setUsage] = useState<{ resetsAt: number; items: ModelUsageItem[] } | null>(null);
+  const loadUsage = useCallback(async () => {
+    const r = await getModelUsage();
+    if (!isApiError(r)) setUsage(r);
+  }, []);
+  useEffect(() => {
+    void loadUsage();
+  }, [loadUsage, modelId]);
+  const runModel =
+    models.find((m) => m.id === modelId) ??
+    models.find((m) => m.isDefault && m.enabled !== false) ??
+    models.find((m) => m.enabled !== false);
+  const runUsage = usage?.items.find((i) => i.id === runModel?.id);
+  const runRequests = runModel ? requestsForRun(parts.length, runModel.modelId) : null;
+  const dayOver = Boolean(runUsage?.exhausted);
 
   /** A version of a finished film: approved, enlarged, re-rendered, or trimmed. */
   const runVersion = async (jobId: string, what: string, go: () => Promise<unknown>) => {
@@ -194,6 +229,7 @@ export function GenerationPanel({
     // for would let the next one through without anybody looking at the figure.
     setConfirmed(false);
     void loadEta();
+    void loadUsage();
     if (isApiError(r)) {
       setStatus('error');
       // "Failed to fetch" means no answer came back at all: the connection was cut
@@ -243,7 +279,8 @@ export function GenerationPanel({
     if (videoRef.current) videoRef.current.currentTime = Math.max(0, t);
   };
 
-  const blocked = !canGenerateRole || !canGenerate || parts.length === 0 || (needsCostConfirm && !confirmed);
+  const blocked =
+    !canGenerateRole || !canGenerate || parts.length === 0 || (needsCostConfirm && !confirmed) || dayOver;
   const failed = clips.filter((c) => c.status === 'failed');
 
   /* ---- refine: retake the bad segments only ---- */
@@ -371,13 +408,39 @@ export function GenerationPanel({
           </label>
         )}
 
+        {runModel && runRequests && parts.length > 0 && status !== 'running' && (
+          <div className={`req-cost${dayOver ? ' out' : ''}`}>
+            {dayOver && usage ? (
+              <>
+                <b>{runModel.name}</b>&rsquo;s daily limit is used up. It comes back at{' '}
+                <b>{resetTimeLabel(usage.resetsAt)}</b> — pick another model in Video to generate now.
+              </>
+            ) : (
+              <>
+                Uses <b>{runRequests.base}</b> request{runRequests.base === 1 ? '' : 's'}
+                {runRequests.worst > runRequests.base ? ` (up to ${runRequests.worst} if a part is made again)` : ''} on{' '}
+                {runModel.name}
+                {runUsage?.limit ? (
+                  <>
+                    {' '}— <b>{Math.max(0, runUsage.limit - runUsage.requests)}</b> of {runUsage.limit} left today.
+                  </>
+                ) : (
+                  <>. {runUsage?.requests ? `${runUsage.requests} used today; ` : ''}no daily limit set for this model.</>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         <div className="toolbar" style={{ marginTop: 0 }}>
           <button
             className="btn primary"
             disabled={blocked || status === 'running'}
             onClick={run}
             title={
-              !canGenerateRole
+              dayOver
+                ? `${runModel?.name ?? 'This model'}'s daily limit is used up — pick another model in Video`
+                : !canGenerateRole
                 ? 'Your account cannot generate videos — ask an admin to make you a creator'
                 : !canGenerate
                   ? 'Resolve the blocking pre-flight checks first'

@@ -641,6 +641,14 @@ export interface VideoModelProfile {
    * restriction, never on silence.
    */
   speechLanguages?: string[];
+  /**
+   * Requests a day the provider allows this model on this account.
+   *
+   * Google counts every attempt against it, failed ones too, and does not lift it
+   * until midnight Pacific. Set from the account's own rate-limit page; left unset
+   * where nobody knows the number, and the app still counts what it spends.
+   */
+  dailyRequestLimit?: number;
   enabled: boolean;
   isDefault: boolean;
   notes?: string;
@@ -666,6 +674,7 @@ export const OMNI_FLASH_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' 
    */
   maxReferenceImages: 10,
   usdPerSecond: 0.1,
+  dailyRequestLimit: 100,
   enabled: true,
   isDefault: true,
 };
@@ -743,6 +752,7 @@ export const VEO_31_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' | 'c
   maxReferenceImages: 3,
   usdPerSecond: 0.4,
   usdPerSecondByResolution: { '720p': 0.4, '1080p': 0.4 },
+  dailyRequestLimit: 50,
   enabled: true,
   isDefault: false,
   notes: '8s max per clip, native audio. 1080p and reference images always render 8s, trimmed to fit.',
@@ -760,9 +770,69 @@ export const VEO_31_FAST_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId'
   maxReferenceImages: 3,
   usdPerSecond: 0.1,
   usdPerSecondByResolution: { '720p': 0.1, '1080p': 0.12 },
+  dailyRequestLimit: 50,
   enabled: true,
   isDefault: false,
   notes: 'Cheaper Veo. 8s max per clip, native audio. 1080p and reference images always render 8s, trimmed to fit.',
+};
+
+/**
+ * Veo 3.1 Lite — the cheapest of the family, on the same Gemini key.
+ *
+ * Google lists it at $0.05/s at 720p and $0.08/s at 1080p, with no 4K. Its docs
+ * do not say whether it takes reference images or a first frame, so it starts
+ * with neither: a run it cannot hold references for is a worse film, but a run
+ * that sends what it refuses is no film and a wasted request. Both can be turned
+ * on in APIs & models once it has been tried.
+ */
+export const VEO_31_LITE_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' | 'createdAt' | 'updatedAt'> = {
+  name: 'Google Veo 3.1 Lite',
+  modelId: 'veo-3.1-lite-generate-preview',
+  minClipSec: 4,
+  maxClipSec: 8,
+  resolutions: ['720p', '1080p'],
+  aspects: ['9:16', '16:9'],
+  supportsImageToVideo: false,
+  supportsReferenceImages: false,
+  maxReferenceImages: 0,
+  usdPerSecond: 0.05,
+  usdPerSecondByResolution: { '720p': 0.05, '1080p': 0.08 },
+  enabled: true,
+  isDefault: false,
+  notes:
+    'Cheapest Veo, for less urgent work. Starts with no reference images and no first frame until it has been tried — set its daily limit here from your rate-limit page.',
+};
+
+/**
+ * The earlier Gemini Omni Flash, on its own daily allowance.
+ *
+ * Google meters it separately from Omni 1.1, so when 1.1 has used its day this one
+ * usually has not — the dashboard showed 3 of 100 against 1.1's 106. The work that
+ * holds the car and the presenter steady was tuned on 1.1, so this is for films
+ * that can wait or can bear a test. Three reference images, the cap the app ran
+ * Omni at before 1.1: a refused set is retried with one fewer, and every retry is
+ * a request counted against the day.
+ */
+export const OMNI_FLASH_LEGACY_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' | 'createdAt' | 'updatedAt'> = {
+  ...OMNI_FLASH_DEFAULTS,
+  name: 'Gemini Omni Flash (earlier)',
+  modelId: 'gemini-omni-flash',
+  maxReferenceImages: 3,
+  dailyRequestLimit: 100,
+  isDefault: false,
+  notes: 'A separate daily allowance from Omni 1.1 — use it for less urgent films. Tuned on 1.1, so test at 360p first.',
+};
+
+/**
+ * Daily limits for the models this app ships with, from the account's own
+ * rate-limit page. Filled onto a saved model that has none, never over one that
+ * was set by hand.
+ */
+export const DAILY_LIMITS: Record<string, number> = {
+  'gemini-omni-1.1-flash': 100,
+  'gemini-omni-flash': 100,
+  'veo-3.1-generate-preview': 50,
+  'veo-3.1-fast-generate-preview': 50,
 };
 
 /* ---- what each model can actually render ---- */

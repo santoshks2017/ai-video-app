@@ -40,11 +40,12 @@ import {
   ROLE_LABEL,
   dealerViewLabel,
   type PlannedRef,
+  remainingLabel,
 } from '@ava/shared';
 import { useApp, api, projectTabId } from '../state/appStore.js';
 import { Field, Panel, Section, Dropdown, ImageUpload, Thumb, Confirm, Banner } from '../components/ui.js';
 import { ListField } from '../components/ListField.js';
-import { isApiError, abs } from '../lib/client.js';
+import { isApiError, abs, getModelUsage, type ModelUsageItem } from '../lib/client.js';
 // `api` above is the library CRUD client; this one owns generation + scripting.
 import { api as genApi } from '../lib/api.js';
 import { Storyboard, type LockField } from '../components/Storyboard.js';
@@ -243,6 +244,31 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
       held: project.excludedRefs ?? [],
     });
   }, [project, client, actor, vehicles, instructions, language, cars, activeModel]);
+
+  /**
+   * How much of today each model has left.
+   *
+   * Shown in the picker so the choice can be made on purpose: an earlier or a
+   * cheaper model for a film that can wait, and the day's Omni requests kept for
+   * the one that cannot. Read again whenever the model list changes.
+   */
+  const [modelUsage, setModelUsage] = useState<{ resetsAt: number; byId: Record<string, ModelUsageItem> } | null>(
+    null,
+  );
+  useEffect(() => {
+    let live = true;
+    void getModelUsage().then((r) => {
+      if (!live || isApiError(r)) return;
+      setModelUsage({ resetsAt: r.resetsAt, byId: Object.fromEntries(r.items.map((i) => [i.id, i])) });
+    });
+    return () => {
+      live = false;
+    };
+  }, [models.length]);
+  const usageLabel = (id: string | undefined): string => {
+    const u = id ? modelUsage?.byId[id] : undefined;
+    return u && modelUsage ? remainingLabel(u, modelUsage.resetsAt) : '';
+  };
 
   /** Hold one reference back from the next run, or send it again. */
   const holdRef = (filename: string, hold: boolean): void => {
@@ -1147,7 +1173,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 label="Model"
                 hint={
                   activeModel
-                    ? `${activeModel.minClipSec}–${activeModel.maxClipSec}s per clip · $${activeModel.usdPerSecond}/s`
+                    ? `${activeModel.minClipSec}–${activeModel.maxClipSec}s per clip · $${activeModel.usdPerSecond}/s${
+                        usageLabel(activeModel.id) ? ` · ${usageLabel(activeModel.id)}` : ''
+                      }. Counted by this app, so requests made elsewhere on the same key are not in it — but a model Google has said is used up shows as used up.`
                     : 'None registered — add one in APIs & models.'
                 }
               >
@@ -1162,6 +1190,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                       <option key={m.id} value={m.id}>
                         {m.name}
                         {m.isDefault ? ' (default)' : ''}
+                        {usageLabel(m.id) ? ` — ${usageLabel(m.id)}` : ''}
                       </option>
                     ))}
                 </select>

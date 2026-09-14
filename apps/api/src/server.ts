@@ -20,6 +20,11 @@ import {
   narrationMode,
   VEO_31_DEFAULTS,
   VEO_31_FAST_DEFAULTS,
+  VEO_31_LITE_DEFAULTS,
+  OMNI_FLASH_LEGACY_DEFAULTS,
+  DAILY_LIMITS,
+  nextPacificMidnight,
+  resetTimeLabel,
   type SceneOverride,
   type Resolution,
   type Brief,
@@ -40,6 +45,7 @@ import {
   type SeedanceRef,
 } from './seedance.js';
 import { generateVeoClip, VeoError } from './veo.js';
+import { countRequest, markExhausted, usageToday } from './usage.js';
 import { checkVehicleFrame } from './vehicleCheck.js';
 import {
   saveJob,
@@ -437,6 +443,42 @@ async function upgradeStoredLanguages(): Promise<void> {
 }
 upgradeStoredLanguages().catch((e) => app.log.warn({ err: (e as Error).message }, 'language upgrade failed'));
 
+/**
+ * Bring an existing install's models up to date, on every start.
+ *
+ * Additive, like the seed: a model already registered is never replaced, and a
+ * daily limit already set — by hand or otherwise — is never written over. What it
+ * adds is the earlier Omni and Veo 3.1 Lite, and the known daily limits on models
+ * saved before limits existed. A fresh install has no Gemini connection yet and is
+ * left to the seed route.
+ */
+async function ensureBuiltInModels(): Promise<string[]> {
+  const done: string[] = [];
+  const [models, creds] = await Promise.all([
+    listAll<Record<string, any>>('models'),
+    listAll<Record<string, any>>('credentials'),
+  ]);
+  const gemini = creds.find((c) => c.provider === 'google-gemini');
+  if (!gemini) return done;
+  for (const d of [OMNI_FLASH_LEGACY_DEFAULTS, VEO_31_LITE_DEFAULTS]) {
+    if (models.some((m) => m.modelId === d.modelId)) continue;
+    await upsert('models', { ...d, credentialId: gemini.id });
+    done.push(d.name);
+  }
+  for (const m of models) {
+    const limit = DAILY_LIMITS[String(m.modelId)];
+    if (!limit || m.dailyRequestLimit != null) continue;
+    await patch('models', m.id, { dailyRequestLimit: limit });
+    done.push(`${m.name}: ${limit} requests a day`);
+  }
+  return done;
+}
+ensureBuiltInModels()
+  .then((done) => {
+    if (done.length) app.log.info({ done }, 'built-in models brought up to date');
+  })
+  .catch((e) => app.log.warn({ err: (e as Error).message }, 'model upgrade failed'));
+
 async function resolveLanguage(languageId?: string): Promise<ScriptLanguage> {
   const all = (await listAll<Record<string, any>>('languages')).map((l) => upgradeLanguage(l) ?? l);
   const chosen =
@@ -702,6 +744,8 @@ app.post('/api/models/seed', async () => {
   // Veo 3.1 runs on the same Gemini key as Omni.
   await addModel(gemini.id, VEO_31_DEFAULTS);
   await addModel(gemini.id, VEO_31_FAST_DEFAULTS);
+  await addModel(gemini.id, VEO_31_LITE_DEFAULTS);
+  await addModel(gemini.id, OMNI_FLASH_LEGACY_DEFAULTS);
   // The Omni record predates the version in its name; say which Omni it is.
   const staleOmni = models.find((m) => m.modelId === 'gemini-omni-1.1-flash' && m.name === 'Gemini Omni Flash');
   if (staleOmni) {
@@ -968,6 +1012,8 @@ interface ResolvedModel {
   label: string;
   usdPerSecondByResolution?: Partial<Record<Resolution, number>>;
   resolutions?: Resolution[];
+  /** Requests a day the provider allows, when it is known. */
+  dailyRequestLimit?: number;
 }
 
 /** Pick the model for this run and fetch the key it needs. */
@@ -1021,6 +1067,26 @@ async function resolveModel(requestedId?: string): Promise<ResolvedModel | { err
     label: chosen.name ?? chosen.modelId,
     usdPerSecondByResolution: chosen.usdPerSecondByResolution,
     resolutions: Array.isArray(chosen.resolutions) ? chosen.resolutions : undefined,
+    dailyRequestLimit: Number(chosen.dailyRequestLimit) || undefined,
+  };
+}
+
+/**
+ * Refuse a run on a model whose day is already spent, before a request is made.
+ *
+ * Counted by the app, or told by Google on the last refusal. Either way, starting
+ * the run would spend requests that fail and count against a day already over.
+ */
+async function dailyBlock(model: ResolvedModel): Promise<{ code: string; message: string; resetsAt: number } | null> {
+  const u = (await usageToday([model.modelId]).catch(() => ({}) as Record<string, never>))[model.modelId];
+  if (!u) return null;
+  const limit = model.dailyRequestLimit;
+  const out = (u.exhaustedUntil ?? 0) > Date.now() || Boolean(limit && u.requests >= limit);
+  if (!out) return null;
+  return {
+    code: 'daily-limit',
+    resetsAt: u.resetsAt,
+    message: `${model.label}'s daily limit${limit ? ` of ${limit} requests` : ''} is used up. It comes back at ${resetTimeLabel(u.resetsAt)}. Pick another model in Video to generate now.`,
   };
 }
 
@@ -1079,6 +1145,7 @@ async function renderSegment(
         maxSec: model.maxClipSec,
         references: refs.length ? refs : undefined,
         generateAudio: true,
+        onAttempt: () => countRequest(model.modelId),
       },
       model.apiKey,
     );
@@ -1103,6 +1170,8 @@ async function renderSegment(
           .filter((r) => r.ref.kind === 'image' && r.ref.data)
           .slice(0, Math.min(3, model.maxReferenceImages))
           .map((r) => ({ data: r.ref.data!, mimeType: r.ref.mimeType })),
+        onAttempt: () => countRequest(model.modelId),
+        dailyLimit: model.dailyRequestLimit,
       },
       model.apiKey,
     );
@@ -1210,13 +1279,16 @@ async function renderSegment(
           // a different car every single time.
           task: list.length ? 'reference_to_video' : 'text_to_video',
           model: model.modelId,
+          onAttempt: () => countRequest(model.modelId),
+          dailyLimit: model.dailyRequestLimit,
         },
         model.apiKey,
       );
     } catch (err) {
       const message = (err as Error).message ?? '';
       const tooMany = /reference|image|invalid.?argument|too many|at most/i.test(message);
-      if (tooMany && list.length > 1) {
+      // A day's cap is never a reference problem — dropping a photo would only spend another request.
+      if (tooMany && list.length > 1 && (err as OmniFlashError).code !== 'daily-limit') {
         app.log.warn({ sent: list.length, message }, 'provider refused the reference set; retrying with one fewer');
         return send(list.slice(0, list.length - 1));
       }
@@ -1587,6 +1659,35 @@ app.get<{ Querystring: { modelId?: string; resolution?: string; seconds?: string
  * raised in deploy config; progress is written to the Firestore job record so a
  * reload can recover via GET /api/generate/:jobId.
  */
+/**
+ * How much of today each model has left, for the picker and the Generate panel.
+ *
+ * Counted by the app — it cannot see requests made outside it on the same key —
+ * and overruled by Google the moment a refusal names the day's cap.
+ */
+app.get('/api/models/usage', async () => {
+  const models = await listAll<Record<string, any>>('models');
+  const usage = await usageToday(models.map((m) => String(m.modelId ?? ''))).catch(
+    () => ({}) as Record<string, never>,
+  );
+  const now = Date.now();
+  return {
+    resetsAt: nextPacificMidnight(now),
+    items: models.map((m) => {
+      const u = usage[String(m.modelId)];
+      const limit = Number(m.dailyRequestLimit) || null;
+      const requests = u?.requests ?? 0;
+      return {
+        id: String(m.id),
+        modelId: String(m.modelId),
+        requests,
+        limit,
+        exhausted: (u?.exhaustedUntil ?? 0) > now || Boolean(limit && requests >= limit),
+      };
+    }),
+  };
+});
+
 app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   const { brief, parts, confirmedCostInr } = req.body ?? ({} as GenerateBody);
   if (!brief || !Array.isArray(parts) || parts.length === 0) {
@@ -1603,6 +1704,9 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   }
   // Narrowing doesn't survive into the closures below, so bind it explicitly.
   const resolved: ResolvedModel = picked;
+
+  const spent = await dailyBlock(resolved);
+  if (spent) return reply.code(429).send(spent);
 
   const wanted = wantedResolution(brief);
   const plannedRes = renderResolution(resolved.modelId, wanted, resolved.resolutions);
@@ -1927,7 +2031,11 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     };
   } catch (err) {
     const e = err as OmniFlashError | SeedanceError | VeoError;
-    app.log.error({ jobId, model: resolved?.modelId, code: e.code, message: e.message }, 'generation failed');
+    app.log.error(
+      { jobId, model: resolved?.modelId, code: e.code, message: e.message, detail: (e as OmniFlashError).detail },
+      'generation failed',
+    );
+    if (e.code === 'daily-limit' && resolved?.modelId) await markExhausted(resolved.modelId).catch(() => {});
     const failedIdx = clips.findIndex((c) => c.status === 'pending');
     if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
     // Bill what actually rendered, not what was planned. A run that dies on
@@ -2295,7 +2403,11 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       };
     } catch (err) {
       const e = err as OmniFlashError | SeedanceError | VeoError;
-      app.log.error({ jobId, model: resolved?.modelId, code: e.code, message: e.message }, 'generation failed');
+      app.log.error(
+        { jobId, model: resolved?.modelId, code: e.code, message: e.message, detail: (e as OmniFlashError).detail },
+        'generation failed',
+      );
+      if (e.code === 'daily-limit' && resolved?.modelId) await markExhausted(resolved.modelId).catch(() => {});
       const failedIdx = clips.findIndex((c) => c.status === 'pending');
       if (failedIdx >= 0) clips[failedIdx] = { ...clips[failedIdx]!, status: 'failed', error: e.message };
       await updateJob(jobId, { ...record, status: 'failed', error: e.message, clips }).catch(() => {});

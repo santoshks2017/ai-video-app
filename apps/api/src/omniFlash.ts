@@ -15,6 +15,8 @@
  * located tolerantly (steps[].content[], output_video, response.*).
  */
 
+
+import { isDailyQuotaError, nextPacificMidnight, resetTimeLabel } from '@ava/shared';
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 export interface OmniRef {
@@ -36,6 +38,10 @@ export interface GenerateClipInput {
   task: 'text_to_video' | 'reference_to_video' | 'image_to_video' | 'extend';
   /** Provider model id; defaults to the deploy-time setting. */
   model?: string;
+  /** Called once for every request actually sent, retries included — Google counts those. */
+  onAttempt?: () => void;
+  /** The model's requests-a-day, so a refusal can be recognised as the day's cap. */
+  dailyLimit?: number;
 }
 
 export interface GeneratedClip {
@@ -52,6 +58,8 @@ export class OmniFlashError extends Error {
     public code: string,
     message: string,
     public status = 502,
+    /** The provider's own words, kept for the log when the message is rewritten for a person. */
+    public detail?: string,
   ) {
     super(message);
   }
@@ -158,6 +166,7 @@ export async function generateClip(input: GenerateClipInput, apiKey: string): Pr
   let ok = false;
   // Omni Flash (preview) rate-limits tightly — retry 429 / 5xx with backoff.
   for (let attempt = 0; attempt < 4; attempt++) {
+    input.onAttempt?.();
     const res = await fetch(`${BASE}/interactions`, {
       method: 'POST',
       headers: headers(apiKey),
@@ -168,17 +177,30 @@ export async function generateClip(input: GenerateClipInput, apiKey: string): Pr
       ok = true;
       break;
     }
+    const err = (json.error ?? {}) as Record<string, unknown>;
+    const message = String(err.message ?? `Interactions API returned ${res.status}`);
+    /*
+     * The day's cap is not worth a single retry.
+     *
+     * Retrying a 429 made sense for the per-minute limit, which clears in seconds.
+     * Into the daily one it spent three more counted requests and ninety seconds of
+     * waiting per part, and still failed — which is how the dashboard came to read
+     * 106 of 100. So a refusal that is the day's cap ends the run here, and says so.
+     */
+    if (res.status === 429 && isDailyQuotaError(`${message} ${JSON.stringify(err.details ?? '')}`, input.dailyLimit)) {
+      throw new OmniFlashError(
+        'daily-limit',
+        `Today's request limit for ${model}${input.dailyLimit ? ` (${input.dailyLimit} a day)` : ''} is used up. It comes back at ${resetTimeLabel(nextPacificMidnight())}. Pick another model in Video to generate now.`,
+        429,
+        message,
+      );
+    }
     const retryable = res.status === 429 || res.status >= 500;
     if (retryable && attempt < 3) {
       await new Promise((r) => setTimeout(r, (attempt + 1) * 15000));
       continue;
     }
-    const err = (json.error ?? {}) as Record<string, unknown>;
-    throw new OmniFlashError(
-      String(err.status ?? 'omni-flash-error'),
-      String(err.message ?? `Interactions API returned ${res.status}`),
-      res.status === 429 ? 429 : 502,
-    );
+    throw new OmniFlashError(String(err.status ?? 'omni-flash-error'), message, res.status === 429 ? 429 : 502);
   }
   if (!ok) throw new OmniFlashError('omni-flash-error', 'Interactions API kept failing after retries.');
 

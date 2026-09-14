@@ -65,6 +65,14 @@ export interface ActorProfile {
   attire?: string;
   /** Delivery notes — pace, warmth, energy. */
   voice?: string;
+  /** Who they are on camera, in a sentence or two — written on the profile sheet. */
+  personality?: string;
+  /** A handful of single words for the profile sheet: Confident, Friendly, Relatable. */
+  traits?: string[];
+  /** The description the profile was filled in and drawn from, kept so it can be drawn again. */
+  profilePrompt?: string;
+  /** Which image model drew the reference photo, when it was drawn rather than uploaded. */
+  photoModel?: string;
   /** Where the high-res original lives, for the designer. */
   sourceNote?: string;
   photo?: StoredImage;

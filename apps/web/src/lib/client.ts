@@ -167,6 +167,24 @@ export async function cleanClientLogos(id: string, pullBrand = false) {
 
 /* ---------------- reference-image upload ---------------- */
 
+/** Fill an actor's profile in from a description. Nothing is saved until the actor is. */
+export async function fillActorProfile(description: string, current: Partial<import('@ava/shared').ActorProfile>) {
+  return await post<{ fill: import('@ava/shared').ActorFill; model: string }>('/api/actor-profile/fill', { description, current });
+}
+
+/** Draw an actor's profile sheet. It comes back stored, ready to be the reference photo. */
+export async function drawActorProfile(
+  actor: Partial<import('@ava/shared').ActorProfile>,
+  opts: { setting?: string; keepFace?: boolean },
+) {
+  const r = await post<{ photo: { refId: string; storagePath: string; filename: string; label: string }; model: string }>(
+    '/api/actor-profile/draw',
+    { actor, ...opts },
+  );
+  if (isApiError(r)) return r;
+  return { model: r.model, photo: { ...r.photo, url: `${BASE}/api/${r.photo.storagePath}` } };
+}
+
 export async function uploadRef(file: File, label: string, kind = 'dealer') {
   const dataBase64 = await new Promise<string>((resolve, reject) => {
     const fr = new FileReader();

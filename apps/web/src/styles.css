@@ -2759,3 +2759,11 @@ textarea.guide {
 .an-bar > div { height: 10px; border-radius: 5px; background: var(--surface-2); overflow: hidden; }
 .an-bar > div i { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
 .an-bar b { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---- Actors from a description ---- */
+.actor-ai { margin-bottom: 14px; padding: 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius); background: var(--surface-2); }
+.actor-ai textarea { min-height: 64px; }
+.actor-keep { display: flex; align-items: center; gap: 7px; margin-top: 8px; font-weight: 500; cursor: pointer; }
+.actor-keep input { width: auto; flex: none; margin: 0; }
+.actor-sheet { display: block; max-width: 340px; margin-top: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.actor-sheet img { display: block; width: 100%; height: auto; }

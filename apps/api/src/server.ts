@@ -51,6 +51,7 @@ import {
 import { generateVeoClip, VeoError } from './veo.js';
 import { countRequest, markExhausted, usageToday } from './usage.js';
 import { renderEditProject } from './editRender.js';
+import { drawActorSheet, fillActorProfile } from './actorProfile.js';
 import { cleanLogo, findBrandLogo } from './logos.js';
 import { checkVehicleFrame } from './vehicleCheck.js';
 import { listRunFacts,
@@ -317,6 +318,77 @@ app.get('/api/session', async (req) => ({
       }
     : null,
 }));
+
+/* ---- actors made from a description ---- */
+
+type ActorInput = Partial<import('@ava/shared').ActorProfile>;
+
+/** Fill an actor's profile in from a sentence describing them. Nothing is saved: the editor decides. */
+app.post<{ Body: { description?: string; current?: ActorInput } }>('/api/actor-profile/fill', async (req, reply) => {
+  const description = (req.body?.description ?? '').trim().slice(0, 2000);
+  if (!description) return reply.code(400).send({ code: 'actor-no-description', message: 'Describe the presenter first.' });
+  const apiKey = await scriptKey();
+  if (!apiKey) {
+    return reply.code(503).send({ code: 'script-no-key', message: 'Filling in a profile needs a Google Gemini key. Add one in APIs & models.' });
+  }
+  try {
+    return await fillActorProfile(description, req.body?.current ?? {}, apiKey);
+  } catch (err) {
+    const e = err as { code?: string; message?: string; status?: number };
+    return reply.code(e.status ?? 502).send({ code: e.code ?? 'actor-fill-failed', message: e.message ?? 'Could not fill the profile in.' });
+  }
+});
+
+/**
+ * Draw an actor's profile sheet and store it, ready to become the reference photo.
+ * With `keepFace`, the photo the actor already has goes along, so a redraw is the
+ * same person rather than a new one.
+ */
+app.post<{ Body: { actor?: ActorInput; setting?: string; keepFace?: boolean } }>('/api/actor-profile/draw', async (req, reply) => {
+  const actor = req.body?.actor;
+  if (!actor) return reply.code(400).send({ code: 'actor-missing', message: 'No actor to draw.' });
+  const apiKey = await scriptKey();
+  if (!apiKey) {
+    return reply.code(503).send({ code: 'script-no-key', message: 'Drawing a profile needs a Google Gemini key. Add one in APIs & models.' });
+  }
+  let face: { data: string; mimeType: string } | undefined;
+  if (req.body?.keepFace && actor.photo?.storagePath) {
+    const obj = await readObject(actor.photo.storagePath).catch(() => null);
+    if (obj) face = { data: obj.bytes.toString('base64'), mimeType: obj.contentType || 'image/png' };
+  }
+  try {
+    const drawn = await drawActorSheet(
+      {
+        name: actor.name ?? '',
+        gender: actor.gender === 'male' ? 'male' : 'female',
+        age: actor.age,
+        ageBand: actor.ageBand,
+        attire: actor.attire,
+        style: actor.style,
+        voice: actor.voice,
+        personality: actor.personality,
+        traits: actor.traits?.map((t) => t.trim()).filter(Boolean),
+      },
+      { setting: req.body?.setting, face },
+      apiKey,
+    );
+    const ext = drawn.mimeType.includes('png') ? 'png' : drawn.mimeType.includes('webp') ? 'webp' : 'jpg';
+    const stem = ((actor.name ?? '').split(/\s+[—–-]\s+|\s*\(/)[0] ?? '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'actor';
+    const { refId, storagePath } = await putRef(`${stem}-profile-${Date.now().toString(36)}.${ext}`, drawn.mimeType, drawn.bytes);
+    return {
+      photo: {
+        refId,
+        storagePath,
+        filename: storagePath.split('/').pop() ?? `${stem}.${ext}`,
+        label: `${actor.name || 'Actor'} — profile sheet`,
+      },
+      model: drawn.model,
+    };
+  } catch (err) {
+    const e = err as { code?: string; message?: string; status?: number };
+    return reply.code(e.status ?? 502).send({ code: e.code ?? 'actor-draw-failed', message: e.message ?? 'Could not draw the profile sheet.' });
+  }
+});
 
 /* ---- analytics (admin only, enforced in the preHandler) ---- */
 

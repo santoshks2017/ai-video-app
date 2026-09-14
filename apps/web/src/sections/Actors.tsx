@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AGE_BANDS, ageBandOf, type ActorProfile, type AgeBand } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty } from '../components/ui.js';
-import { isApiError } from '../lib/client.js';
+import { drawActorProfile, fillActorProfile, isApiError } from '../lib/client.js';
 
 /** Common enough to be worth offering; anything else can still be typed. */
 const ATTIRE = ['Saree', 'Kurta', 'Salwar kameez', 'Formal shirt', 'Polo shirt', 'Blazer', 'Dress', 'Casual'];
@@ -24,6 +24,14 @@ export function ActorsSection() {
   const [fGender, setFGender] = useState('');
   const [fBand, setFBand] = useState('');
   const [fAttire, setFAttire] = useState('');
+  // Made from a description: what was typed, what the models are doing, and the way back.
+  const [describe, setDescribe] = useState('');
+  const [busy, setBusy] = useState<'' | 'fill' | 'draw'>('');
+  const [aiNote, setAiNote] = useState('');
+  const [aiErr, setAiErr] = useState('');
+  const [undo, setUndo] = useState<ActorProfile | null>(null);
+  const [keepFace, setKeepFace] = useState(true);
+  const [setting, setSetting] = useState('');
 
   /** Attire values actually in the library, so the filter offers only real ones. */
   const attireFacets = useMemo(
@@ -66,6 +74,53 @@ export function ActorsSection() {
 
   const set = (p: Partial<ActorProfile>) => setDraft((d) => (d ? { ...d, ...p } : d));
 
+  // A different actor opened: its own description, and nothing to undo.
+  useEffect(() => {
+    setDescribe(draft?.profilePrompt ?? '');
+    setUndo(null);
+    setAiNote('');
+    setAiErr('');
+    setSetting('');
+  }, [draft?.id]);
+
+  const drawSheet = async (from: ActorProfile, where: string, keep: boolean): Promise<void> => {
+    setBusy('draw');
+    setAiErr('');
+    const r = await drawActorProfile(from, { setting: where || undefined, keepFace: keep && Boolean(from.photo?.storagePath) });
+    setBusy('');
+    if (isApiError(r)) {
+      setAiErr(`The profile sheet could not be drawn: ${r.message}`);
+      return;
+    }
+    setDraft((d) => (d ? { ...d, photo: r.photo, photoModel: r.model } : d));
+    setAiNote(`Profile sheet drawn with ${r.model}. Save actor to keep it.`);
+  };
+
+  const fillFromDescription = async (andDraw: boolean): Promise<void> => {
+    if (!draft || !describe.trim()) return;
+    setBusy('fill');
+    setAiErr('');
+    setAiNote('');
+    const before = draft;
+    const r = await fillActorProfile(describe, draft);
+    if (isApiError(r)) {
+      setBusy('');
+      setAiErr(r.message);
+      return;
+    }
+    const { setting: where = '', ...fields } = r.fill;
+    const next: ActorProfile = { ...draft, ...fields, profilePrompt: describe.trim() };
+    setUndo(before);
+    setDraft(next);
+    setSetting(where);
+    if (!andDraw) {
+      setBusy('');
+      setAiNote('Filled in from the description. Check the fields, then Save actor.');
+      return;
+    }
+    await drawSheet(next, where, keepFace);
+  };
+
   const save = async () => {
     if (!draft?.name.trim()) {
       setErr('Name is required.');
@@ -73,7 +128,7 @@ export function ActorsSection() {
     }
     setSaving(true);
     setErr('');
-    const r = await api.actors.save(draft);
+    const r = await api.actors.save({ ...draft, traits: draft.traits?.map((t) => t.trim()).filter(Boolean) });
     setSaving(false);
     if (isApiError(r)) {
       setErr(r.message);
@@ -191,6 +246,52 @@ export function ActorsSection() {
           actions={draft.id ? <Confirm onConfirm={() => del(draft.id)}>Delete</Confirm> : undefined}
         >
           {err && <div className="hint" style={{ color: 'var(--bad)', marginBottom: 8 }}>{err}</div>}
+          <div className="actor-ai">
+            <Field
+              label="Describe the presenter"
+              hint="A sentence or two is enough. The fields below are filled in from it, and Google’s image model (Nano Banana 2 where the key has it) draws a profile sheet — a hero shot, five expressions and four full views of the same person — as the reference photo. Every field can still be edited by hand, and your own photo uploaded instead."
+            >
+              <textarea
+                value={describe}
+                onChange={(e) => setDescribe(e.target.value)}
+                placeholder="e.g. A warm, confident Marathi woman in her late 20s in a maroon polo dress, for premium showroom walkarounds"
+              />
+            </Field>
+            <div className="toolbar" style={{ marginTop: 6 }}>
+              <button
+                className="btn primary small"
+                type="button"
+                disabled={!describe.trim() || Boolean(busy)}
+                onClick={() => void fillFromDescription(true)}
+              >
+                {busy === 'fill' ? 'Writing the profile…' : busy === 'draw' ? 'Drawing the sheet…' : 'Fill profile & draw'}
+              </button>
+              <button
+                className="btn ghost small"
+                type="button"
+                disabled={!describe.trim() || Boolean(busy)}
+                onClick={() => void fillFromDescription(false)}
+              >
+                Fill fields only
+              </button>
+              {undo && !busy && (
+                <button
+                  className="btn ghost small"
+                  type="button"
+                  onClick={() => {
+                    setDraft(undo);
+                    setUndo(null);
+                    setAiNote('Put back as it was.');
+                  }}
+                >
+                  Undo
+                </button>
+              )}
+            </div>
+            {busy === 'draw' && <div className="hint">Drawing the profile sheet — usually 20 to 60 seconds.</div>}
+            {aiNote && !busy && <div className="hint">{aiNote}</div>}
+            {aiErr && <div className="hint" style={{ color: 'var(--bad)' }}>{aiErr}</div>}
+          </div>
           <div className="field-grid">
             <Field label="Name / label">
               <input
@@ -248,18 +349,67 @@ export function ActorsSection() {
                 />
               </Field>
             </div>
+            <div className="span">
+              <Field label="Personality" hint="Who they are on camera, in a sentence or two. Written on the profile sheet.">
+                <textarea
+                  value={draft.personality ?? ''}
+                  onChange={(e) => set({ personality: e.target.value })}
+                  placeholder="e.g. Confident, friendly and relatable — makes complex information feel simple"
+                />
+              </Field>
+            </div>
+            <div className="span">
+              <Field label="Key traits" hint="A few single words, separated by commas. Written on the profile sheet.">
+                <input
+                  value={(draft.traits ?? []).join(', ')}
+                  onChange={(e) =>
+                    set({
+                      traits: e.target.value
+                        .split(',')
+                        .map((t) => t.trimStart())
+                        .filter((t, i, all) => t || i === all.length - 1),
+                    })
+                  }
+                  placeholder="e.g. Confident, Friendly, Relatable, Energetic"
+                />
+              </Field>
+            </div>
           </div>
 
           <Field label="Reference photo" hint="The visual reference used when this actor is on camera.">
             <div className="thumbs">
-              {draft.photo && <Thumb img={draft.photo} onRemove={() => set({ photo: undefined })} />}
+              {draft.photo && <Thumb img={draft.photo} onRemove={() => set({ photo: undefined, photoModel: undefined })} />}
               <ImageUpload
                 label={`${draft.name || 'Actor'} — reference photo`}
                 kind="dealer"
                 buttonText={draft.photo ? 'Replace photo' : 'Upload photo'}
-                onUploaded={(img) => set({ photo: img })}
+                onUploaded={(img) => set({ photo: img, photoModel: undefined })}
               />
+              <button
+                className="btn ghost small"
+                type="button"
+                disabled={Boolean(busy)}
+                onClick={() => {
+                  setUndo(draft);
+                  void drawSheet(draft, setting, keepFace);
+                }}
+                title="Draw a profile sheet from the fields above"
+              >
+                {busy === 'draw' ? 'Drawing…' : draft.photo ? 'Redraw profile sheet' : 'Draw profile sheet'}
+              </button>
             </div>
+            {draft.photo && (
+              <label className="actor-keep">
+                <input type="checkbox" checked={keepFace} onChange={(e) => setKeepFace(e.target.checked)} />
+                Keep the face in this photo when drawing
+              </label>
+            )}
+            {draft.photo?.url && (
+              <a className="actor-sheet" href={draft.photo.url} target="_blank" rel="noreferrer" title="Open full size">
+                <img src={draft.photo.url} alt={draft.photo.label} />
+              </a>
+            )}
+            {draft.photoModel && <div className="hint">Drawn by {draft.photoModel}.</div>}
           </Field>
 
           <div className="sec-stack">

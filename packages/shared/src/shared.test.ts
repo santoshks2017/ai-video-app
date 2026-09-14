@@ -66,6 +66,9 @@ import {
   trendBuckets,
   parseRupees,
   revenueMissing,
+  normalizeActorFill,
+  actorSheetPrompt,
+  actorFillPrompt,
   type RunFact,
   newEditProject,
   addEditClip,
@@ -1472,4 +1475,50 @@ test('a paid pack needs its revenue; a trial does not', () => {
   assert.equal(revenueMissing({ campaignRevenueInr: 0 }), true);
   assert.equal(revenueMissing({ campaignRevenueInr: 18000 }), false);
   assert.equal(revenueMissing({ packType: 'trial' }), false);
+});
+
+/* ---------------------------------------------------------------------------
+ * Actors from a description.
+ * ------------------------------------------------------------------------ */
+
+test('a filled-in profile keeps what fits and drops what does not', () => {
+  const fill = normalizeActorFill({
+    name: '  Riya ',
+    gender: 'Woman',
+    age: 'mid 20s',
+    ageBand: '18-25',
+    attire: 'Kurta',
+    traits: 'upbeat, friendly, conversational, relatable, expressive, positive, warm',
+    voice: 42,
+    setting: 'a sunlit living room',
+  });
+  assert.equal(fill.name, 'Riya');
+  assert.equal(fill.gender, 'female');
+  assert.equal(fill.ageBand, '18–25');
+  assert.deepEqual(fill.traits, ['Upbeat', 'Friendly', 'Conversational', 'Relatable', 'Expressive', 'Positive']);
+  assert.ok(!('voice' in fill), 'a field that is not text is left out, not blanked');
+  assert.equal(normalizeActorFill({ gender: 'robot', ageBand: '90s' }).gender, undefined);
+  assert.deepEqual(normalizeActorFill('not json'), {});
+  assert.match(actorFillPrompt('A warm Marathi woman in a saree', { name: 'Neha' }), /"name":"Neha"/);
+});
+
+test('the profile sheet letters only what it is given, and keeps a face only when asked', () => {
+  const actor = {
+    name: 'Meera — Metro Premium promoter',
+    gender: 'female' as const,
+    age: 'late 20s',
+    attire: 'Maroon polo dress',
+    voice: 'warm, energetic, confident ad pace',
+    personality: 'Confident, friendly and "relatable".',
+    traits: ['Confident', 'Friendly'],
+  };
+  const drawn = actorSheetPrompt(actor, { setting: 'a bright car showroom' });
+  assert.match(drawn, /the name "Meera" in large bold type/);
+  assert.match(drawn, /"Styling \/ look" — "Maroon polo dress"/);
+  assert.match(drawn, /"Front View", "Left Profile", "Right Profile", "Back View"/);
+  assert.match(drawn, /letter nothing else/);
+  assert.ok(!/attached photograph/.test(drawn));
+  assert.ok(!/""relatable""|"relatable"\./.test(drawn), 'quotes inside a line cannot end its quote early');
+  assert.match(actorSheetPrompt(actor, { keepFace: true }), /the person in the attached photograph/);
+  assert.match(actorSheetPrompt({ ...actor, gender: 'male', name: '' }), /Indian man/);
 });

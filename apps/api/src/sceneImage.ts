@@ -27,6 +27,23 @@ export class SceneImageError extends Error {
 }
 
 let cachedImageModel = '';
+let cachedSheetModel = '';
+let cachedImageModels: string[] | null = null;
+
+/** Every model on the key that draws a picture through `:generateContent`. */
+async function imageModels(apiKey: string): Promise<string[]> {
+  if (cachedImageModels) return cachedImageModels;
+  const res = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': apiKey } });
+  if (!res.ok) {
+    throw new SceneImageError('image-models-unavailable', `Could not list Gemini models (${res.status}).`);
+  }
+  const json = (await res.json()) as { models?: { name?: string; supportedGenerationMethods?: string[] }[] };
+  cachedImageModels = (json.models ?? [])
+    .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent'))
+    .map((m) => (m.name ?? '').replace(/^models\//, ''))
+    .filter((n) => /image/i.test(n) && !/imagen|embed|video|veo|omni|tts|audio/i.test(n));
+  return cachedImageModels;
+}
 
 /**
  * The best image model this key can reach.
@@ -38,17 +55,9 @@ let cachedImageModel = '';
  */
 export async function resolveImageModel(apiKey: string): Promise<string> {
   if (cachedImageModel) return cachedImageModel;
-  const res = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': apiKey } });
-  if (!res.ok) {
-    throw new SceneImageError('image-models-unavailable', `Could not list Gemini models (${res.status}).`);
-  }
-  const json = (await res.json()) as { models?: { name?: string; supportedGenerationMethods?: string[] }[] };
-  const usable = (json.models ?? [])
-    .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent'))
-    .map((m) => (m.name ?? '').replace(/^models\//, ''))
-    .filter((n) => /image/i.test(n) && !/imagen|embed|video|veo|omni|tts|audio/i.test(n));
+  const usable = await imageModels(apiKey);
   const stable = usable.filter((n) => !/exp|preview/.test(n));
-  const pick = stable.sort().at(-1) ?? usable.sort().at(-1);
+  const pick = [...stable].sort().at(-1) ?? [...usable].sort().at(-1);
   if (!pick) {
     throw new SceneImageError(
       'no-image-model',
@@ -58,6 +67,23 @@ export async function resolveImageModel(apiKey: string): Promise<string> {
   }
   cachedImageModel = pick;
   return pick;
+}
+
+/**
+ * The model a presenter's profile sheet is drawn with: Nano Banana 2 (Gemini 3.1
+ * Flash Image) when the key has it, then Nano Banana Pro, then the scene model. A
+ * sheet is a dozen photographs of one face with lettering between them, and holding
+ * a face and spelling a label are what the newer models do markedly better.
+ */
+export async function resolveSheetImageModel(apiKey: string): Promise<string> {
+  if (cachedSheetModel) return cachedSheetModel;
+  const usable = await imageModels(apiKey);
+  for (const family of [/^gemini-3\.1-flash-image/, /^gemini-3(?:\.\d+)?-pro-image/]) {
+    const hits = usable.filter((n) => family.test(n));
+    const pick = hits.filter((n) => !/exp/.test(n)).sort().at(-1) ?? hits.sort().at(-1);
+    if (pick) return (cachedSheetModel = pick);
+  }
+  return (cachedSheetModel = await resolveImageModel(apiKey));
 }
 
 export interface SceneImageRef {
@@ -138,35 +164,31 @@ function instruction(req: SceneImageRequest): string {
 }
 
 /** Draw one frame. Returns the bytes and what they are. */
-export async function drawSceneFrame(
-  req: SceneImageRequest,
+export type ImagePart = { text: string } | { inline_data: { mime_type: string; data: string } };
+
+/**
+ * One picture from an image model.
+ *
+ * How to ask for it, in descending order of how much we get to say. Which of these
+ * an image model accepts is a property of the model and the API version, not
+ * something source can know: asking for an aspect ratio a model has no
+ * `imageConfig` for comes back as an argument error rather than a picture, and so
+ * does naming a response modality it does not offer. So the ask degrades — frame
+ * it, then just draw it, then draw it however you like — instead of failing on a
+ * config key.
+ */
+export async function requestImage(
+  model: string,
+  parts: ImagePart[],
   apiKey: string,
+  imageConfigs: Record<string, unknown>[],
+  temperature = 0.4,
 ): Promise<{ bytes: Buffer; mimeType: string; model: string }> {
-  const model = await resolveImageModel(apiKey);
-  const legend = req.references.length
-    ? `## REFERENCE IMAGES\n${req.references.map((r, i) => `<IMAGE_REF_${i}> — ${r.label}`).join('\n')}\n\n`
-    : '';
-
-  const parts = [
-    { text: legend + instruction(req) },
-    ...req.references.map((r) => ({ inline_data: { mime_type: r.mimeType, data: r.data } })),
-  ];
-
-  /*
-   * How to ask for a picture, in descending order of how much we get to say.
-   *
-   * Which of these an image model accepts is a property of the model and the API
-   * version, not something source can know: asking for an aspect ratio a model has
-   * no `imageConfig` for comes back as an argument error rather than a picture, and
-   * so does naming a response modality it does not offer. So the ask degrades —
-   * frame it, then just draw it, then draw it however you like — instead of the
-   * whole storyboard failing on a config key.
-   */
   const configs: Record<string, unknown>[] = [
-    { temperature: 0.4, responseModalities: ['IMAGE'], imageConfig: { aspectRatio: req.aspect } },
-    { temperature: 0.4, responseModalities: ['IMAGE'] },
-    { temperature: 0.4, responseModalities: ['TEXT', 'IMAGE'] },
-    { temperature: 0.4 },
+    ...imageConfigs.map((imageConfig) => ({ temperature, responseModalities: ['IMAGE'], imageConfig })),
+    { temperature, responseModalities: ['IMAGE'] },
+    { temperature, responseModalities: ['TEXT', 'IMAGE'] },
+    { temperature },
   ];
 
   let res!: Response;
@@ -208,8 +230,30 @@ export async function drawSceneFrame(
     'no-image-returned',
     `${model} came back without a picture${
       json.candidates?.[0]?.finishReason ? ` (${json.candidates[0].finishReason})` : ''
-    }. Try the scene again, or soften the shot direction.`,
+    }.`,
   );
+}
+
+export async function drawSceneFrame(
+  req: SceneImageRequest,
+  apiKey: string,
+): Promise<{ bytes: Buffer; mimeType: string; model: string }> {
+  const model = await resolveImageModel(apiKey);
+  const legend = req.references.length
+    ? `## REFERENCE IMAGES\n${req.references.map((r, i) => `<IMAGE_REF_${i}> — ${r.label}`).join('\n')}\n\n`
+    : '';
+  const parts: ImagePart[] = [
+    { text: legend + instruction(req) },
+    ...req.references.map((r) => ({ inline_data: { mime_type: r.mimeType, data: r.data } })),
+  ];
+  try {
+    return await requestImage(model, parts, apiKey, [{ aspectRatio: req.aspect }]);
+  } catch (err) {
+    if (err instanceof SceneImageError && err.code === 'no-image-returned') {
+      throw new SceneImageError(err.code, `${err.message} Try the scene again, or soften the shot direction.`, err.status);
+    }
+    throw err;
+  }
 }
 
 /**

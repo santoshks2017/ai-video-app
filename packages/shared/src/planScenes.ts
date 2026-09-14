@@ -168,6 +168,16 @@ export function planScenes(
     }
   }
 
+  // The models hand back whole seconds: asked for a 5.2-second part, Omni rendered
+  // 5.0, and the fifth of a second it dropped came off the end of the closing line.
+  // So each part is planned at the length it will actually come back at, and every
+  // word budget is worked out on that.
+  for (const g of groups) {
+    const len = g.reduce((a, i) => a + durations[i]!, 0);
+    const whole = Math.max(1, Math.min(Math.floor(maxChunk), Math.round(len)));
+    if (len > 0) for (const i of g) durations[i] = durations[i]! * (whole / len);
+  }
+
   const scenes: Scene[] = [];
   let clock = 0;
   groups.forEach((group, gi) => {
@@ -197,6 +207,11 @@ export function planScenes(
  * again at the start of the next part — the "six airbags airbags" repeat. So the
  * last scene before a cut leaves a silent beat, and the first scene after a cut
  * waits a moment before it speaks.
+ *
+ * The film's own last scene leaves the same beat. A model does not wrap up a line
+ * because its clip is ending: on a Sahyadri Motors run, a closing line budgeted to
+ * the final frame was still being spoken when the clip stopped, and its last words
+ * were never rendered — nothing in post can bring them back.
  */
 export const PART_TAIL_SILENCE = 0.8;
 export const PART_HEAD_SILENCE = 0.4;
@@ -208,7 +223,7 @@ export function speakingSeconds(plan: Pick<ScenePlan, 'scenes'>, sc: Scene): num
   if (i >= 0) {
     const next = plan.scenes[i + 1];
     const prev = plan.scenes[i - 1];
-    if (next && next.part !== sc.part) t -= PART_TAIL_SILENCE;
+    if (!next || next.part !== sc.part) t -= PART_TAIL_SILENCE;
     if (prev && prev.part !== sc.part) t -= PART_HEAD_SILENCE;
   }
   return Math.max(1.5, Math.round(t * 10) / 10);

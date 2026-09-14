@@ -25,6 +25,7 @@ import {
   editAspectSize,
   editClipEnd,
   editClipLength,
+  editFilterFfmpeg,
   type EditClip,
   type EditProject,
   type EditSource,
@@ -116,11 +117,9 @@ async function renderPiece(
   const graph: string[] = [];
   const look = clip.filter ? EDIT_FILTERS.find((f) => f.id === clip.filter!.id) : undefined;
   if (look) {
-    // Graded in full, then blended back over the original by the strength chosen.
+    // Graded in RGB by the same operations the editor previewed, at the strength chosen.
     const strength = Math.max(0, Math.min(1, clip.filter?.strength ?? 1));
-    graph.push(`${videoIn},split[base][fx]`);
-    graph.push(`[fx]${look.ffmpeg},format=yuv420p[graded]`);
-    graph.push(`[base][graded]blend=all_mode=normal:all_opacity=${strength.toFixed(2)},format=yuv420p${tail}`);
+    graph.push(`${videoIn},${editFilterFfmpeg(look, strength)},format=yuv420p${tail}`);
   } else {
     graph.push(`${videoIn}${tail}`);
   }

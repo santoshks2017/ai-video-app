@@ -24,6 +24,7 @@ import {
   editClipAt,
   editClipEnd,
   editClipLength,
+  editFilterMatrices,
   editProjectLength,
   editSnap,
   editSnapPoints,
@@ -464,17 +465,39 @@ export function VideoEditor({
     if (r.id) setSelectedId(r.id);
   };
 
+  /**
+   * Where a filter lands: the selected main-track clip, or with none selected, every
+   * clip on the main track — the whole film. It used to need a selection and say so
+   * only in the header, so a click in the panel looked like it did nothing.
+   */
+  const filterTargets = (p: EditProject): EditClip[] =>
+    selected && selected.trackId === EDIT_MAIN_TRACK
+      ? p.clips.filter((c) => c.id === selected.id)
+      : p.clips.filter((c) => c.trackId === EDIT_MAIN_TRACK);
   const applyFilter = (id: string | null): void => {
-    if (!selected || selected.trackId !== EDIT_MAIN_TRACK) {
-      setNotice('Select a video or a still on the main track, then pick a filter.');
+    const p = projectRef.current;
+    const targets = filterTargets(p);
+    if (!targets.length) {
+      setNotice('Add a video or a still to the main track, then pick a filter.');
       return;
     }
     commit(
-      updateEditClip(projectRef.current, selected.id, {
-        filter: id ? { id, strength: selected.filter?.strength ?? 1 } : undefined,
-      }),
+      targets.reduce(
+        (next, c) => updateEditClip(next, c.id, { filter: id ? { id, strength: c.filter?.strength ?? 1 } : undefined }),
+        p,
+      ),
     );
     setNotice('');
+  };
+  const setFilterStrength = (strength: number): void => {
+    const p = projectRef.current;
+    edit(
+      'filter-strength',
+      filterTargets(p).reduce(
+        (next, c) => (c.filter ? updateEditClip(next, c.id, { filter: { id: c.filter.id, strength } }) : next),
+        p,
+      ),
+    );
   };
   const applyTransition = (id: string | null): void => {
     const isFirst = mainList[0]?.id === selected?.id;
@@ -571,8 +594,15 @@ export function VideoEditor({
   const stageW = Math.max(0, Math.min(box.w, box.h * ar));
   const stageH = stageW / ar;
 
-  const lookOf = (c: EditClip | undefined): string =>
-    c?.filter ? (EDIT_FILTERS.find((f) => f.id === c.filter!.id)?.css(c.filter.strength) ?? 'none') : 'none';
+  const lookDef = (c: EditClip | undefined) => (c?.filter ? EDIT_FILTERS.find((f) => f.id === c.filter!.id) : undefined);
+  const lookId = (c: EditClip): string => `ve-look-${c.id.replace(/[^\w-]/g, '_')}`;
+  const lookOf = (c: EditClip | undefined): string => (c && lookDef(c) ? `url(#${lookId(c)})` : 'none');
+  // The filter the panel shows as picked: null when none of its clips has one, undefined when they differ.
+  const filterScope = filterTargets(project);
+  const filterOn =
+    filterScope.length && filterScope.every((c) => c.filter?.id === filterScope[0]!.filter?.id)
+      ? (filterScope[0]!.filter ?? null)
+      : undefined;
   const texts = trackOf(EDIT_TEXT_TRACK)?.hidden
     ? []
     : project.clips.filter(
@@ -943,6 +973,26 @@ export function VideoEditor({
 
   return createPortal(
     <div className="ve-wrap" role="dialog" aria-label="Video editor">
+      {/* The looks as colour matrices, so the preview grades exactly as the export will. */}
+      <svg className="ve-defs" aria-hidden="true">
+        {EDIT_FILTERS.map((f) => (
+          <filter key={f.id} id={`ve-swatch-${f.id}`} colorInterpolationFilters="sRGB">
+            {editFilterMatrices(f, 1).map((values, i) => (
+              <feColorMatrix key={i} type="matrix" values={values} />
+            ))}
+          </filter>
+        ))}
+        {[prevClip, mainClip].map((c) => {
+          const def = lookDef(c);
+          return c && def ? (
+            <filter key={c.id} id={lookId(c)} colorInterpolationFilters="sRGB">
+              {editFilterMatrices(def, c.filter!.strength).map((values, i) => (
+                <feColorMatrix key={i} type="matrix" values={values} />
+              ))}
+            </filter>
+          ) : null;
+        })}
+      </svg>
       <header className="ve-head">
         <div>
           <h2>Video Editor</h2>
@@ -1098,22 +1148,43 @@ export function VideoEditor({
                 <div className="ve-panel-head">
                   <h3>Filter</h3>
                 </div>
+                <div className="ve-scope">
+                  {selected?.trackId === EDIT_MAIN_TRACK ? (
+                    <>
+                      <span>Applies to the selected clip</span>
+                      <button type="button" className="ve-scope-btn" onClick={() => setSelectedId(null)}>
+                        Use on the whole film
+                      </button>
+                    </>
+                  ) : (
+                    <span>Applies to the whole film</span>
+                  )}
+                </div>
                 {tabs(filterTab, [['all', 'All'], ['Daily', 'Daily'], ['Stylize', 'Stylize']], (v) => setFilterTab(v as typeof filterTab))}
                 <div className="ve-grid two">
+                  <button type="button" className={`ve-effect${filterOn === null ? ' on' : ''}`} onClick={() => applyFilter(null)}>
+                    <span className="ve-filter-swatch" style={{ backgroundImage: run.posterUrl ? `url("${run.posterUrl}")` : undefined }} />
+                    <span>None</span>
+                  </button>
                   {EDIT_FILTERS.filter((f) => filterTab === 'all' || f.group === filterTab).map((f) => (
-                    <button key={f.id} type="button" className={`ve-effect${selected?.filter?.id === f.id ? ' on' : ''}`} onClick={() => applyFilter(f.id)}>
+                    <button key={f.id} type="button" className={`ve-effect${filterOn?.id === f.id ? ' on' : ''}`} onClick={() => applyFilter(f.id)}>
                       <span
                         className="ve-filter-swatch"
                         style={{
                           backgroundImage: run.posterUrl ? `url("${run.posterUrl}")` : undefined,
-                          filter: f.css(1),
+                          filter: `url(#ve-swatch-${f.id})`,
                         }}
                       />
                       <span>{f.name}</span>
                     </button>
                   ))}
                 </div>
-                <div className="ve-hint">Select a video or still on the main track, then pick a filter. Its strength is in Edit clip.</div>
+                {filterOn && (
+                  <label className="ve-field ve-filter-strength">
+                    <span>Strength · {Math.round(filterOn.strength * 100)}%</span>
+                    <input type="range" min={0} max={1} step={0.05} value={filterOn.strength} onChange={(e) => setFilterStrength(Number(e.target.value))} />
+                  </label>
+                )}
               </>
             )}
 

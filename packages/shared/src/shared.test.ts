@@ -50,6 +50,11 @@ import {
   VEO_31_LITE_DEFAULTS,
   DAILY_LIMITS,
   EDIT_MAIN_TRACK,
+  EDIT_FILTERS,
+  editFilterColour,
+  editFilterFfmpeg,
+  editFilterMatrices,
+  spokenWords,
   newEditProject,
   addEditClip,
   removeEditClip,
@@ -626,7 +631,10 @@ test('a part stops talking before its cut, and the model makes no music of its o
   const lastOfFirst = first[first.length - 1]!;
   assert.equal(speakingSeconds(plan, lastOfFirst), Math.max(1.5, Math.round((lastOfFirst.duration - PART_TAIL_SILENCE) * 10) / 10));
   const final = plan.scenes[plan.scenes.length - 1]!;
-  assert.ok(speakingSeconds(plan, final) >= final.duration - PART_HEAD_SILENCE - 0.001, 'the film\'s last scene keeps its time');
+  assert.ok(
+    speakingSeconds(plan, final) <= Math.max(1.5, final.duration - PART_TAIL_SILENCE + 0.05),
+    'the film\'s last scene leaves a closing beat too — its last words were cut when it did not',
+  );
   for (const p of res.parts.filter((x) => !x.isLast)) {
     assert.match(`${p.text}\n${p.continuationText ?? ''}`, /stop speaking and hold a natural silent beat/);
   }
@@ -1292,4 +1300,73 @@ test('the server refuses an edit it cannot render', () => {
   assert.equal(validateEditProject(ok), null);
   const broken = { ...ok, clips: [{ ...ok.clips[0]!, out: Number.NaN }] };
   assert.match(String(validateEditProject(broken)), /not a number/);
+});
+
+/* ---------------------------------------------------------------------------
+ * The end of the film: the closing line has to finish inside the last clip.
+ * ------------------------------------------------------------------------ */
+
+test('every part is planned in whole seconds, because that is what the models render', () => {
+  const beat = (key: string): Beat => ({ key, title: key, shot: `a shot of ${key}`, dialogue: 'a line' });
+  for (const [total, beats] of [[42, 7], [36, 6], [23, 4], [30, 5]] as const) {
+    const plan = planScenes(Array.from({ length: beats }, (_, i) => beat(`b${i}`)), total, 10, { speaks: true });
+    for (let p = 0; p < plan.parts; p++) {
+      const scenes = plan.scenes.filter((s) => s.part === p);
+      const len = Math.round((scenes[scenes.length - 1]!.end - scenes[0]!.start) * 10) / 10;
+      assert.ok(Number.isInteger(len), `a ${total}s film planned a ${len}s part`);
+      assert.ok(len <= 10, `a ${total}s film planned a ${len}s part, over the cap`);
+    }
+  }
+  const b = base({ categories: ['feature'], narration: 'presenter', durationSec: 42, maxChunkSec: 10, fieldValues: { feature: { feature1: 'Sunroof', feature2: 'Touchscreen', feature3: '6 airbags' } } });
+  for (const part of buildPrompt(b)!.parts) assert.ok(Number.isInteger(part.duration), `the prompt asked for ${part.duration} seconds`);
+});
+
+test('a model code is counted the way it is said', () => {
+  assert.equal(spokenWords('Mahindra XUV 3XO'), 7);
+  assert.equal(spokenWords('गणेश चतुर्थी पर लाएं नई Mahindra XUV 3XO, तुरंत डिलीवरी और शानदार बेनेफिट्स के साथ!'), 19);
+  assert.equal(spokenWords('अपनी बढ़ती family के लिए घर लाइये।'), 7);
+  assert.equal(spokenWords(' — '), 0);
+});
+
+test('a closing line too long to finish before the film ends is flagged', () => {
+  const b = base({ categories: ['feature'], narration: 'presenter', durationSec: 30, maxChunkSec: 10, fieldValues: { feature: { feature1: 'Sunroof', feature2: 'Touchscreen', feature3: '6 airbags' } } });
+  const plan = buildPrompt(b)!.scenePlan;
+  const final = plan.scenes[plan.scenes.length - 1]!;
+  const key = final.beat.key!;
+  const long = 'गणेश चतुर्थी पर लाएं नई Mahindra XUV 3XO, तुरंत डिलीवरी और शानदार बेनेफिट्स के साथ, आज ही showroom आइये!';
+  const flagged = runChecks(b, { sceneOverrides: { [key]: { dialogue: long } } }).checks;
+  assert.ok(flagged.some((c) => c.code === 'closing-line-cut'), 'the closing line was not flagged');
+  assert.ok(!flagged.some((c) => c.code === 'line-spills-part' && c.text.includes(`scene ${plan.scenes.length}`)), 'flagged once, as the ending');
+  const fine = runChecks(b, { sceneOverrides: { [key]: { dialogue: 'आज ही आइये।' } } }).checks;
+  assert.ok(!fine.some((c) => c.code === 'closing-line-cut'));
+
+  const res = buildPrompt(b)!;
+  const last = res.parts[res.parts.length - 1]!;
+  assert.match(`${last.text}\n${last.continuationText ?? ''}`, /about a second to spare/);
+});
+
+/* ---------------------------------------------------------------------------
+ * Editor filters: visible, distinct, and the same in the preview and the export.
+ * ------------------------------------------------------------------------ */
+
+test('every filter is visible, unlike the others, and does nothing at zero strength', () => {
+  const samples = [[0.78, 0.24, 0.16], [0.16, 0.47, 0.78], [0.5, 0.5, 0.5], [0.9, 0.82, 0.31], [0.2, 0.25, 0.22]];
+  const graded = EDIT_FILTERS.map((f) => samples.map((c) => editFilterColour(f, 1, c)));
+  EDIT_FILTERS.forEach((f, i) => {
+    const moved = Math.max(...samples.flatMap((c, j) => c.map((v, k) => Math.abs(graded[i]![j]![k]! - v))));
+    assert.ok(moved >= 0.08, `${f.name} moves no colour further than ${moved.toFixed(3)}`);
+    for (const c of samples) {
+      assert.deepEqual(editFilterColour(f, 0, c).map((v) => Math.round(v * 1e6) / 1e6), c, `${f.name} at zero strength`);
+    }
+    assert.equal(editFilterFfmpeg(f, 0), 'null');
+    assert.match(editFilterFfmpeg(f, 1), /^format=gbrp(,(colorchannelmixer|colorlevels)=[a-z]+=-?[\d.]+(:[a-z]+=-?[\d.]+)*)+$/);
+    const matrices = editFilterMatrices(f, 1);
+    assert.equal(matrices.length, f.ops.length, 'one preview step per operation, as in the export');
+    for (const m of matrices) assert.equal(m.split(' ').length, 20);
+    EDIT_FILTERS.forEach((g, j) => {
+      if (j <= i) return;
+      const apart = Math.max(...samples.flatMap((_, s) => [0, 1, 2].map((k) => Math.abs(graded[i]![s]![k]! - graded[j]![s]![k]!))));
+      assert.ok(apart >= 0.04, `${f.name} and ${g.name} look the same`);
+    });
+  });
 });

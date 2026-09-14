@@ -253,6 +253,14 @@ export interface BuildPromptOptions {
   sceneOverrides?: Record<string, SceneOverride>;
 }
 
+/**
+ * How the film's last clip is told to end. The model does not wrap up a line because
+ * its clip is running out — a closing line still being spoken at the last frame is
+ * simply cut, and there is no later part to finish it in.
+ */
+const CLOSING_BEAT =
+  'Finish the last line with about a second to spare, then hold the final shot in silence until the clip ends — the film ends with this clip, so a word still being spoken at its last frame is lost.';
+
 export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildPromptResult | null {
   if (brief.categories.length === 0) return null;
   const ctx = buildContext(brief);
@@ -299,6 +307,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         L.push(
           `This is the OPENING segment of a longer ${ctx.totalDuration}-second video generated in ${totalParts} parts, because one generation cannot hold the whole script without rushing the delivery. End on a natural cut, mid-motion — never an abrupt stop — so it can be extended. When this segment's last line is finished, stop speaking and hold a natural silent beat — a smile, a glance at the car — until the clip ends. Never start a line that is not written in this segment; the next line belongs to the next part.`,
         );
+      else if (mode.speaks) L.push(CLOSING_BEAT);
       L.push(`Video type: ${catLabels.join(' + ')}.`);
     } else {
       L.push(
@@ -306,7 +315,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       );
       L.push(
         isLast
-          ? 'This is the FINAL part — close cleanly on the last scene below.'
+          ? `This is the FINAL part — close cleanly on the last scene below.${mode.speaks ? ` ${CLOSING_BEAT}` : ''}`
           : 'End on a natural cut, mid-motion, so it can be extended again in the next part. When this segment\'s last line is finished, stop speaking and hold a natural silent beat — a smile, a glance at the car — until the clip ends. Never start a line that is not written in this segment; the next line belongs to the next part.',
       );
     }
@@ -701,7 +710,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         mode.onCameraPerson ? "one presenter only, with unchanged hair, outfit and look, never popping in or out and never standing inside the car; " : ''
       }${mode.speaks ? 'the voice is the same one as before; ' : ''}the ${ctx.vehicle === 'bike' ? 'bike' : 'car'} is a real vehicle in the real location, never a picture or studio shot of one.`,
     );
-    if (isLast) C.push('This is the final segment — end cleanly on the last scene.');
+    if (isLast) C.push(`This is the final segment — end cleanly on the last scene.${mode.speaks ? ` ${CLOSING_BEAT}` : ''}`);
     else
       C.push(
         "End mid-motion so the next part can continue. When this segment's last line is finished, stop speaking and hold a natural silent beat until the clip ends — never start a line that is not written in this segment; the next line belongs to the next part.",

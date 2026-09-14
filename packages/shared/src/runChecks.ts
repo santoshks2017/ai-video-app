@@ -17,6 +17,18 @@ import { planScenes, speakingSeconds } from './planScenes.js';
 import { CATEGORY_BY_ID, isPromptOnly, categoryValues, listRows } from './categories.js';
 import { sceneCard, sceneEditFor, wordBudget } from './buildPrompt.js';
 
+/**
+ * How many words a line takes to say. An acronym or a model code is read a letter
+ * at a time — "XUV 3XO" is six spoken words, not two — so each of its letters counts.
+ */
+export function spokenWords(line: string): number {
+  return line
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{M}\p{N}]/gu, ''))
+    .filter((w) => /[\p{L}\p{N}]/u.test(w))
+    .reduce((n, w) => n + (/^(?=.*[A-Z])[A-Z0-9]{2,6}$/.test(w) ? w.length : /^\d+$/.test(w) ? Math.min(w.length, 3) : 1), 0);
+}
+
 export interface PreflightResult {
   checks: Check[];
   /** True when no `bad` check is present — generation may proceed. */
@@ -238,16 +250,24 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
     const langName = brief.language?.name ?? 'Hindi';
     // A line too long for the time left before its part's cut is where repeats come
     // from: the model runs out of clip, carries the rest into the next part, and
-    // that part says it again.
-    const spills = plan.scenes.filter((sc, i) => {
+    // that part says it again. The film's closing line has no next part to spill
+    // into — its last words are simply never said.
+    const tooLong = plan.scenes.filter((sc, i) => {
       const next = plan.scenes[i + 1];
-      if (!next || next.part === sc.part) return false;
+      if (next && next.part === sc.part) return false;
       const o = sceneEditFor(overrides, plan, sc);
-      const words = (o?.phonetic?.trim() || o?.dialogue?.trim() || '')
-        .split(/\s+/)
-        .filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+      const words = spokenWords(o?.phonetic?.trim() || o?.dialogue?.trim() || '');
       return words > Math.ceil(wordBudget(speakingSeconds(plan, sc), 1, brief.speechWpm) * 1.25);
     });
+    const closing = plan.scenes[plan.scenes.length - 1];
+    const spills = tooLong.filter((sc) => sc !== closing);
+    if (closing && tooLong.includes(closing)) {
+      checks.push({
+        level: 'warn',
+        code: 'closing-line-cut',
+        text: `The closing line in scene ${plan.scenes.length} is too long for the time left before the film ends — the model stops when its clip does, and the last words are lost. Shorten it, or press Rewrite script.`,
+      });
+    }
     if (spills.length) {
       const names = spills.map((sc) => `scene ${plan.scenes.indexOf(sc) + 1}`).join(', ');
       checks.push({

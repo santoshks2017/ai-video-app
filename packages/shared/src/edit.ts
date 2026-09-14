@@ -285,31 +285,141 @@ export function validateEditProject(p: unknown): string | null {
 
 /* ---- what the panels offer ---- */
 
+/**
+ * One colour operation in a filter: five of the browser's CSS filter functions,
+ * with the weights the CSS specification gives them, plus a per-channel tint,
+ * which CSS has no function for and a warm or cool look cannot do without.
+ */
+export type EditFilterOp =
+  | { kind: 'brightness' | 'contrast' | 'saturate' | 'sepia' | 'grayscale'; amount: number }
+  | { kind: 'tint'; r: number; g: number; b: number };
+
 export interface EditFilterDef {
   id: string;
   name: string;
   group: 'Daily' | 'Stylize';
-  /** The look in the browser, at a strength from 0 to 1. */
-  css: (strength: number) => string;
-  /** The same look in ffmpeg, at full strength; the server blends it back by the strength. */
-  ffmpeg: string;
+  /**
+   * The look at full strength, applied in order. The editor previews it as one
+   * colour matrix and the render server applies the same operations in ffmpeg, so
+   * the export is graded the way the preview was.
+   */
+  ops: EditFilterOp[];
 }
 
-const mix = (s: number, from: number, to: number): string => (from + (to - from) * s).toFixed(3);
-
+/*
+ * Strong enough to tell apart at a glance. The first set was so gentle — a 12%
+ * brightness lift, a 10% contrast bump — that every thumbnail in the panel looked
+ * the same and picking one looked like it had done nothing.
+ */
 export const EDIT_FILTERS: EditFilterDef[] = [
-  { id: 'bright', name: 'Bright', group: 'Daily', css: (s) => `brightness(${mix(s, 1, 1.12)}) saturate(${mix(s, 1, 1.05)})`, ffmpeg: 'eq=brightness=0.06:saturation=1.05' },
-  { id: 'clear', name: 'Clear', group: 'Daily', css: (s) => `contrast(${mix(s, 1, 1.1)}) saturate(${mix(s, 1, 1.1)})`, ffmpeg: 'eq=contrast=1.1:saturation=1.1' },
-  { id: 'warm', name: 'Warm', group: 'Daily', css: (s) => `sepia(${mix(s, 0, 0.18)}) saturate(${mix(s, 1, 1.12)})`, ffmpeg: 'colorbalance=rs=0.07:gs=0.02:bs=-0.07' },
-  { id: 'cool', name: 'Cool', group: 'Daily', css: (s) => `hue-rotate(${mix(s, 0, -10)}deg) saturate(${mix(s, 1, 1.05)})`, ffmpeg: 'colorbalance=rs=-0.06:gs=0:bs=0.08' },
-  { id: 'vivid', name: 'Vivid', group: 'Daily', css: (s) => `saturate(${mix(s, 1, 1.4)}) contrast(${mix(s, 1, 1.06)})`, ffmpeg: 'eq=saturation=1.4:contrast=1.06' },
-  { id: 'soft', name: 'Soft', group: 'Daily', css: (s) => `contrast(${mix(s, 1, 0.9)}) brightness(${mix(s, 1, 1.05)})`, ffmpeg: 'eq=contrast=0.9:brightness=0.03' },
-  { id: 'mono', name: 'Mono', group: 'Stylize', css: (s) => `grayscale(${mix(s, 0, 1)})`, ffmpeg: 'hue=s=0' },
-  { id: 'vintage', name: 'Vintage', group: 'Stylize', css: (s) => `sepia(${mix(s, 0, 0.5)}) contrast(${mix(s, 1, 0.95)})`, ffmpeg: 'curves=preset=vintage' },
-  { id: 'film', name: 'Film', group: 'Stylize', css: (s) => `contrast(${mix(s, 1, 1.15)}) saturate(${mix(s, 1, 0.85)})`, ffmpeg: 'curves=preset=strong_contrast,eq=saturation=0.85' },
-  { id: 'faded', name: 'Faded', group: 'Stylize', css: (s) => `contrast(${mix(s, 1, 0.85)}) brightness(${mix(s, 1, 1.08)}) saturate(${mix(s, 1, 0.8)})`, ffmpeg: 'curves=preset=lighter,eq=contrast=0.85:saturation=0.8' },
-  { id: 'dramatic', name: 'Dramatic', group: 'Stylize', css: (s) => `contrast(${mix(s, 1, 1.3)}) saturate(${mix(s, 1, 1.1)}) brightness(${mix(s, 1, 0.95)})`, ffmpeg: 'eq=contrast=1.3:saturation=1.1:brightness=-0.03' },
+  { id: 'bright', name: 'Bright', group: 'Daily', ops: [{ kind: 'brightness', amount: 1.16 }, { kind: 'contrast', amount: 1.06 }, { kind: 'saturate', amount: 1.12 }] },
+  { id: 'clear', name: 'Clear', group: 'Daily', ops: [{ kind: 'contrast', amount: 1.22 }, { kind: 'saturate', amount: 1.15 }] },
+  { id: 'warm', name: 'Warm', group: 'Daily', ops: [{ kind: 'tint', r: 1.08, g: 1, b: 0.84 }, { kind: 'saturate', amount: 1.12 }] },
+  { id: 'cool', name: 'Cool', group: 'Daily', ops: [{ kind: 'tint', r: 0.88, g: 1, b: 1.12 }, { kind: 'contrast', amount: 1.04 }] },
+  { id: 'vivid', name: 'Vivid', group: 'Daily', ops: [{ kind: 'saturate', amount: 1.6 }, { kind: 'contrast', amount: 1.1 }] },
+  { id: 'soft', name: 'Soft', group: 'Daily', ops: [{ kind: 'contrast', amount: 0.84 }, { kind: 'brightness', amount: 1.07 }, { kind: 'saturate', amount: 0.9 }] },
+  { id: 'mono', name: 'Mono', group: 'Stylize', ops: [{ kind: 'grayscale', amount: 1 }, { kind: 'contrast', amount: 1.12 }] },
+  { id: 'vintage', name: 'Vintage', group: 'Stylize', ops: [{ kind: 'sepia', amount: 0.5 }, { kind: 'contrast', amount: 0.88 }, { kind: 'brightness', amount: 1.06 }] },
+  { id: 'film', name: 'Film', group: 'Stylize', ops: [{ kind: 'contrast', amount: 1.2 }, { kind: 'saturate', amount: 0.78 }, { kind: 'tint', r: 1.03, g: 1, b: 0.92 }] },
+  { id: 'faded', name: 'Faded', group: 'Stylize', ops: [{ kind: 'contrast', amount: 0.76 }, { kind: 'brightness', amount: 1.1 }, { kind: 'saturate', amount: 0.72 }] },
+  { id: 'dramatic', name: 'Dramatic', group: 'Stylize', ops: [{ kind: 'contrast', amount: 1.4 }, { kind: 'saturate', amount: 1.15 }, { kind: 'brightness', amount: 0.92 }] },
 ];
+
+/** A colour transform on 0–1 values: three rows of red, green and blue weights, each followed by an offset. */
+type ColourAffine = number[];
+
+const NEUTRAL_AFFINE: ColourAffine = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0];
+
+/** An operation dialled back towards doing nothing, by a strength from 0 to 1. */
+function opAtStrength(op: EditFilterOp, strength: number): EditFilterOp {
+  const k = Math.max(0, Math.min(1, strength));
+  const lerp = (from: number, to: number): number => from + (to - from) * k;
+  if (op.kind === 'tint') return { kind: 'tint', r: lerp(1, op.r), g: lerp(1, op.g), b: lerp(1, op.b) };
+  return { kind: op.kind, amount: lerp(op.kind === 'sepia' || op.kind === 'grayscale' ? 0 : 1, op.amount) };
+}
+
+function opAffine(op: EditFilterOp): ColourAffine {
+  if (op.kind === 'tint') return [op.r, 0, 0, 0, 0, op.g, 0, 0, 0, 0, op.b, 0];
+  const a = op.amount;
+  const k = 1 - a;
+  switch (op.kind) {
+    case 'brightness':
+      return [a, 0, 0, 0, 0, a, 0, 0, 0, 0, a, 0];
+    case 'contrast': {
+      const o = 0.5 - 0.5 * a;
+      return [a, 0, 0, o, 0, a, 0, o, 0, 0, a, o];
+    }
+    case 'saturate':
+      return [
+        0.213 + 0.787 * a, 0.715 - 0.715 * a, 0.072 - 0.072 * a, 0,
+        0.213 - 0.213 * a, 0.715 + 0.285 * a, 0.072 - 0.072 * a, 0,
+        0.213 - 0.213 * a, 0.715 - 0.715 * a, 0.072 + 0.928 * a, 0,
+      ];
+    case 'sepia':
+      return [
+        0.393 + 0.607 * k, 0.769 - 0.769 * k, 0.189 - 0.189 * k, 0,
+        0.349 - 0.349 * k, 0.686 + 0.314 * k, 0.168 - 0.168 * k, 0,
+        0.272 - 0.272 * k, 0.534 - 0.534 * k, 0.131 + 0.869 * k, 0,
+      ];
+    default:
+      return [
+        0.2126 + 0.7874 * k, 0.7152 - 0.7152 * k, 0.0722 - 0.0722 * k, 0,
+        0.2126 - 0.2126 * k, 0.7152 + 0.2848 * k, 0.0722 - 0.0722 * k, 0,
+        0.2126 - 0.2126 * k, 0.7152 - 0.7152 * k, 0.0722 + 0.9278 * k, 0,
+      ];
+  }
+}
+
+/**
+ * Each operation of the look as the `values` of an SVG feColorMatrix, in order — how
+ * the editor previews it. One primitive per operation rather than one merged matrix,
+ * so the preview clips a colour between steps exactly where ffmpeg does: merged, a
+ * strong contrast followed by a darkening showed a bright yellow 19 levels off the export.
+ */
+export function editFilterMatrices(def: EditFilterDef, strength: number): string[] {
+  return def.ops.map((op) => {
+    const m = opAffine(opAtStrength(op, strength));
+    const row = (r: number): number[] => [m[r * 4]!, m[r * 4 + 1]!, m[r * 4 + 2]!, 0, m[r * 4 + 3]!];
+    return [...row(0), ...row(1), ...row(2), 0, 0, 0, 1, 0].map((v) => +v.toFixed(4)).join(' ');
+  });
+}
+
+/** One colour, as 0–1 red, green and blue, graded the way the preview and the export both grade it. */
+export function editFilterColour(def: EditFilterDef, strength: number, rgb: readonly number[]): number[] {
+  return def.ops.reduce<number[]>((c, op) => {
+    const m = opAffine(opAtStrength(op, strength));
+    return [0, 1, 2].map((r) =>
+      Math.max(0, Math.min(1, m[r * 4]! * c[0]! + m[r * 4 + 1]! * c[1]! + m[r * 4 + 2]! * c[2]! + m[r * 4 + 3]!)),
+    );
+  }, [...rgb]);
+}
+
+/**
+ * The same look as an ffmpeg filter chain, at a strength from 0 to 1. Each operation
+ * is its own step in RGB: colorchannelmixer for the weights, and colorlevels for
+ * contrast, whose offset colorchannelmixer has no way to express.
+ */
+export function editFilterFfmpeg(def: EditFilterDef, strength: number): string {
+  const f = (v: number): string => String(+v.toFixed(5));
+  const steps: string[] = [];
+  for (const raw of def.ops) {
+    const op = opAtStrength(raw, strength);
+    if (op.kind === 'contrast') {
+      const a = op.amount;
+      if (Math.abs(a - 1) < 1e-4) continue;
+      const lo = f(a > 1 ? 0.5 - 0.5 / a : 0.5 - 0.5 * a);
+      const hi = f(a > 1 ? 0.5 + 0.5 / a : 0.5 + 0.5 * a);
+      const side = a > 1 ? 'i' : 'o';
+      steps.push(`colorlevels=${['r', 'g', 'b'].map((c) => `${c}${side}min=${lo}:${c}${side}max=${hi}`).join(':')}`);
+      continue;
+    }
+    const m = opAffine(op);
+    if (m.every((v, i) => Math.abs(v - NEUTRAL_AFFINE[i]!) < 1e-4)) continue;
+    const names = ['rr', 'rg', 'rb', '', 'gr', 'gg', 'gb', '', 'br', 'bg', 'bb', ''];
+    steps.push(`colorchannelmixer=${names.flatMap((n, i) => (n ? [`${n}=${f(m[i]!)}`] : [])).join(':')}`);
+  }
+  return steps.length ? ['format=gbrp', ...steps].join(',') : 'null';
+}
 
 export interface EditTransitionDef {
   id: string;

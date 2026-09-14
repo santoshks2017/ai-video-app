@@ -44,6 +44,7 @@ import {
 } from '@ava/shared';
 import { api, isApiError, type GenerationHistoryItem } from '../lib/api.js';
 import { abs, uploadRef } from '../lib/client.js';
+import { filesFrom, PASTE_KEYS } from './ui.js';
 
 /**
  * The video editor.
@@ -402,7 +403,7 @@ export function VideoEditor({
     setPanel('clip');
   };
 
-  const onFiles = async (files: FileList | null): Promise<void> => {
+  const onFiles = async (files: FileList | File[] | null): Promise<void> => {
     const list = [...(files ?? [])];
     for (const [i, f] of list.entries()) {
       setUploading(list.length > 1 ? `Uploading ${i + 1} of ${list.length}…` : 'Uploading…');
@@ -1046,6 +1047,20 @@ export function VideoEditor({
                     >
                       material library
                     </button>
+                    <span
+                      className="ve-chip ve-paste"
+                      tabIndex={0}
+                      role="button"
+                      title={`Click here, then paste an image, a video or a sound (${PASTE_KEYS})`}
+                      onPaste={(e) => {
+                        const files = filesFrom(e.clipboardData, 'video/*,image/*,audio/*');
+                        if (!files.length) return;
+                        e.preventDefault();
+                        void onFiles(files);
+                      }}
+                    >
+                      Paste
+                    </span>
                     <label className="ve-chip accent">
                       {uploading || '+ Upload material'}
                       <input type="file" hidden multiple accept="video/*,image/*,audio/*" onChange={(e) => void onFiles(e.target.files).then(() => { e.target.value = ''; })} />

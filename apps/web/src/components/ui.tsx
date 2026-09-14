@@ -274,7 +274,36 @@ export function PickList<T extends { id: string }>({
   );
 }
 
-/** Upload one image and hand back the stored handle. */
+/** Does a file fit an `accept` list such as "image/*" or "video/*,image/*"? */
+function accepts(accept: string, file: File): boolean {
+  return accept
+    .split(',')
+    .map((a) => a.trim())
+    .filter(Boolean)
+    .some((a) => (a.endsWith('/*') ? file.type.startsWith(a.slice(0, -1)) : file.type === a));
+}
+
+/** The files on a clipboard. A copied screenshot arrives as an item rather than in `files`. */
+export function filesFrom(data: DataTransfer | null, accept: string): File[] {
+  if (!data) return [];
+  const direct = [...data.files].filter((f) => accepts(accept, f));
+  if (direct.length) return direct;
+  return [...data.items]
+    .filter((it) => it.kind === 'file')
+    .map((it) => it.getAsFile())
+    .filter((f): f is File => f !== null && accepts(accept, f));
+}
+
+export const PASTE_KEYS = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘V' : 'Ctrl+V';
+
+/**
+ * Upload an image — or paste one.
+ *
+ * A logo or a showroom photo is as often a screenshot on the clipboard as a file on
+ * disk, and saving it only to pick it again is two steps for nothing. So the control
+ * takes focus when it is clicked, and a paste while it has focus uploads the image on
+ * the clipboard exactly as if it had been picked.
+ */
 export function ImageUpload({
   label,
   kind = 'dealer',
@@ -295,9 +324,10 @@ export function ImageUpload({
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
+  const [armed, setArmed] = useState(false);
+  const what = accept.startsWith('video') ? 'video' : 'image';
 
-  const pick = async (files: FileList | null) => {
-    const list = [...(files ?? [])];
+  const upload = async (list: File[]) => {
     if (!list.length) return;
     setErr('');
     for (const [i, file] of list.entries()) {
@@ -315,17 +345,39 @@ export function ImageUpload({
 
   return (
     <>
-      <button className="btn small" type="button" disabled={Boolean(busy)} onClick={() => ref.current?.click()}>
-        {busy || buttonText}
-      </button>
-      <input
-        ref={ref}
-        type="file"
-        accept={accept}
-        multiple={multiple}
-        hidden
-        onChange={(e) => pick(e.target.files)}
-      />
+      <div
+        className={`upload-zone${armed ? ' armed' : ''}`}
+        tabIndex={0}
+        role="group"
+        aria-label={`${buttonText}, or paste ${what === 'video' ? 'a video' : 'an image'}`}
+        title={`Click here, then paste ${what === 'video' ? 'a video' : 'an image'} (${PASTE_KEYS})`}
+        onFocus={() => setArmed(true)}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setArmed(false);
+        }}
+        onPaste={(e) => {
+          const files = filesFrom(e.clipboardData, accept);
+          if (!files.length) {
+            setErr(`There is no ${what} on the clipboard to paste.`);
+            return;
+          }
+          e.preventDefault();
+          if (!busy) void upload(multiple ? files : files.slice(0, 1));
+        }}
+      >
+        <button className="btn small" type="button" disabled={Boolean(busy)} onClick={() => ref.current?.click()}>
+          {busy || buttonText}
+        </button>
+        <span className="upload-paste">{armed ? `Paste now · ${PASTE_KEYS}` : 'or paste'}</span>
+        <input
+          ref={ref}
+          type="file"
+          accept={accept}
+          multiple={multiple}
+          hidden
+          onChange={(e) => void upload([...(e.target.files ?? [])])}
+        />
+      </div>
       {err && <div className="hint" style={{ color: 'var(--bad)' }}>{err}</div>}
     </>
   );

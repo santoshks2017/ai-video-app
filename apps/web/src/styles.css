@@ -2783,3 +2783,15 @@ textarea.guide {
 .logo-corner img { height: 20px; width: auto; max-width: 74px; object-fit: contain; }
 .logo-ph { padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.85); color: #1d1a1a; font-size: 9.5px; font-weight: 600; }
 .logo-frame-foot { position: absolute; left: 0; right: 0; bottom: 0; height: 13%; background: rgba(18, 32, 58, 0.85); }
+
+/* ---- Paste to upload ---- */
+.upload-zone {
+  display: inline-flex; align-items: center; gap: 8px; padding: 2px 9px 2px 2px;
+  border: 1px dashed transparent; border-radius: var(--radius-sm); cursor: text;
+}
+.upload-zone:hover { border-color: var(--line-strong); }
+.upload-zone.armed { border-color: var(--accent); background: var(--accent-wash); }
+.upload-paste { font-size: 11.5px; color: var(--ink-faint); white-space: nowrap; }
+.upload-zone.armed .upload-paste { color: var(--accent); font-weight: 600; }
+.ve-paste { cursor: text; }
+.ve-paste:focus { outline: 2px solid var(--ve-accent); outline-offset: 1px; }

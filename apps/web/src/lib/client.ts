@@ -121,6 +121,14 @@ export async function recheckCarPhotos(id: string) {
 }
 
 /**
+ * Read a vehicle's colours again without touching its photographs. The sync once
+ * stopped at ten colours; this puts back what it cut and keeps every photo as filed.
+ */
+export async function refreshCarColours(id: string) {
+  return await post<{ ok: true; count: number; added: string[] }>(`/api/cars/${id}/colours`, {});
+}
+
+/**
  * File a dealership's photos by the part of the place they show, and build one
  * sheet per part. Photos already filed by hand keep what they were given.
  */

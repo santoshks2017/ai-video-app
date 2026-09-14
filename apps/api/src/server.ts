@@ -117,7 +117,7 @@ import {
   DEALER_VIEWS,
   type DealerView,
 } from '@ava/shared';
-import { syncVehicleModel, listBrandModels, title } from './carSync.js';
+import { syncVehicleModel, listBrandModels, title, syncColours } from './carSync.js';
 import { seePhotos, seeDealerPhotos } from './vision.js';
 import {
   drawSceneFrame,
@@ -2647,6 +2647,39 @@ app.get<{ Params: { jobId: string } }>('/api/generations/:jobId', async (req, re
  * told the model that was the front, and the front became the one view it never
  * saw. This re-files the photos already stored, without downloading anything.
  */
+/**
+ * Read a vehicle's colours again, without touching its photographs.
+ *
+ * The sync used to keep the first ten colours it found, so a model with more lost
+ * the rest — Citrine Yellow on the XUV 3XO among them. A full re-sync would put
+ * them back but replace the photos as well, and with them every angle filed by
+ * hand. This corrects the colour list alone, and says what it added.
+ */
+app.post<{ Params: { id: string } }>('/api/cars/:id/colours', async (req, reply) => {
+  const car = await getOne<CarModelProfile>('cars', req.params.id);
+  if (!car) return reply.code(404).send({ code: 'not-found', message: 'No such vehicle' });
+  if ((car.kind ?? 'car') === 'bike') {
+    return reply
+      .code(422)
+      .send({ code: 'bike', message: 'Bike colours come with the full sync — use Re-sync for this one.' });
+  }
+  const colours = await syncColours(car);
+  if (!colours) {
+    return reply
+      .code(502)
+      .send({ code: 'no-page', message: 'The source page did not come back. Try again in a moment.' });
+  }
+  if (!colours.length) {
+    return reply.code(422).send({ code: 'no-colours', message: 'The source page lists no colours for this model.' });
+  }
+  const before = new Set((car.colours ?? []).map((c) => c.name.toLowerCase()));
+  const added = colours.filter((c) => !before.has(c.name.toLowerCase())).map((c) => c.name);
+  // Round-tripped so no undefined field reaches Firestore: a colour with no image
+  // or no hex carries the key with nothing in it, and a write with that fails.
+  await patch('cars', car.id, { colours: JSON.parse(JSON.stringify(colours)), updatedAt: Date.now() });
+  return { ok: true, count: colours.length, added };
+});
+
 app.post<{ Params: { id: string } }>('/api/cars/:id/recheck', async (req, reply) => {
   const car = await getOne<CarModelProfile>('cars', req.params.id);
   if (!car) return reply.code(404).send({ code: 'not-found', message: 'No such vehicle' });

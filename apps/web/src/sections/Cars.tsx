@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CarModelProfile, CarAngle, StoredImage, BrandEntry, VehicleDataSource } from '@ava/shared';
-import { BRAND_CATALOGUE, CAR_VIEWS } from '@ava/shared';
+import { BRAND_CATALOGUE, CAR_VIEWS,
+  colourName,
+} from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
-import { isApiError, post, get, abs, recheckCarPhotos } from '../lib/client.js';
+import { isApiError, post, get, abs, recheckCarPhotos, refreshCarColours } from '../lib/client.js';
 
 const ANGLES: CarAngle[] = ['front', 'side', 'rear', 'interior'];
 
@@ -39,6 +41,7 @@ export function CarsSection() {
   const [sourceBusy, setSourceBusy] = useState('');
   const [sourceNote, setSourceNote] = useState('');
   const [checkBusy, setCheckBusy] = useState(false);
+  const [colourBusy, setColourBusy] = useState(false);
   /** Rebuilding the whole library, one vehicle at a time, with a way out. */
   const [rebuild, setRebuild] = useState<{ done: number; total: number; now: string } | null>(null);
   const stopRebuild = useRef(false);
@@ -64,6 +67,29 @@ export function CarsSection() {
       r.moved.length || r.dropped.length
         ? `Re-filed: ${[...r.moved, ...r.dropped.map((d) => `dropped ${d}`)].join('; ')}.`
         : 'Every photo was already filed correctly.',
+    );
+  };
+
+  /**
+   * Read this vehicle's colours again, leaving its photos exactly as filed. The
+   * sync once kept only the first ten colours, which cut Citrine Yellow from the
+   * XUV 3XO and a colour or more from fourteen other models.
+   */
+  const refreshColours = async () => {
+    if (!activeId) return;
+    setColourBusy(true);
+    setSourceNote('');
+    const r = await refreshCarColours(activeId);
+    setColourBusy(false);
+    if (isApiError(r)) {
+      setSourceNote(`${r.code}: ${r.message}`);
+      return;
+    }
+    await refresh();
+    setSourceNote(
+      r.added.length
+        ? `${r.count} colours now — added ${r.added.map((n) => colourName(n) || n).join(', ')}.`
+        : `All ${r.count} colours on the source page were already here.`,
     );
   };
 
@@ -229,6 +255,18 @@ export function CarsSection() {
       }).catch(() => null);
       await refresh();
     }
+    setRebuild(null);
+  };
+
+  /** The colour correction, for every car in view. Photos are not touched. */
+  const refreshAllColours = async (list: CarModelProfile[]) => {
+    stopRebuild.current = false;
+    for (const [i, c] of list.entries()) {
+      if (stopRebuild.current) break;
+      setRebuild({ done: i, total: list.length, now: `${c.brand} ${c.model} — colours` });
+      await refreshCarColours(c.id).catch(() => null);
+    }
+    await refresh();
     setRebuild(null);
   };
 
@@ -433,6 +471,25 @@ export function CarsSection() {
         >
           Rebuild every photo set
         </button>
+        {kind !== 'bike' && (
+          <button
+            className="btn ghost small"
+            type="button"
+            disabled={Boolean(rebuild)}
+            title="Read every car's colours again. Photos are not touched."
+            onClick={() => {
+              const list = brandRows.flatMap((b) => b.models).filter((c) => (c.kind ?? 'car') !== 'bike');
+              if (
+                window.confirm(
+                  `Read the colours again for all ${list.length} cars?\n\nOne page each and a few small images — quick, and no vision calls. The photos stay exactly as they are.`,
+                )
+              )
+                void refreshAllColours(list);
+            }}
+          >
+            Refresh every colour list
+          </button>
+        )}
       </div>
 
       {/* Brand, then model, then the vehicle — each column narrowing the last. */}
@@ -508,6 +565,17 @@ export function CarsSection() {
                   >
                     {checkBusy ? 'Looking…' : 'Check the photos'}
                   </button>
+                  {(active.kind ?? 'car') !== 'bike' && (
+                    <button
+                      className="btn ghost small"
+                      type="button"
+                      disabled={colourBusy || Boolean(sourceBusy)}
+                      title="Read the colours from the source page again — the photos stay exactly as filed"
+                      onClick={() => void refreshColours()}
+                    >
+                      {colourBusy ? 'Reading…' : 'Refresh colours'}
+                    </button>
+                  )}
                   <button
                     className="btn ghost small"
                     type="button"
@@ -687,7 +755,7 @@ export function CarsSection() {
                   {sourceNote && <div className="hint">{sourceNote}</div>}
                 </Section>
 
-                <Section sub title="Colours" step={`${active.colours.length} on the source page`}>
+                <Section sub title="Colours" step={`${active.colours.length} colour${active.colours.length === 1 ? '' : 's'}`}>
                   <div className="swatches">
                     {active.colours.map((c) => (
                       <div className="swatch" key={c.name} title={c.hex}>

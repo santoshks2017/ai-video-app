@@ -465,6 +465,78 @@ export interface SyncOptions {
 export const syncCarModel = (input: string, opts: SyncOptions = {}): Promise<CarModelProfile> =>
   syncVehicleModel(input, { ...opts, kind: opts.kind ?? 'car' });
 
+/**
+ * A safety net, not a line-up size. The sync used to stop at ten, and CarDekho
+ * lists fifteen for the XUV 3XO — so Citrine Yellow, the colour every one of its
+ * photographs is shot in, was cut, along with a colour or more on fourteen other
+ * models. No real line-up comes near this.
+ */
+const MAX_COLOURS = 40;
+
+/**
+ * Every colour on the page, in the order the page lists them, each at the
+ * largest size it is published in.
+ *
+ * The old list was sorted by image resolution and then cut at ten, which decided
+ * which colours survived by how big their thumbnails happened to be. Page order
+ * is the maker's own order, and one entry per colour keeps the biggest file.
+ */
+export function pickColours(
+  html: string,
+  modelRe: RegExp,
+  max = MAX_COLOURS,
+): { name: string; hex?: string; url: string }[] {
+  const best = new Map<string, { name: string; hex?: string; url: string }>();
+  for (const url of new Set(html.match(COLOUR_RE) ?? [])) {
+    if (!modelRe.test(url)) continue;
+    const parsed = parseColourFile(url);
+    if (!parsed) continue;
+    const key = parsed.name.toLowerCase();
+    const have = best.get(key);
+    // Setting an existing key keeps its place, so a sharper copy found later does
+    // not move the colour to the back of the list.
+    if (!have) best.set(key, { ...parsed, url });
+    else if (resScore(url) > resScore(have.url)) best.set(key, { ...have, url });
+  }
+  return [...best.values()].slice(0, max);
+}
+
+async function storeColours(
+  picked: { name: string; hex?: string; url: string }[],
+  brand: string,
+  model: string,
+  id: string,
+): Promise<CarColour[]> {
+  const out: CarColour[] = [];
+  for (const c of picked) {
+    const img = await store(c.url, `${brand} ${model} — ${c.name}`, `${id}-colour-${slugify(c.name)}.jpg`);
+    out.push({ name: c.name, hex: c.hex, image: img ?? undefined });
+  }
+  return out;
+}
+
+/**
+ * Read a vehicle's colours again, and nothing else.
+ *
+ * A full re-sync replaces the photographs too, and with them every angle that was
+ * filed by hand. Colours are independent of all that, so a model missing a colour
+ * can have its list corrected without losing a single correction to its photos.
+ * Null when the page did not come back; bikes carry their colours in page data
+ * the full sync already reads.
+ */
+export async function syncColours(
+  car: Pick<CarModelProfile, 'id' | 'slug' | 'kind' | 'brand' | 'model'>,
+): Promise<CarColour[] | null> {
+  const kind: VehicleKind = car.kind ?? 'car';
+  if (kind === 'bike') return null;
+  const src = SOURCES[kind];
+  const html = (await get(src.picturesUrl(car.slug))) || (await get(src.modelUrl(car.slug)));
+  if (!html) return null;
+  const modelSeg = car.slug.split('/').pop() ?? '';
+  const modelRe = new RegExp(`/${escapeRe(title(modelSeg))}(?:[-/])`, 'i');
+  return storeColours(pickColours(html, modelRe), car.brand, car.model, car.id);
+}
+
 export async function syncVehicleModel(input: string, opts: SyncOptions = {}): Promise<CarModelProfile> {
   const kind: VehicleKind = opts.kind ?? 'car';
   const src = SOURCES[kind];
@@ -674,23 +746,10 @@ export async function syncVehicleModel(input: string, opts: SyncOptions = {}): P
   }
 
   /* ---- colours ---- */
-  const colourUrls = [...new Set(html.match(COLOUR_RE) ?? [])]
-    .filter((u) => modelRe.test(u))
-    .sort((a, b) => resScore(b) - resScore(a));
-  const seenColour = new Set<string>();
-  const colours: CarColour[] = namedColours.map((name) => ({ name }));
-  for (const u of kind === 'bike' ? [] : colourUrls) {
-    if (colours.length >= (opts.maxColours ?? 10)) break;
-    const parsed = parseColourFile(u);
-    if (!parsed || seenColour.has(parsed.name.toLowerCase())) continue;
-    seenColour.add(parsed.name.toLowerCase());
-    const img = await store(
-      u,
-      `${brand} ${model} — ${parsed.name}`,
-      `${id}-colour-${slugify(parsed.name)}.jpg`,
-    );
-    colours.push({ name: parsed.name, hex: parsed.hex, image: img ?? undefined });
-  }
+  const colours: CarColour[] = [
+    ...namedColours.map((name) => ({ name })),
+    ...(kind === 'bike' ? [] : await storeColours(pickColours(html, modelRe, opts.maxColours), brand, model, id)),
+  ];
 
   /* ---- variants ---- */
   const variants: CarVariant[] = parseVariants(variantHtml, kind === 'bike' ? model : model).map((v) => ({

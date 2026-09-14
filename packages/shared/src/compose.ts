@@ -6,6 +6,7 @@
  * already understand — so the whole generation pipeline stays unchanged.
  */
 
+import { overlayTheme } from './overlayLook.js';
 import { logoLayout } from './logoLayout.js';
 import { adaptTrial, clampPace } from './context.js';
 import { suggestDuration } from './duration.js';
@@ -233,6 +234,7 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   b.footer = client?.footerText?.trim() ?? '';
   b.endCardOn = s.endCardOn;
   b.endCard = s.endCard;
+  b.overlayTheme = overlayTheme(s.overlayThemeId, s.overlayCustom);
   b.fieldValues = project.fieldValues;
   // A scene is out of the film whether it was deleted or only skipped. The
   // difference is where it is kept, not whether it is generated.

@@ -1,3 +1,4 @@
+import type { OverlayTheme } from './overlayLook.js';
 /**
  * Core domain types for the AI Video App.
  *
@@ -291,6 +292,8 @@ export interface Brief {
   footer: string;
   endCardOn: boolean;
   endCard: string;
+  /** The colours the captions, footer strip and end card are drawn in. Unset is Midnight. */
+  overlayTheme?: OverlayTheme;
   dealer: Dealer;
   actor: Actor;
   /** Per-category dynamic field values, keyed by category id. */

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
-import { LOGO_CLEAN_VERSION, logoLayout,
+import { overlayTheme, LOGO_CLEAN_VERSION, logoLayout,
   brandMatches,
   isPromptOnly,
   estimateCost,
@@ -51,6 +51,7 @@ import {
 import { generateVeoClip, VeoError } from './veo.js';
 import { countRequest, markExhausted, usageToday } from './usage.js';
 import { renderEditProject } from './editRender.js';
+import { importWebsite } from './siteImport.js';
 import { drawActorSheet, fillActorProfile } from './actorProfile.js';
 import { cleanLogo, findBrandLogo } from './logos.js';
 import { checkVehicleFrame } from './vehicleCheck.js';
@@ -1060,6 +1061,20 @@ app.post<{ Body: { url?: string; query?: string } }>('/api/clients/gmb', async (
   }
 });
 
+/* ---- client import from its own website ---- */
+app.post<{ Body: { url?: string } }>('/api/clients/website', async (req, reply) => {
+  const url = (req.body?.url ?? '').trim();
+  if (!url) return reply.code(400).send({ code: 'site-no-url', message: 'Paste the website address first.' });
+  try {
+    return await importWebsite(url, await scriptKey().catch(() => undefined));
+  } catch (e) {
+    const err = e as { code?: string; message?: string; status?: number };
+    return reply
+      .code(err.status ?? 502)
+      .send({ code: err.code ?? 'site-import-failed', message: err.message ?? 'Could not read that website.' });
+  }
+});
+
 /**
  * The resolution a brief asks for. Unset means 720p, which is what every
  * project before 1080p was made at. The model may render lower — Seedance tops
@@ -1636,6 +1651,8 @@ function buildOverlay(
     dealerLogo: logos.dealer === 'off' ? undefined : dealerLogo,
     brandLogo: logos.brand === 'off' ? undefined : brandLogo,
     logoPlacement: logos,
+    // Films made before looks existed were all Midnight, and a retake of one stays Midnight.
+    theme: brief.overlayTheme ?? overlayTheme(),
     cards: plan ? overlayCards(plan, sceneOverrides ?? {}) : [],
     endCard:
       brief.endCardOn && copy.endCardLines.length ? { lines: copy.endCardLines, seconds: 3 } : undefined,

@@ -71,6 +71,13 @@ import {
   actorFillPrompt,
   logoLayout,
   logosOn,
+  extractSiteSignals,
+  tidyPhone,
+  resolveLink,
+  OVERLAY_THEMES,
+  overlayTheme,
+  contrast,
+  CUSTOM_THEME_ID,
   type RunFact,
   newEditProject,
   addEditClip,
@@ -1547,4 +1554,74 @@ test('each logo goes where the client wants it, and an unset client keeps the ol
   const kinds = (brief.attachments ?? []).map((a) => a.kind);
   assert.ok(kinds.includes('logo'));
   assert.ok(!kinds.includes('brand-logo'), 'a logo switched off is not carried');
+});
+
+/* ---------------------------------------------------------------------------
+ * A client's details from its own website.
+ * ------------------------------------------------------------------------ */
+
+test('a dealer page gives up its name, phones and logo without a browser', () => {
+  const html = `<!doctype html><html><head><title>Sterling Hyundai | Jaipur</title>
+    <meta property="og:site_name" content="Sterling Hyundai">
+    <meta property="og:image" content="/banners/creta.jpg">
+    <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"AutoDealer","name":"Sterling Hyundai","telephone":"+91 98290 12345","logo":{"@type":"ImageObject","url":"https://cdn.example.com/sterling-logo.png"},"address":{"@type":"PostalAddress","streetAddress":"Tonk Road","addressLocality":"Jaipur","addressRegion":"Rajasthan"}}]}</script>
+    <!--<script type="application/ld+json">{ broken</script>-->
+    </head><body><header class="navbar"><a href="/"><img class="site-logo" src="/img/logo.svg" alt="Sterling Hyundai"></a></header>
+    <img src="/img/google-play-logo.png" alt="Get it on Google Play">
+    <a href="tel:09829012345">Call</a> <a href="tel:+91-98290-12345">Sales</a>
+    <a href="/contact-us">Contact us</a><a href="https://elsewhere.com/contact">Partner</a>
+    <p>Visit us &amp; test drive the Creta.</p><script>var x = 1;</script></body></html>`;
+  const s = extractSiteSignals(html, 'https://www.sterlinghyundai.in/home');
+  assert.equal(s.org?.name, 'Sterling Hyundai');
+  assert.equal(s.org?.address, 'Tonk Road, Jaipur, Rajasthan');
+  assert.equal(s.org?.state, 'Rajasthan');
+  assert.equal(s.logos[0]?.url, 'https://cdn.example.com/sterling-logo.png', 'the business record’s own logo first');
+  assert.ok(s.logos.some((l) => l.url === 'https://www.sterlinghyundai.in/img/logo.svg'));
+  assert.ok(!s.logos.some((l) => /google-play/.test(l.url)), 'a store badge is not the dealer’s logo');
+  assert.deepEqual(s.phones, ['09829012345', '+91-98290-12345']);
+  assert.deepEqual(s.contactLinks, ['https://www.sterlinghyundai.in/contact-us'], 'only the site’s own contact page');
+  assert.match(s.text, /Visit us & test drive the Creta\./);
+  assert.ok(!/var x/.test(s.text));
+  assert.equal(tidyPhone('9829012345'), '+91 98290 12345');
+  assert.equal(tidyPhone('09829012345'), '09829012345', 'a leading 0 could as well be a landline');
+  assert.equal(tidyPhone('+91-98290-12345'), '+91 98290 12345');
+  assert.equal(tidyPhone('080 4275 3684'), '080 4275 3684', 'a landline is kept as written');
+  assert.equal(resolveLink('img/a.png', 'https://x.in/cars/list.html'), 'https://x.in/cars/img/a.png');
+  assert.equal(resolveLink('//cdn.x.in/a.png', 'https://x.in/'), 'https://cdn.x.in/a.png');
+});
+
+/* ---------------------------------------------------------------------------
+ * The look of the words on a film, and where each caption sits.
+ * ------------------------------------------------------------------------ */
+
+test('every look keeps its words readable, and a custom look makes its own readable', () => {
+  for (const t of OVERLAY_THEMES) {
+    assert.ok(contrast(t.text, t.panel) >= 4.5, `${t.name}: caption text`);
+    assert.ok(contrast(t.accent, t.panel) >= 3, `${t.name}: the caption's small line`);
+    assert.ok(contrast(t.cardText, t.card) >= 4.5, `${t.name}: the end card's name`);
+    assert.ok(contrast(t.accent, t.card) >= 3, `${t.name}: the call to action`);
+    assert.ok(contrast(t.cardMuted, t.card) >= 4.5, `${t.name}: the contact lines`);
+  }
+  assert.equal(overlayTheme().id, 'midnight', 'unset is what every film had before');
+  assert.equal(overlayTheme('long-gone').id, 'midnight');
+  const pale = overlayTheme(CUSTOM_THEME_ID, { panel: '#fff5d6', accent: '#fff0b0' });
+  assert.equal(pale.text, '#111827');
+  assert.ok(contrast(pale.accent, pale.panel) >= 3, 'an accent too faint to read is pushed until it reads');
+  assert.ok(contrast(pale.cardText, pale.card) >= 4.5);
+  assert.equal(overlayTheme(CUSTOM_THEME_ID, { panel: 'not a colour' }).panel, '#0f1e33');
+});
+
+test('a scene’s caption placement reaches the render, and Auto leaves it to the render', () => {
+  const b = base({ categories: ['feature'], narration: 'presenter', durationSec: 20, maxChunkSec: 10, fieldValues: { feature: { feature1: 'Sunroof', feature2: 'Touchscreen', feature3: '6 airbags' } } });
+  const plan = buildPrompt(b)!.scenePlan;
+  const [first, second, third] = plan.scenes;
+  const cards = overlayCards(plan, {
+    [first!.beat.key!]: { card: 'Panoramic sunroof', cardPos: 'top-right' },
+    [second!.beat.key!]: { card: 'Ten-inch screen', cardPos: 'auto' },
+    [third!.beat.key!]: { card: 'Six airbags', cardPos: 'sideways' as never },
+  });
+  assert.equal(cards.find((c) => c.text === 'Panoramic sunroof')?.position, 'top-right');
+  assert.equal(cards.find((c) => c.text === 'Ten-inch screen')?.position, undefined);
+  assert.equal(cards.find((c) => c.text === 'Six airbags')?.position, undefined, 'a place that does not exist is Auto');
+  assert.equal(composeBrief({ ...emptyProject(), id: 'p', useCases: ['offer'], spec: { ...emptyProject().spec, overlayThemeId: 'emerald' } } as Parameters<typeof composeBrief>[0]).overlayTheme?.id, 'emerald');
 });

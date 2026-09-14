@@ -7,6 +7,7 @@
  */
 
 import type { Brief, PromptPart } from './types.js';
+import { isCardPosition, type CardPosition } from './overlayLook.js';
 import { WORDS_PER_SECOND, speechRate } from './constants.js';
 import { buildContext, type RenderContext } from './context.js';
 import { buildBeats, collectStrings, storyGuidance, storyTheme, themeDirection } from './buildBeats.js';
@@ -216,6 +217,8 @@ export interface SceneOverride {
   card?: string;
   /** The smaller line under the caption. Undefined keeps the template's. */
   cardSub?: string;
+  /** Where the caption sits. Unset or 'auto': wherever the shot is quietest, decided at render. */
+  cardPos?: CardPosition | 'auto';
   /** The designer took this scene out of the film. */
   deleted?: boolean;
   /** Held out of this cut, but still written and still on the storyboard. */
@@ -754,6 +757,8 @@ export interface OverlayCard {
   end: number;
   /** The length that part was planned at, so a short render still lines up. */
   partSeconds: number;
+  /** Where the designer put it. Unset: the render picks the quietest place in the shot. */
+  position?: CardPosition;
 }
 
 /**
@@ -781,7 +786,8 @@ export function overlayCards(plan: ScenePlan, overrides: Record<string, SceneOve
     const partSeconds = Math.round((scenes[scenes.length - 1]!.end - partStart) * 10) / 10;
 
     for (const sc of scenes) {
-      const card = sceneCard(sc.beat, sceneEditFor(overrides, plan, sc));
+      const edit = sceneEditFor(overrides, plan, sc);
+      const card = sceneCard(sc.beat, edit);
       if (!card) continue;
       // A caption that covers its whole shot is wallpaper. Hold it off the cut
       // at either end so the picture is seen before the words arrive.
@@ -793,6 +799,7 @@ export function overlayCards(plan: ScenePlan, overrides: Record<string, SceneOve
         start: Math.round((sc.start - partStart + lead) * 10) / 10,
         end: Math.round((sc.end - partStart - lead) * 10) / 10,
         partSeconds,
+        position: isCardPosition(edit?.cardPos) ? edit.cardPos : undefined,
       });
     }
   }

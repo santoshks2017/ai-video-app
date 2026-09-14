@@ -49,6 +49,8 @@ export interface TextCard {
   end: number;
   /** The length that segment was planned at. */
   partSeconds: number;
+  /** A CARD_SPOTS place the designer chose. Unset: the quietest place in the shot. */
+  position?: string;
 }
 
 export interface BrandOverlay {
@@ -84,6 +86,18 @@ export interface BrandOverlay {
   speed?: number;
   accent?: string;
   ink?: string;
+  /** The colours of the captions, the footer strip and the end card. Unset: Midnight, from `accent` and `ink`. */
+  theme?: OverlayColours;
+}
+
+/** What an overlay is drawn in. The same fields as @ava/shared's OverlayTheme. */
+export interface OverlayColours {
+  panel: string;
+  text: string;
+  accent: string;
+  card: string;
+  cardText: string;
+  cardMuted: string;
 }
 
 /**
@@ -97,6 +111,24 @@ export const FF_THREADS = String(Math.max(1, Number(process.env.FFMPEG_THREADS) 
 
 const DEFAULT_ACCENT = '#e2600a';
 const DEFAULT_INK = '#0f1e33';
+const DEFAULT_COLOURS: OverlayColours = {
+  panel: DEFAULT_INK,
+  text: '#ffffff',
+  accent: DEFAULT_ACCENT,
+  card: DEFAULT_INK,
+  cardText: '#ffffff',
+  cardMuted: '#c9d3e0',
+};
+/** Light enough that white logos would vanish on it. */
+const isLight = (colour: string): boolean => {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(colour);
+  if (!m) return false;
+  const lin = (h: string): number => {
+    const c = parseInt(h, 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(m[1]!) + 0.7152 * lin(m[2]!) + 0.0722 * lin(m[3]!) > 0.4;
+};
 /**
  * The type the overlays are set in. The Cloud Run image installs DejaVu Sans and
  * Noto (for Devanagari) and nothing else, so DejaVu is what production draws —
@@ -446,7 +478,7 @@ const LOGO_BOX = { w: 0.26, h: 0.085 };
 const shortSide = (w: number, h: number): number => Math.min(w, h);
 
 /** Bottom strip: solid bar + centred contact detail, wrapped and fitted. */
-async function footerPng(text: string, W: number, H: number, ink: string): Promise<Buffer> {
+async function footerPng(text: string, W: number, H: number, colours: Pick<OverlayColours, 'panel' | 'text'>): Promise<Buffer> {
   const S = shortSide(W, H);
   const pad = Math.round(W * 0.045);
   const maxWidth = W - pad * 2;
@@ -474,8 +506,8 @@ async function footerPng(text: string, W: number, H: number, ink: string): Promi
   const firstBaseline = Math.round((h - fitted.lineHeight * (fitted.lines.length - 1)) / 2 + fitted.fontSize * 0.35);
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${h}">
-  <rect width="${W}" height="${h}" fill="${ink}" fill-opacity="0.92"/>
-  ${tspans(fitted, W / 2, firstBaseline, '#ffffff', 600, maxWidth)}
+  <rect width="${W}" height="${h}" fill="${colours.panel}" fill-opacity="0.92"/>
+  ${tspans(fitted, W / 2, firstBaseline, colours.text, 600, maxWidth)}
 </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
@@ -485,8 +517,7 @@ async function endCardPng(
   spec: EndCardSpec,
   w: number,
   h: number,
-  accent: string,
-  ink: string,
+  colours: OverlayColours,
 ): Promise<Buffer> {
   const S = shortSide(w, h);
   const [name, cta, ...rest] = spec.lines.map((l) => (l ?? '').trim()).filter(Boolean);
@@ -528,24 +559,24 @@ async function endCardPng(
 
   const parts: string[] = [];
   if (nameFit) {
-    parts.push(tspans(nameFit, w / 2, y + nameFit.fontSize, '#ffffff', 700, maxWidth));
+    parts.push(tspans(nameFit, w / 2, y + nameFit.fontSize, colours.cardText, 700, maxWidth));
     y += nameH + (ctaFit ? gapAfterName : 0);
   }
   if (ctaFit) {
-    parts.push(tspans(ctaFit, w / 2, y + ctaFit.fontSize, accent, 500, maxWidth));
+    parts.push(tspans(ctaFit, w / 2, y + ctaFit.fontSize, colours.accent, 500, maxWidth));
     y += ctaH;
   }
   if (restH) {
     y += gapAfterCta;
     for (const f of restFits) {
-      parts.push(tspans(f, w / 2, y + f.fontSize, '#c9d3e0', 400, maxWidth));
+      parts.push(tspans(f, w / 2, y + f.fontSize, colours.cardMuted, 400, maxWidth));
       y += f.lineHeight * f.lines.length + gapBetweenRest;
     }
   }
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-  <rect width="${w}" height="${h}" fill="${ink}"/>
-  <rect x="0" y="0" width="${w}" height="${Math.max(2, Math.round(S * 0.008))}" fill="${accent}"/>
+  <rect width="${w}" height="${h}" fill="${colours.card}"/>
+  <rect x="0" y="0" width="${w}" height="${Math.max(2, Math.round(S * 0.008))}" fill="${colours.accent}"/>
   ${parts.join('\n')}
 </svg>`;
 
@@ -700,8 +731,7 @@ export async function cardPng(
   sub: string | undefined,
   W: number,
   H: number,
-  accent: string,
-  ink: string,
+  colours: OverlayColours,
   /** The film-wide headline size from captionSize(). A caption that cannot fit at it goes smaller. */
   headSize?: number,
 ): Promise<Buffer> {
@@ -746,10 +776,10 @@ export async function cardPng(
       .join('\n');
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-  <rect width="${w}" height="${h}" rx="${rx}" fill="${ink}" fill-opacity="0.93"/>
-  <rect width="${barW}" height="${h}" rx="${Math.round(barW / 2)}" fill="${accent}"/>
-  ${line(head, padY, '#ffffff', 700)}
-  ${subFit ? line(subFit, padY + headH + gap, accent, 500) : ''}
+  <rect width="${w}" height="${h}" rx="${rx}" fill="${colours.panel}" fill-opacity="0.93"/>
+  <rect width="${barW}" height="${h}" rx="${Math.round(barW / 2)}" fill="${colours.accent}"/>
+  ${line(head, padY, colours.text, 700)}
+  ${subFit ? line(subFit, padY + headH + gap, colours.accent, 500) : ''}
 </svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
@@ -949,6 +979,101 @@ async function tightenJoins(files: string[], dir: string): Promise<{ files: stri
   return { files: out, notes };
 }
 
+/** Where a caption can go, in the order they are preferred when two are equally clear. */
+const CARD_SPOTS = ['bottom-left', 'bottom-right', 'top-left', 'top-right', 'middle-left', 'middle-right', 'bottom-center'] as const;
+type CardSpot = (typeof CARD_SPOTS)[number];
+const isCardSpot = (v: unknown): v is CardSpot => (CARD_SPOTS as readonly string[]).includes(v as string);
+
+/** A caption's top-left corner at a spot: above the footer strip, below the logos, inside the margin. */
+function spotXY(
+  spot: CardSpot,
+  W: number,
+  H: number,
+  w: number,
+  h: number,
+  margin: number,
+  footerH: number,
+  logoBand: number,
+): { x: number; y: number } {
+  const [row, col] = spot.split('-') as [string, string];
+  const x = col === 'left' ? margin : col === 'right' ? W - w - margin : Math.round((W - w) / 2);
+  const bottom = Math.max(margin, H - footerH - margin - h);
+  const top = Math.min(bottom, margin + logoBand + margin);
+  const y = row === 'bottom' ? bottom : row === 'top' ? top : Math.round(Math.min(Math.max(top, (H - h) / 2), bottom));
+  return { x: Math.max(0, x), y: Math.max(0, y) };
+}
+
+/**
+ * Where a caption covers the least of what is happening.
+ *
+ * Six small grey frames are taken from the stretch of the shot the caption is up for,
+ * and every place it could go is scored by how much moves inside it from frame to
+ * frame and how much detail it covers. Movement counts double: a caption over a
+ * plain wall hides nothing, one over the presenter's face or the car driving through
+ * hides the shot. A place has to be clearly quieter to win over the one before it in
+ * CARD_SPOTS, so a shot with nothing going on keeps its caption bottom-left.
+ */
+async function quietestSpot(
+  file: string,
+  localFrom: number,
+  seconds: number,
+  dir: string,
+  n: number,
+  W: number,
+  H: number,
+  w: number,
+  h: number,
+  margin: number,
+  footerH: number,
+  logoBand: number,
+): Promise<CardSpot> {
+  const gw = 96;
+  const gh = Math.max(2, Math.round((gw * H) / W));
+  const span = Math.max(0.4, seconds);
+  const raw = join(dir, `quiet-${n}.gray`);
+  const ok = await run('ffmpeg', [
+    '-v', 'error', '-y', '-ss', Math.max(0, localFrom).toFixed(3), '-t', span.toFixed(3), '-i', file,
+    '-vf', `fps=${(6 / span).toFixed(4)},scale=${gw}:${gh}:flags=area,format=gray`,
+    '-frames:v', '6', '-f', 'rawvideo', raw,
+  ])
+    .then(() => true)
+    .catch(() => false);
+  const buf = ok ? await readFile(raw).catch(() => null) : null;
+  const frames = buf ? Math.floor(buf.length / (gw * gh)) : 0;
+  if (!buf || !frames) return CARD_SPOTS[0];
+  let best: CardSpot = CARD_SPOTS[0];
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const spot of CARD_SPOTS) {
+    const { x, y } = spotXY(spot, W, H, w, h, margin, footerH, logoBand);
+    const x0 = Math.max(0, Math.floor((x / W) * gw));
+    const x1 = Math.min(gw, Math.ceil(((x + w) / W) * gw));
+    const y0 = Math.max(0, Math.floor((y / H) * gh));
+    const y1 = Math.min(gh, Math.ceil(((y + h) / H) * gh));
+    let detail = 0;
+    let motion = 0;
+    let cells = 0;
+    for (let f = 0; f < frames; f++) {
+      const o = f * gw * gh;
+      for (let yy = y0; yy < y1; yy++) {
+        for (let xx = x0; xx < x1; xx++) {
+          const v = buf[o + yy * gw + xx]!;
+          if (xx + 1 < x1) detail += Math.abs(v - buf[o + yy * gw + xx + 1]!);
+          if (yy + 1 < y1) detail += Math.abs(v - buf[o + (yy + 1) * gw + xx]!);
+          if (f > 0) motion += Math.abs(v - buf[o - gw * gh + yy * gw + xx]!);
+          cells++;
+        }
+      }
+    }
+    if (!cells) continue;
+    const score = (detail + 2 * motion * (frames / Math.max(1, frames - 1))) / cells;
+    if (score < bestScore * 0.85) {
+      best = spot;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 /**
  * Build the finished video. Returns an MP4 buffer.
  * A single segment with no overlays short-circuits to the input untouched.
@@ -956,8 +1081,12 @@ async function tightenJoins(files: string[], dir: string): Promise<{ files: stri
 export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {}): Promise<Buffer> {
   if (segments.length === 0) throw new Error('no segments to compose');
 
-  const accent = overlay.accent ?? DEFAULT_ACCENT;
-  const ink = overlay.ink ?? DEFAULT_INK;
+  const colours: OverlayColours = overlay.theme ?? {
+    ...DEFAULT_COLOURS,
+    panel: overlay.ink ?? DEFAULT_INK,
+    card: overlay.ink ?? DEFAULT_INK,
+    accent: overlay.accent ?? DEFAULT_ACCENT,
+  };
 
   const nothingToDo =
     segments.length === 1 &&
@@ -1048,7 +1177,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     let endCardFile: string | undefined;
     if (overlay.endCard && overlay.endCard.lines.some((l) => l.trim())) {
       const png = join(dir, 'endcard.png');
-      await writeFile(png, await endCardPng(overlay.endCard, W, H, accent, ink));
+      await writeFile(png, await endCardPng(overlay.endCard, W, H, colours));
       endCardFile = join(dir, 'endcard.mp4');
       await run('ffmpeg', [
         '-v', 'error', '-y',
@@ -1171,7 +1300,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     };
 
     const footerBytes = overlay.footerText?.trim()
-      ? await footerPng(overlay.footerText.trim(), W, H, ink)
+      ? await footerPng(overlay.footerText.trim(), W, H, colours)
       : null;
     const footerH = footerBytes ? ((await sharp(footerBytes).metadata()).height ?? 0) : 0;
     const footerIdx = footerBytes ? await addOverlayInput('footer.png', footerBytes) : -1;
@@ -1194,7 +1323,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
         logoStrip(await Promise.all(srcs.map((_, i) => fitLogo(pick(i), W, H))), align, W, H);
       const colour = await addOverlayInput(`${align}-logos.png`, await strip((i) => cleaned[i]?.colour ?? srcs[i]!));
       const white =
-        endCardFile && cleaned.some(Boolean)
+        endCardFile && !isLight(colours.card) && cleaned.some(Boolean)
           ? await addOverlayInput(`${align}-logos-white.png`, await strip((i) => cleaned[i]?.white ?? srcs[i]!))
           : -1;
       return { colour, white };
@@ -1206,6 +1335,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     // Both logo inputs are the same normalised box, so a single margin puts them
     // on the same baseline however different the uploaded files were.
     const margin = Math.round(shortSide(W, H) * 0.04);
+    const logoBand = Math.round(shortSide(W, H) * LOGO_BOX.h);
     let vCur = 'vcat';
 
     // --- timed captions ---
@@ -1241,23 +1371,29 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       const to = Math.min(bodyEnd, clipStart[ci]! + Math.max(0, card.end - head) * k);
       if (to - from < 0.8) continue; // too brief to read
 
-      const png = await cardPng(text, card.sub, W, H, accent, ink, headSize);
-      const cardH = (await sharp(png).metadata()).height ?? 0;
+      const png = await cardPng(text, card.sub, W, H, colours, headSize);
+      const cardMeta = await sharp(png).metadata();
+      const cardH = cardMeta.height ?? 0;
+      const cardW = cardMeta.width ?? 0;
       const idx = await addOverlayInput(`card-${cardNo}.png`, png, { from, seconds: to - from });
-      const top = Math.max(margin, H - footerH - margin - cardH);
+      // Where the designer put it — or, left to the render, wherever the shot is quietest while it is up.
+      const spot: CardSpot = isCardSpot(card.position)
+        ? card.position
+        : await quietestSpot(files[ci]!, (from - clipStart[ci]!) * speed, (to - from) * speed, dir, cardNo, W, H, cardW, cardH, margin, footerH, logoBand);
+      const { x: cardX, y: top } = spotXY(spot, W, H, cardW, cardH, margin, footerH, logoBand);
       const label = `cd${cardNo}`;
       const outLabel = `vc${cardNo}`;
       parts.push(
         `[${idx}:v]format=rgba,settb=AVTB,fade=t=in:st=${from.toFixed(3)}:d=${CARD_FADE}:alpha=1,` +
           `fade=t=out:st=${Math.max(from, to - CARD_FADE).toFixed(3)}:d=${CARD_FADE}:alpha=1[${label}]`,
       );
-      parts.push(`[${vCur}][${label}]overlay=${margin}:${top}:eof_action=pass[${outLabel}]`);
+      parts.push(`[${vCur}][${label}]overlay=${cardX}:${top}:eof_action=pass[${outLabel}]`);
       vCur = outLabel;
       cardNo++;
     }
 
-    // Colour over the film; white from the moment the navy end card begins.
-    const onFilm = endCardFile ? `:enable='lt(t,${bodyEnd.toFixed(3)})'` : '';
+    // Colour over the film; white from the moment a dark end card begins. A light card keeps the colour logos.
+    const onFilm = endCardFile && !isLight(colours.card) ? `:enable='lt(t,${bodyEnd.toFixed(3)})'` : '';
     const onCard = `:enable='gte(t,${bodyEnd.toFixed(3)})'`;
     for (const [logos, x, tag] of [
       [leftLogos, `${margin}`, 'b'],
@@ -1592,17 +1728,16 @@ export async function selfTest(): Promise<{
     const version = (await run('ffmpeg', ['-version'])).split('\n')[0] ?? '';
     const strip = 'Sterling Hyundai  ·  MG Road, Bengaluru  ·  98765 43210';
 
-    const portrait = await footerPng(strip, 720, 1280, DEFAULT_INK);
+    const portrait = await footerPng(strip, 720, 1280, DEFAULT_COLOURS);
     const pm = await sharp(portrait).metadata();
-    const landscape = await footerPng(strip, 1280, 720, DEFAULT_INK);
+    const landscape = await footerPng(strip, 1280, 720, DEFAULT_COLOURS);
     const lm = await sharp(landscape).metadata();
 
     const end = await endCardPng(
       { lines: ['Sterling Hyundai', 'Book your test drive today', 'MG Road'], seconds: 3 },
       1280,
       720,
-      DEFAULT_ACCENT,
-      DEFAULT_INK,
+      DEFAULT_COLOURS,
     );
     const em = await sharp(end).metadata();
 

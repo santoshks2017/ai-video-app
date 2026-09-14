@@ -6,6 +6,7 @@
  */
 
 import type { Beat, Gender, CategoryId, NarrationKey, AspectRatio, Resolution, TextLang, LogoPlacement } from './types.js';
+import type { CardPosition } from './overlayLook.js';
 
 /** A stored image: bytes live in Cloud Storage, this is the handle. */
 export interface StoredImage {
@@ -302,6 +303,9 @@ export interface ClientProfile {
    * composited in post, so it is always legible.
    */
   footerText?: string;
+  /** The dealership's own website — read first when details are imported. */
+  website?: string;
+  websiteSyncedAt?: number;
   /** Google Business Profile import. */
   gmbUrl?: string;
   gmbPlaceId?: string;
@@ -361,6 +365,10 @@ export interface ProjectVideoSpec {
   footer: string;
   endCardOn: boolean;
   endCard: string;
+  /** The look of the captions, footer strip and end card — an OVERLAY_THEMES id, or 'custom'. Unset is Midnight. */
+  overlayThemeId?: string;
+  /** The two colours a custom look is built from. */
+  overlayCustom?: { panel: string; accent: string };
 }
 
 export type ProjectStatus = 'draft' | 'ready' | 'generating' | 'generated' | 'failed';
@@ -422,6 +430,8 @@ export interface Project {
       ref?: string;
       card?: string;
       cardSub?: string;
+      /** Where this scene's caption sits. Unset or 'auto': wherever the shot is quietest. */
+      cardPos?: CardPosition | 'auto';
       deleted?: boolean;
       /**
        * Held out of this cut, but still written.

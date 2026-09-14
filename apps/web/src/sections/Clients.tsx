@@ -39,6 +39,19 @@ const STATES = [
   'West Bengal',
 ];
 
+interface SiteResult {
+  url: string;
+  name?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  logo?: StoredImage;
+  logoWhite?: StoredImage;
+  logoKind?: 'dealer' | 'brand';
+  notes: string[];
+}
+
 interface GmbResult {
   placeId: string;
   name: string;
@@ -58,6 +71,8 @@ export function ClientsSection() {
   const [gmbInput, setGmbInput] = useState('');
   const [gmbBusy, setGmbBusy] = useState(false);
   const [gmbNote, setGmbNote] = useState('');
+  /** A logo the website had, held back because the client already has one. */
+  const [siteLogo, setSiteLogo] = useState<null | { slot: 'dealer' | 'brand'; logo: StoredImage; white?: StoredImage }>(null);
   const [brandDraft, setBrandDraft] = useState('');
   const [sheetBusy, setSheetBusy] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
@@ -268,33 +283,100 @@ export function ClientsSection() {
   /** A stored logo's link, made absolute: records written by the server carry the path. */
   const logoView = (img: StoredImage): StoredImage => ({ ...img, url: abs(img.url ?? null) ?? img.url });
 
-  const importGmb = async () => {
+  /*
+   * Import the client's details from its website and its Google listing together.
+   *
+   * The website is the client's own word, so it is preferred for everything it has —
+   * the logo, the phone, the address — and the Google listing fills in only what the
+   * website left out, and brings the showroom photos. With only a Google link, the
+   * website that listing names is read too.
+   */
+  const importDetails = async () => {
+    if (!draft) return;
+    const site = (draft.website ?? '').trim();
     const q = gmbInput.trim();
-    if (!q || !draft) return;
+    if (!site && !q) return;
     setGmbBusy(true);
     setGmbNote('');
+    setSiteLogo(null);
     const isUrl = /^https?:\/\//i.test(q);
-    const r = await post<GmbResult>('/api/clients/gmb', isUrl ? { url: q } : { query: q });
+    const [g, w] = await Promise.all([
+      q ? post<GmbResult>('/api/clients/gmb', isUrl ? { url: q } : { query: q }) : Promise.resolve(null),
+      site ? post<SiteResult>('/api/clients/website', { url: site }) : Promise.resolve(null),
+    ]);
+    const problems: string[] = [];
+    const gmb = g && !isApiError(g) ? g : null;
+    if (g && isApiError(g)) problems.push(`Google listing: ${g.message}`);
+    let web = w && !isApiError(w) ? w : null;
+    if (w && isApiError(w)) problems.push(`Website: ${w.message}`);
+    if (!site && gmb?.website) {
+      const again = await post<SiteResult>('/api/clients/website', { url: gmb.website });
+      if (!isApiError(again)) web = again;
+    }
     setGmbBusy(false);
-    if (isApiError(r)) {
-      setGmbNote(r.message);
+    if (!gmb && !web) {
+      setGmbNote(problems.join(' ') || 'Nothing could be imported.');
       return;
     }
-    const photos = r.photos.map((p) => ({ ...p, url: abs(p.url ?? null) ?? p.url }));
-    const importedName = draft.name.trim() || r.name;
-    set({
+
+    const fromSite: string[] = [];
+    const fromGoogle: string[] = [];
+    const choose = (label: string, siteValue?: string, googleValue?: string, current?: string): string | undefined => {
+      if (siteValue?.trim()) {
+        fromSite.push(label);
+        return siteValue.trim();
+      }
+      if (googleValue?.trim()) {
+        fromGoogle.push(label);
+        return googleValue.trim();
+      }
+      return current;
+    };
+    const view = (img?: StoredImage): StoredImage | undefined => (img ? { ...img, url: abs(img.url ?? null) ?? img.url } : undefined);
+    const importedName = draft.name.trim() || web?.name || gmb?.name || '';
+    const patch: Partial<ClientProfile> = {
       name: importedName,
       displayName: draft.displayName?.trim() || suggestDisplayName(importedName),
-      address: r.address ?? draft.address,
-      phone: r.phone ?? draft.phone,
-      city: r.city ?? draft.city,
-      gmbPlaceId: r.placeId,
-      gmbUrl: isUrl ? q : draft.gmbUrl,
-      gmbSyncedAt: Date.now(),
-      photos: [...draft.photos, ...(photos as StoredImage[])],
-    });
+      phone: choose('phone', web?.phone, gmb?.phone, draft.phone),
+      address: choose('address', web?.address, gmb?.address, draft.address),
+      city: choose('city', web?.city, gmb?.city, draft.city),
+      state: choose('state', web?.state, undefined, draft.state),
+      website: web?.url ?? (site || gmb?.website || draft.website),
+      ...(web ? { websiteSyncedAt: Date.now() } : {}),
+      ...(gmb
+        ? {
+            gmbPlaceId: gmb.placeId,
+            gmbUrl: isUrl ? q : draft.gmbUrl,
+            gmbSyncedAt: Date.now(),
+            photos: [...draft.photos, ...(gmb.photos.map((p) => view(p)) as StoredImage[])],
+          }
+        : {}),
+    };
+    if (web?.logo) {
+      const slot = web.logoKind === 'brand' ? 'brand' : 'dealer';
+      const logo = view(web.logo)!;
+      const white = view(web.logoWhite);
+      if (slot === 'brand' ? !draft.brandLogo : !draft.logo) {
+        Object.assign(
+          patch,
+          slot === 'brand' ? { brandLogo: logo, brandLogoWhite: white, brandLogoSource: web.url } : { logo, logoWhite: white },
+        );
+        fromSite.push(slot === 'brand' ? 'brand logo' : 'logo');
+      } else {
+        setSiteLogo({ slot, logo, white });
+      }
+    }
+    if (gmb?.photos.length) fromGoogle.push(`${gmb.photos.length} photo${gmb.photos.length === 1 ? '' : 's'}`);
+    set(patch);
     setGmbNote(
-      r.note ?? `Imported ${r.name}${r.photos.length ? ` and ${r.photos.length} photos` : ''}. Review, then Save.`,
+      [
+        fromSite.length ? `From the website: ${fromSite.join(', ')}.` : web ? 'The website had nothing to add.' : '',
+        fromGoogle.length ? `From Google: ${fromGoogle.join(', ')}.` : '',
+        ...problems,
+        'Review, then Save.',
+      ]
+        .filter(Boolean)
+        .join(' '),
     );
   };
 
@@ -393,7 +475,13 @@ export function ClientsSection() {
                 key={c.id}
                 type="button"
                 className={`browse-item${c.id === draft?.id ? ' on' : ''}`}
-                onClick={() => { setDraft(clients.find((x) => x.id === c.id) ?? null); setGmbNote(''); }}
+                onClick={() => {
+                  const next = clients.find((x) => x.id === c.id) ?? null;
+                  setDraft(next);
+                  setGmbNote('');
+                  setGmbInput(next?.gmbUrl ?? '');
+                  setSiteLogo(null);
+                }}
               >
                 <b>{c.name}</b>
                 <span>
@@ -425,21 +513,55 @@ export function ClientsSection() {
           {err && <Banner kind="bad">{err}</Banner>}
 
           <Field
-            label="Import from Google Business Profile"
-            hint="Paste the Google Maps link for the showroom, or type “Dealer name, city”. Pulls address, phone and photos."
+            label="Import details"
+            hint="The website is read first — the logo, phone and address come from there — and the Google listing fills in whatever the website does not have, and brings showroom photos. Only a Google link? The website it names is read too."
           >
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className="import-grid">
+              <input
+                value={draft.website ?? ''}
+                onChange={(e) => set({ website: e.target.value })}
+                placeholder="Website — www.dealer.com"
+                aria-label="Website"
+              />
               <input
                 value={gmbInput}
                 onChange={(e) => setGmbInput(e.target.value)}
-                placeholder="https://maps.google.com/… or Sterling Hyundai, Jaipur"
+                placeholder="Google Maps link, or “Dealer name, city”"
+                aria-label="Google Business Profile"
               />
-              <button className="btn small" type="button" disabled={gmbBusy || !gmbInput.trim()} onClick={importGmb}>
+              <button
+                className="btn small"
+                type="button"
+                disabled={gmbBusy || !(draft.website?.trim() || gmbInput.trim())}
+                onClick={importDetails}
+              >
                 {gmbBusy ? 'Importing…' : 'Import'}
               </button>
             </div>
           </Field>
           {gmbNote && <div className="hint" style={{ marginTop: -6, marginBottom: 10 }}>{gmbNote}</div>}
+          {siteLogo && (
+            <div className="site-logo-offer">
+              <div className="logo-dark">
+                <Thumb img={siteLogo.logo} />
+              </div>
+              <span>The website has a {siteLogo.slot === 'brand' ? 'brand' : 'dealership'} logo too.</span>
+              <button
+                className="btn ghost small"
+                type="button"
+                onClick={() => {
+                  set(
+                    siteLogo.slot === 'brand'
+                      ? { brandLogo: siteLogo.logo, brandLogoWhite: siteLogo.white }
+                      : { logo: siteLogo.logo, logoWhite: siteLogo.white },
+                  );
+                  setSiteLogo(null);
+                }}
+              >
+                Use the website’s logo
+              </button>
+            </div>
+          )}
 
           <div className="divider" />
 

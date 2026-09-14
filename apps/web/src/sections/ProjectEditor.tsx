@@ -54,6 +54,7 @@ import { api as genApi } from '../lib/api.js';
 import { Storyboard, type LockField } from '../components/Storyboard.js';
 import { OutputPanel } from '../components/OutputPanel.js';
 import { GenerationPanel } from '../components/GenerationPanel.js';
+import { LookPicker } from '../components/LookPicker.js';
 
 /**
  * One line of the reference list: where it sits, what it is a picture of, and a
@@ -1343,6 +1344,19 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     <input readOnly value={client ? footerPreview : 'Select a client to set the footer'} />
                   </Field>
                 </div>
+                <Field
+                  label="Look"
+                  hint="The colours of the captions, the footer strip and the end card, drawn here as they will be on the film. Where each caption sits is set per scene in the storyboard."
+                >
+                  <LookPicker
+                    value={project.spec.overlayThemeId}
+                    custom={project.spec.overlayCustom}
+                    onChange={(patch) => setSpec(patch)}
+                    dealer={client?.displayName?.trim() || client?.name}
+                    cta={project.spec.cta}
+                    footer={client ? footerPreview : undefined}
+                  />
+                </Field>
                 <div className="check-row">
                   <input
                     type="checkbox"

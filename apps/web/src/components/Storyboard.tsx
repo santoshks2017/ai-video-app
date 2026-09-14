@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import type React from 'react';
-import {
+import { CARD_POSITIONS, type CardPosition,
   fmtTime,
   wordBudget,
   narrationMode,
@@ -80,6 +80,7 @@ type SceneEdit = {
   ref?: string;
   card?: string;
   cardSub?: string;
+  cardPos?: CardPosition | 'auto';
   deleted?: boolean;
   skipped?: boolean;
 };
@@ -225,6 +226,22 @@ function CaptionEditor({
             </button>
           )}
         </div>
+      )}
+      {card && (
+        <label className="sb-caption-pos" title="Where this caption sits on the film">
+          <span>Placement</span>
+          <select
+            value={ov.cardPos ?? 'auto'}
+            onChange={(e) => onChange({ cardPos: e.target.value === 'auto' ? undefined : (e.target.value as CardPosition) })}
+          >
+            <option value="auto">Auto — clear of the action</option>
+            {CARD_POSITIONS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
     </div>
   );
@@ -916,8 +933,14 @@ export function Storyboard({
                     <td colSpan={4}>
                       <div className="sb-scene-head">
                         <span className="sb-scene-no">{gi + 1}</span>
-                        <b className="sb-scene-title">{sc.beat.title}</b>
-                        {sc.beat.cat && <span className="sb-scene-cat">{sc.beat.cat}</span>}
+                        <b className="sb-scene-title" title={sc.beat.title}>
+                          {sc.beat.title}
+                        </b>
+                        {sc.beat.cat && (
+                          <span className="sb-scene-cat" title={sc.beat.cat}>
+                            {sc.beat.cat}
+                          </span>
+                        )}
                         <span className="sb-scene-time">
                           {fmtTime(sc.start)}–{fmtTime(sc.end)} · {sc.duration}s
                         </span>

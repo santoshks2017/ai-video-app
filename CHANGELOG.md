@@ -1,10 +1,22 @@
 # Changelog
 
-Current version: **3.4**
+Current version: **3.5**
 
 Minor bumps for every shipped change; the major number moves only for an
 overhaul of how the app works. Generated from `packages/shared/src/changelog.ts`
 — edit that, then run `npm run changelog`.
+
+## 3.5 — A real editor, logos without boxes, and a closing line that finishes
+_2026-09-14_
+
+- Edit opens a timeline editor laid out the way the team knows from Lumina: material on the left — this project’s films, its vehicle and dealership photographs, and anything uploaded — the player on the right, the timeline underneath. Text presets, transitions and filters; split, delete, duplicate, trim and snap; a magnet that closes gaps and linkage that keeps text and sound with their clip; undo and redo; aspect switching; a draft kept on this device. Export renders the edit on the server and saves it as a new version of the film — no model, no cost. The preview shows every transition as a cross-fade and stops volume at 100%; the export is exact.
+- A filter does something the moment it is clicked. It needed a clip selected first and said so only in the corner of the header, so a click in the panel looked like nothing at all. With no clip selected it now goes on the whole film; with one selected, on that clip, and the panel says which. The looks were so gentle that every thumbnail was identical — they are strong enough to tell apart now, there is a None, and Strength sits in the panel. The preview and the export grade with the same colour steps: checked in Chrome to the level, and the export within 2 levels of 255. Cool used to turn reds pink in the preview and do something else in the export.
+- The last words of a film are no longer lost. On a Sahyadri Motors run the closing line was still being spoken at full volume in the final frame of the last part — the model stopped mid-word, so the words were never in the video, and holding the last frame could not bring them back. Four things let that happen and all four are fixed: the last scene keeps a silent beat before the film ends, as every part before a cut already did; parts are planned in whole seconds, because a model asked for 5.2 renders 5.0; a name said letter by letter counts per letter, so "XUV 3XO" is six words, not two; and the too-long check reads the closing line, with a warning of its own. The final part is also told to finish its last line with a second to spare. Scene timings shift slightly as a result — a 42-second film now plans as 41.
+- Logos without boxes. A logo was composited however it had been saved, so Shaw Toyota’s end card carried two white plates. Every logo is cleaned now: the background is found from the colour of its border and only what touches the border is removed, so white inside a logo stays. A white version is made for dark grounds — logos stay in colour over the film and switch to white when the end card begins. Uploads are cleaned on the way in and every logo again at render, so clients saved earlier render correctly with nothing to redo.
+- A client with a brand and no brand logo gets one when it is saved — from Wikidata, then Wikimedia Commons, then CarDekho — with where it came from shown under it, so it can be checked and replaced. Clients has Pull brand logo and Clean up logos, and shows each logo in colour and in white.
+- A model’s day of requests is spent on purpose. Google caps each video model per day — 100 for Omni 1.1 Flash — and counts failed attempts too; the app retried a refusal three more times, so once the day was spent every part burned four requests and ninety seconds before failing. A refusal that is the day’s cap now ends the run at once and says when the model comes back: 12:30 PM IST. The model picker shows what each model has left today, the Generate panel shows how many requests this film will use beside what it costs, and a model with nothing left stops the button before anything is sent. The count is of what this app sends.
+- Two more models to spread the day across: the earlier Gemini Omni Flash, metered separately from 1.1, and Veo 3.1 Lite. Every model has a daily limit field in APIs & models.
+- Every colour on the page, not the first ten. The sync kept ten colours chosen by thumbnail size, which is how the XUV 3XO lost Citrine Yellow — the colour its photographs are shot in — along with three others, and fifteen cars sat at exactly ten. Colours are read in the order the page lists them now. Refresh colours on a vehicle, or Refresh every colour list across the library, puts the missing ones back without touching the photographs.
 
 ## 3.4 — Approving a spend, from wherever the run has got to
 _2026-09-13_

@@ -253,6 +253,18 @@ export interface ClientProfile {
   logo?: StoredImage;
   /** Manufacturer logo — overlaid top-left. Transparent PNG works best. */
   brandLogo?: StoredImage;
+  /**
+   * The same two logos in white, for dark backgrounds — the end card.
+   *
+   * A colour logo on a white plate is how a navy end card came to carry two white
+   * boxes. Every logo is stored with its background removed, and in white as well,
+   * made by knocking the light parts out rather than painting everything white —
+   * so the Toyota emblem stays an emblem instead of becoming a blank square.
+   */
+  logoWhite?: StoredImage;
+  brandLogoWhite?: StoredImage;
+  /** Where an automatically pulled brand logo came from, so it can be checked and replaced. */
+  brandLogoSource?: string;
   /** Showroom / delivery / team photos, each filed under the part of the place it shows. */
   photos: StoredImage[];
   /**

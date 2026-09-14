@@ -18,6 +18,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
+import { cleanLogo } from './logos.js';
 
 export interface EndCardSpec {
   /** Dealer name first, then CTA, then contact lines. */
@@ -1145,12 +1146,25 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       : null;
     const footerH = footerBytes ? ((await sharp(footerBytes).metadata()).height ?? 0) : 0;
     const footerIdx = footerBytes ? await addOverlayInput('footer.png', footerBytes) : -1;
-    const brandIdx = overlay.brandLogo
-      ? await addOverlayInput('brand.png', await normalizedLogo(overlay.brandLogo, W, H, 'left'))
-      : -1;
-    const dealerIdx = overlay.dealerLogo
-      ? await addOverlayInput('dealer.png', await normalizedLogo(overlay.dealerLogo, W, H, 'right'))
-      : -1;
+    /*
+     * Each logo twice: in colour for the film, in white for the end card.
+     *
+     * Cleaned here as well as when it is uploaded, because a logo saved before
+     * logos were cleaned still carries its white canvas — and that is what put two
+     * white boxes on a navy end card. A logo that cannot be cleaned is used as it is.
+     */
+    const logoPair = async (src: Buffer | undefined, align: 'left' | 'right'): Promise<{ colour: number; white: number } | null> => {
+      if (!src) return null;
+      const cleaned = await cleanLogo(src).catch(() => null);
+      const colour = await addOverlayInput(`${align}-logo.png`, await normalizedLogo(cleaned?.colour ?? src, W, H, align));
+      const white =
+        cleaned && endCardFile
+          ? await addOverlayInput(`${align}-logo-white.png`, await normalizedLogo(cleaned.white, W, H, align))
+          : -1;
+      return { colour, white };
+    };
+    const brandLogos = await logoPair(overlay.brandLogo, 'left');
+    const dealerLogos = await logoPair(overlay.dealerLogo, 'right');
 
     // --- lay the brand furniture on top ---
     // Both logo inputs are the same normalised box, so a single margin puts them
@@ -1206,13 +1220,20 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       cardNo++;
     }
 
-    if (brandIdx >= 0) {
-      parts.push(`[${vCur}][${brandIdx}:v]overlay=${margin}:${margin}[vb]`);
-      vCur = 'vb';
-    }
-    if (dealerIdx >= 0) {
-      parts.push(`[${vCur}][${dealerIdx}:v]overlay=W-w-${margin}:${margin}[vd]`);
-      vCur = 'vd';
+    // Colour over the film; white from the moment the navy end card begins.
+    const onFilm = endCardFile ? `:enable='lt(t,${bodyEnd.toFixed(3)})'` : '';
+    const onCard = `:enable='gte(t,${bodyEnd.toFixed(3)})'`;
+    for (const [logos, x, tag] of [
+      [brandLogos, `${margin}`, 'b'],
+      [dealerLogos, `W-w-${margin}`, 'd'],
+    ] as const) {
+      if (!logos) continue;
+      parts.push(`[${vCur}][${logos.colour}:v]overlay=${x}:${margin}${onFilm}[v${tag}]`);
+      vCur = `v${tag}`;
+      if (logos.white >= 0) {
+        parts.push(`[${vCur}][${logos.white}:v]overlay=${x}:${margin}${onCard}[v${tag}w]`);
+        vCur = `v${tag}w`;
+      }
     }
     if (footerIdx >= 0) {
       parts.push(`[${vCur}][${footerIdx}:v]overlay=0:H-h[vf]`);

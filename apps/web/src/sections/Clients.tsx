@@ -15,7 +15,7 @@ import {
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
-import { isApiError, post, get, abs, buildClientSheets } from '../lib/client.js';
+import { isApiError, post, get, abs, buildClientSheets, cleanClientLogos } from '../lib/client.js';
 
 function blank(): ClientProfile {
   const now = Date.now();
@@ -60,6 +60,8 @@ export function ClientsSection() {
   const [gmbNote, setGmbNote] = useState('');
   const [brandDraft, setBrandDraft] = useState('');
   const [sheetBusy, setSheetBusy] = useState(false);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const [logoNote, setLogoNote] = useState('');
   const [sheetNote, setSheetNote] = useState('');
   const [q, setQ] = useState('');
   const [fBrand, setFBrand] = useState('');
@@ -140,6 +142,20 @@ export function ClientsSection() {
     }
     await refresh();
     setDraft(r);
+    // A client with a brand and no brand logo gets one: looked up, cleaned, and put
+    // on the record, without anyone having to go and find the file.
+    if (!r.brandLogo && (r.brands?.some((b) => b.trim()) || r.brand?.trim())) {
+      setLogoNote('Looking up the brand logo…');
+      const pulled = await cleanClientLogos(r.id, false);
+      if (isApiError(pulled)) {
+        setLogoNote(pulled.message);
+        return;
+      }
+      await refresh();
+      const fresh = await get<ClientProfile>(`/api/clients/${r.id}`);
+      if (!isApiError(fresh)) setDraft((d) => (d?.id === r.id ? fresh : d));
+      setLogoNote(pulled.notes.length ? `${pulled.notes.join('; ')}.` : '');
+    }
   };
 
   /**
@@ -182,6 +198,36 @@ export function ClientsSection() {
           .join(' ') + '.',
     );
   };
+
+  /**
+   * Clean the saved logos and, when asked or when there is none, pull the brand's.
+   * Saved first — the server reads the record, not the form — then read back so the
+   * transparent logos and their white versions are on screen.
+   */
+  const tidyLogos = async (pullBrand: boolean) => {
+    if (!draft?.id) return;
+    setLogoBusy(true);
+    setLogoNote('');
+    const saved = await api.clients.save(draft);
+    if (isApiError(saved)) {
+      setLogoBusy(false);
+      setLogoNote(saved.message);
+      return;
+    }
+    const r = await cleanClientLogos(draft.id, pullBrand);
+    setLogoBusy(false);
+    if (isApiError(r)) {
+      setLogoNote(r.message);
+      return;
+    }
+    await refresh();
+    const fresh = await get<ClientProfile>(`/api/clients/${draft.id}`);
+    if (!isApiError(fresh)) setDraft(fresh);
+    setLogoNote(r.notes.length ? `${r.notes.join('; ')}.` : 'Nothing to tidy.');
+  };
+
+  /** A stored logo's link, made absolute: records written by the server carry the path. */
+  const logoView = (img: StoredImage): StoredImage => ({ ...img, url: abs(img.url ?? null) ?? img.url });
 
   const importGmb = async () => {
     const q = gmbInput.trim();
@@ -495,31 +541,86 @@ export function ClientsSection() {
               <div className="field-grid">
                 <Field
                   label="Dealership logo"
-                  hint="Overlaid top-right on every video. Use a transparent PNG."
+                  hint="Overlaid top-right on every video — in colour over the film, in white over the end card. Any file works: the background is taken off when it is uploaded."
                 >
                   <div className="thumbs">
-                    {draft.logo && <Thumb img={draft.logo} onRemove={() => set({ logo: undefined })} />}
+                    {draft.logo && (
+                      <Thumb img={logoView(draft.logo)} onRemove={() => set({ logo: undefined, logoWhite: undefined })} />
+                    )}
+                    {draft.logoWhite && (
+                      <div className="logo-dark">
+                        <Thumb img={logoView(draft.logoWhite)} />
+                      </div>
+                    )}
                     <ImageUpload
                       label={`${draft.name || 'Client'} — dealership logo`}
                       kind="logo"
                       buttonText={draft.logo ? 'Replace' : 'Upload'}
-                      onUploaded={(img) => set({ logo: img })}
+                      onUploaded={(img) =>
+                        set({ logo: img, logoWhite: (img as StoredImage & { white?: StoredImage }).white })
+                      }
                     />
                   </div>
                 </Field>
-                <Field label="Brand logo" hint="Overlaid top-left. Transparent PNG.">
+                <Field
+                  label="Brand logo"
+                  hint={
+                    draft.brandLogoSource
+                      ? `Pulled from ${draft.brandLogoSource}. Upload the dealership's own file if this is not the one they use.`
+                      : 'Overlaid top-left — in colour over the film, in white over the end card. Pulled automatically when there is none, or upload one: the background is taken off.'
+                  }
+                >
                   <div className="thumbs">
                     {draft.brandLogo && (
-                      <Thumb img={draft.brandLogo} onRemove={() => set({ brandLogo: undefined })} />
+                      <Thumb
+                        img={logoView(draft.brandLogo)}
+                        onRemove={() => set({ brandLogo: undefined, brandLogoWhite: undefined, brandLogoSource: undefined })}
+                      />
+                    )}
+                    {draft.brandLogoWhite && (
+                      <div className="logo-dark">
+                        <Thumb img={logoView(draft.brandLogoWhite)} />
+                      </div>
                     )}
                     <ImageUpload
                       label={`${draft.brand || 'Brand'} — brand logo`}
                       kind="brand-logo"
                       buttonText={draft.brandLogo ? 'Replace' : 'Upload'}
-                      onUploaded={(img) => set({ brandLogo: img })}
+                      onUploaded={(img) =>
+                        set({
+                          brandLogo: img,
+                          brandLogoWhite: (img as StoredImage & { white?: StoredImage }).white,
+                          brandLogoSource: undefined,
+                        })
+                      }
                     />
                   </div>
                 </Field>
+              </div>
+              <div className="toolbar">
+                <button
+                  className="btn small"
+                  type="button"
+                  disabled={logoBusy || !draft.id || !(draft.brands?.length || draft.brand?.trim())}
+                  title={draft.id ? "Look up this brand's current logo and use it" : 'Save the client first'}
+                  onClick={() => void tidyLogos(true)}
+                >
+                  {logoBusy ? 'Working…' : draft.brandLogo ? 'Pull brand logo again' : 'Pull brand logo'}
+                </button>
+                <button
+                  className="btn ghost small"
+                  type="button"
+                  disabled={logoBusy || !draft.id || (!draft.logo && !draft.brandLogo)}
+                  title="Take the background off both logos and make their white versions"
+                  onClick={() => void tidyLogos(false)}
+                >
+                  Clean up logos
+                </button>
+                {logoNote && (
+                  <span className="hint" style={{ marginTop: 0 }}>
+                    {logoNote}
+                  </span>
+                )}
               </div>
             </Section>
 

@@ -2655,3 +2655,9 @@ textarea.guide {
 @media (prefers-reduced-motion: reduce) {
   .ve-mat-add { transition: none; }
 }
+
+/* A white logo is shown on the dark ground it is made for, or it cannot be seen at all. */
+.logo-dark { border-radius: var(--radius-sm); background: #0f1e33; padding: 2px; }
+.logo-dark .thumb { background: transparent; border-color: rgba(255, 255, 255, 0.12); }
+.logo-dark .thumb span { color: rgba(255, 255, 255, 0.7); }
+.thumb img { object-fit: contain; }

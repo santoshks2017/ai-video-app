@@ -157,6 +157,14 @@ export async function buildClientSheets(id: string, relabel = false) {
   }>(`/api/clients/${id}/sheets`, { relabel });
 }
 
+/**
+ * Clean a client's saved logos — background off, a white version made — and pull the
+ * brand's logo when it has none, or when asked for again.
+ */
+export async function cleanClientLogos(id: string, pullBrand = false) {
+  return await post<{ ok: true; notes: string[]; pulled: boolean }>(`/api/clients/${id}/logos`, { pullBrand });
+}
+
 /* ---------------- reference-image upload ---------------- */
 
 export async function uploadRef(file: File, label: string, kind = 'dealer') {
@@ -166,10 +174,14 @@ export async function uploadRef(file: File, label: string, kind = 'dealer') {
     fr.onerror = () => reject(fr.error);
     fr.readAsDataURL(file);
   });
-  const r = await post<{ refId: string; storagePath: string; filename: string; label: string }>(
-    '/api/refs',
-    { filename: file.name, contentType: file.type || 'image/jpeg', label, kind, dataBase64 },
-  );
+  const r = await post<{
+    refId: string;
+    storagePath: string;
+    filename: string;
+    label: string;
+    /** A logo comes back with its background removed, and a white version for dark backgrounds. */
+    white?: { refId: string; storagePath: string; filename: string; label: string };
+  }>('/api/refs', { filename: file.name, contentType: file.type || 'image/jpeg', label, kind, dataBase64 });
   if (isApiError(r)) return r;
   return {
     refId: r.refId,
@@ -178,5 +190,6 @@ export async function uploadRef(file: File, label: string, kind = 'dealer') {
     label: r.label,
     // Link to the name storage actually keeps, not the name it was uploaded as.
     url: `${BASE}/api/${r.storagePath}`,
+    ...(r.white ? { white: { ...r.white, url: `${BASE}/api/${r.white.storagePath}` } } : {}),
   };
 }

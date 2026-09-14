@@ -51,6 +51,7 @@ import {
 import { generateVeoClip, VeoError } from './veo.js';
 import { countRequest, markExhausted, usageToday } from './usage.js';
 import { renderEditProject } from './editRender.js';
+import { cleanLogo, findBrandLogo } from './logos.js';
 import { checkVehicleFrame } from './vehicleCheck.js';
 import {
   saveJob,
@@ -3171,6 +3172,36 @@ app.post<{
         : 'Reference image exceeds 8MB.',
     });
   }
+  /*
+   * A logo is cleaned on the way in: its background removed, and a white version
+   * made for dark backgrounds. Stored as it came, a logo saved with a white canvas
+   * put a white box on every end card. An image that cannot be read as one is kept
+   * exactly as it was sent.
+   */
+  if ((b.kind === 'logo' || b.kind === 'brand-logo') && !isVideo) {
+    try {
+      const cleaned = await cleanLogo(bytes);
+      const base = (b.filename || 'logo').replace(/\.[a-z0-9]+$/i, '') || 'logo';
+      const main = await putRef(`${base}.png`, 'image/png', cleaned.colour);
+      const white = await putRef(`${base}-white.png`, 'image/png', cleaned.white);
+      return {
+        refId: main.refId,
+        storagePath: main.storagePath,
+        filename: `${base}.png`,
+        label: b.label.trim(),
+        kind: b.kind,
+        cleaned: cleaned.removedBackground,
+        white: {
+          refId: white.refId,
+          storagePath: white.storagePath,
+          filename: `${base}-white.png`,
+          label: `${b.label.trim()} (white)`,
+        },
+      };
+    } catch (err) {
+      app.log.warn({ err: (err as Error).message }, 'logo could not be cleaned; stored as sent');
+    }
+  }
   const { refId, storagePath } = await putRef(
     b.filename || 'ref.jpg',
     b.contentType || 'image/jpeg',
@@ -3183,6 +3214,77 @@ app.post<{
     label: b.label.trim(),
     kind: b.kind || 'dealer',
   };
+});
+
+/**
+ * Tidy a client's logos, and pull the brand's if it has none.
+ *
+ * Every logo already saved is cleaned — background off, a white version made — and
+ * written back as transparent PNGs. The brand logo is looked up when there is none,
+ * or when asked for again, and where it came from is kept on the record so a
+ * designer can see it and replace it with the dealership's own file.
+ */
+app.post<{ Params: { id: string }; Body?: { pullBrand?: boolean } }>('/api/clients/:id/logos', async (req, reply) => {
+  const client = await getOne<ClientProfile>('clients', req.params.id);
+  if (!client) return reply.code(404).send({ code: 'not-found', message: 'No such client' });
+
+  const asStored = (r: { refId: string; storagePath: string }, filename: string, label: string): StoredImage => ({
+    refId: r.refId,
+    storagePath: r.storagePath,
+    filename,
+    label,
+    url: `/api/refs/${r.refId}/${safeRefName(filename)}`,
+  });
+  const keep = async (bytes: Buffer, base: string, label: string) => {
+    const c = await cleanLogo(bytes);
+    const colour = await putRef(`${base}.png`, 'image/png', c.colour);
+    const white = await putRef(`${base}-white.png`, 'image/png', c.white);
+    return {
+      colour: asStored(colour, `${base}.png`, label),
+      white: asStored(white, `${base}-white.png`, `${label} (white)`),
+      removed: c.removedBackground,
+    };
+  };
+
+  const fields: Partial<ClientProfile> = {};
+  const notes: string[] = [];
+  if (client.logo?.storagePath) {
+    const obj = await readObject(client.logo.storagePath).catch(() => null);
+    if (obj) {
+      const k = await keep(obj.bytes, `${client.id}-dealer-logo`, client.logo.label || 'Dealership logo');
+      fields.logo = k.colour;
+      fields.logoWhite = k.white;
+      notes.push(k.removed ? 'took the background off the dealership logo' : 'the dealership logo was already transparent');
+    }
+  }
+
+  const brand = (client.brands?.find((x) => x.trim()) ?? client.brand ?? '').trim();
+  let pulled = false;
+  if (req.body?.pullBrand === true || !client.brandLogo) {
+    const found = brand ? await findBrandLogo(brand).catch(() => null) : null;
+    if (found) {
+      const k = await keep(found.bytes, `${client.id}-brand-logo`, `${brand} logo`);
+      fields.brandLogo = k.colour;
+      fields.brandLogoWhite = k.white;
+      fields.brandLogoSource = found.source;
+      pulled = true;
+      notes.push(`pulled the ${brand} logo from ${found.source}`);
+    } else if (req.body?.pullBrand === true) {
+      notes.push(`no ${brand || 'brand'} logo could be found — upload one`);
+    }
+  }
+  if (!pulled && client.brandLogo?.storagePath) {
+    const obj = await readObject(client.brandLogo.storagePath).catch(() => null);
+    if (obj) {
+      const k = await keep(obj.bytes, `${client.id}-brand-logo`, client.brandLogo.label || `${brand} logo`);
+      fields.brandLogo = k.colour;
+      fields.brandLogoWhite = k.white;
+      notes.push(k.removed ? 'took the background off the brand logo' : 'the brand logo was already transparent');
+    }
+  }
+
+  if (Object.keys(fields).length) await patch('clients', client.id, { ...fields, updatedAt: Date.now() });
+  return { ok: true, notes, pulled };
 });
 
 /**

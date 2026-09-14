@@ -25,3 +25,4 @@ export * from './changelog.js';
 export * from './references.js';
 export * from './quota.js';
 export * from './edit.js';
+export * from './analytics.js';

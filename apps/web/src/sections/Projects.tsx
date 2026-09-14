@@ -5,6 +5,7 @@ import {
   projectStage,
   emptyProject,
   formatInr,
+  packOf,
   type CategoryId,
   type Project,
   type ProjectStage,
@@ -119,6 +120,7 @@ export function ProjectsSection() {
 
   const tags = (p: Project) => (
     <>
+      {packOf(p) === 'trial' && <span className="chip">Trial pack</span>}
       {clientName(p.clientId) && <span className="chip">{clientName(p.clientId)}</span>}
       {carName(p.carId) && <span className="chip">{carName(p.carId)}</span>}
       {p.useCases.map((u) => (

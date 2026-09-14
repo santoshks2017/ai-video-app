@@ -55,6 +55,18 @@ import {
   editFilterFfmpeg,
   editFilterMatrices,
   spokenWords,
+  campaignFacts,
+  filterCampaigns,
+  analyticsTotals,
+  groupCampaigns,
+  attemptsDistribution,
+  modelReport,
+  teamReport,
+  presetRange,
+  trendBuckets,
+  parseRupees,
+  revenueMissing,
+  type RunFact,
   newEditProject,
   addEditClip,
   removeEditClip,
@@ -1369,4 +1381,95 @@ test('every filter is visible, unlike the others, and does nothing at zero stren
       assert.ok(apart >= 0.04, `${f.name} and ${g.name} look the same`);
     });
   });
+});
+
+/* ---------------------------------------------------------------------------
+ * Analytics: what a campaign earned, what it cost to make, and how it went.
+ * ------------------------------------------------------------------------ */
+
+type AnalyticsProject = Parameters<typeof campaignFacts>[0][number];
+type AnalyticsClient = Parameters<typeof campaignFacts>[1][number];
+
+test('a campaign costs every attempt, failed ones included, and first time right means one attempt', () => {
+  const at = new Date(2026, 8, 14, 12).getTime();
+  const project = (id: string, extra: Partial<AnalyticsProject> = {}): AnalyticsProject =>
+    ({ ...emptyProject(), id, name: id, clientId: 'c1', useCases: ['offer'], createdAt: at, updatedAt: at, ...extra }) as AnalyticsProject;
+  const client = { id: 'c1', name: 'Sahyadri Motors Pvt Ltd', displayName: 'Sahyadri Motors', brand: 'Mahindra', city: 'Pune', state: 'Maharashtra', tier: 'Regional/Volume' } as AnalyticsClient;
+  const run = (projectId: string, minute: number, status: RunFact['status'], costInr: number, extra: Partial<RunFact> = {}): RunFact => ({
+    jobId: `${projectId}-${minute}`, projectId, createdAt: at + minute * 60_000, startedAt: at + minute * 60_000, finishedAt: at + (minute + 5) * 60_000,
+    status, costInr, totalSeconds: 30, modelId: 'omni', modelName: 'Omni 1.1 Flash', userEmail: 'a@cardekho.com', userName: 'Asha', ...extra,
+  });
+  const rows = campaignFacts(
+    [
+      project('p1', { campaignRevenueInr: 30000 }),
+      project('p2', { campaignRevenueInr: 20000 }),
+      project('p3', { packType: 'trial' }),
+      project('p4'),
+    ],
+    [client],
+    [
+      run('p1', 1, 'failed', 200),
+      run('p1', 10, 'done', 600),
+      run('p1', 30, 'done', 300, { kind: 'retake' }),
+      run('p2', 1, 'done', 500, { approved: true }),
+      run('p2', 20, 'done', 0, { kind: 'edit' }),
+      run('p3', 1, 'done', 400),
+    ],
+  );
+  const p1 = rows.find((c) => c.id === 'p1')!;
+  assert.equal(p1.attempts, 3);
+  assert.equal(p1.costInr, 1100);
+  assert.equal(p1.reworkInr, 500, 'the failure and the retake, not the attempt that delivered');
+  assert.equal(p1.firstTimeRight, false);
+  assert.equal(p1.turnaroundMs, 14 * 60_000, 'from the first attempt starting to the first video finishing');
+  const p2 = rows.find((c) => c.id === 'p2')!;
+  assert.equal(p2.attempts, 1, 'an edit of a finished film is not an attempt');
+  assert.ok(p2.firstTimeRight && p2.approved);
+  assert.equal(p2.dealer, 'Sahyadri Motors');
+
+  const paid = analyticsTotals(filterCampaigns(rows, { pack: 'paid' }));
+  assert.equal(paid.campaigns, 3, 'the trial pack is left out');
+  assert.equal(paid.revenueInr, 50000);
+  assert.equal(paid.costInr, 1600);
+  assert.equal(paid.marginInr, 48400);
+  assert.equal(Math.round(paid.marginPct! * 10) / 10, 96.8);
+  assert.equal(paid.attempts, 4);
+  assert.equal(paid.ftrPct, 50);
+  assert.equal(paid.missingRevenue, 1);
+  assert.equal(paid.attemptsPerCampaign, 2);
+  assert.equal(analyticsTotals(filterCampaigns(rows, { pack: 'all' })).costInr, 2000);
+
+  const byState = groupCampaigns(filterCampaigns(rows, { pack: 'paid' }), 'state');
+  assert.equal(byState.length, 1);
+  assert.deepEqual(byState[0]!.totals, paid, 'a breakdown adds up to the total');
+  assert.deepEqual(attemptsDistribution(filterCampaigns(rows, { pack: 'paid' })).map((b) => b.campaigns), [1, 1, 0, 1, 0]);
+
+  const models = modelReport(filterCampaigns(rows, { pack: 'all' }));
+  assert.equal(models.length, 1);
+  assert.equal(models[0]!.runs, 5);
+  const renamed = campaignFacts([project('p5')], [client], [run('p5', 1, 'done', 100, { modelId: 'models/omni-copy' }), run('p5', 9, 'done', 100)]);
+  assert.equal(modelReport(renamed).length, 1, 'one model saved under two ids is one row');
+  assert.equal(models[0]!.successPct, 80);
+  const team = teamReport(filterCampaigns(rows, { pack: 'all' }));
+  assert.equal(team[0]!.campaigns, 3);
+  assert.equal(team[0]!.retakes, 1);
+
+  const wednesday = new Date(2026, 8, 16, 15).getTime();
+  const week = presetRange('week', wednesday);
+  assert.equal(week.from, new Date(2026, 8, 14).getTime(), 'weeks start on Monday');
+  assert.equal(week.to, new Date(2026, 8, 21).getTime());
+  assert.deepEqual(presetRange('last-month', wednesday), { from: new Date(2026, 7, 1).getTime(), to: new Date(2026, 8, 1).getTime() });
+  const days = trendBuckets(rows, 'day', week, wednesday);
+  assert.equal(days.length, 3, 'Monday to today, and no further');
+  assert.equal(days[0]!.totals.campaigns, 4);
+});
+
+test('a paid pack needs its revenue; a trial does not', () => {
+  assert.equal(parseRupees('₹ 25,000'), 25000);
+  assert.equal(parseRupees(''), undefined);
+  assert.equal(parseRupees('a lot'), undefined);
+  assert.equal(revenueMissing({}), true);
+  assert.equal(revenueMissing({ campaignRevenueInr: 0 }), true);
+  assert.equal(revenueMissing({ campaignRevenueInr: 18000 }), false);
+  assert.equal(revenueMissing({ packType: 'trial' }), false);
 });

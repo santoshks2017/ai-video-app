@@ -11,17 +11,18 @@ export const SECTION_META: Record<Section, { label: string; icon: string }> = {
   languages: { label: 'Languages', icon: '🗣️' },
   models: { label: 'APIs & models', icon: '🔌' },
   users: { label: 'People', icon: '👥' },
+  analytics: { label: 'Analytics', icon: '📈' },
   whatsnew: { label: "What's new", icon: '✨' },
 };
 
 /** The rail. What's new is reached from the version in the foot instead. */
 /** Rail entries, with the role each needs. What's new lives in the foot. */
 const NAV: { id: Section; label: string; icon: string; needs?: Role }[] = (
-  ['projects', 'clients', 'cars', 'actors', 'instructions', 'languages', 'models', 'users'] as Section[]
+  ['projects', 'clients', 'cars', 'actors', 'instructions', 'languages', 'models', 'users', 'analytics'] as Section[]
 ).map((id) => ({
   id,
   ...SECTION_META[id],
-  needs: id === 'models' || id === 'users' ? ('admin' as Role) : undefined,
+  needs: id === 'models' || id === 'users' || id === 'analytics' ? ('admin' as Role) : undefined,
 }));
 
 export function SignIn() {

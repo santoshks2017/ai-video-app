@@ -35,6 +35,7 @@ export function GenerationPanel({
   parts,
   scenePlan,
   canGenerate,
+  revenueNeeded,
   needsCostConfirm,
   costInr,
   modelId,
@@ -49,6 +50,8 @@ export function GenerationPanel({
   parts: PromptPart[];
   scenePlan: ScenePlan | null;
   canGenerate: boolean;
+  /** A paid pack with no campaign revenue on it yet. */
+  revenueNeeded?: boolean;
   needsCostConfirm: boolean;
   costInr: number;
   /** Which registered model to generate with. */
@@ -280,7 +283,7 @@ export function GenerationPanel({
   };
 
   const blocked =
-    !canGenerateRole || !canGenerate || parts.length === 0 || (needsCostConfirm && !confirmed) || dayOver;
+    !canGenerateRole || !canGenerate || parts.length === 0 || (needsCostConfirm && !confirmed) || dayOver || Boolean(revenueNeeded);
   const failed = clips.filter((c) => c.status === 'failed');
 
   /* ---- refine: retake the bad segments only ---- */
@@ -391,6 +394,15 @@ export function GenerationPanel({
           </div>
         )}
 
+        {revenueNeeded && canGenerateRole && (
+          <div className="check warn" style={{ marginBottom: 10 }}>
+            <span className="icon">!</span>
+            <span>
+              Add the campaign revenue in <b>Project</b> before generating, or mark this project a trial pack.
+            </span>
+          </div>
+        )}
+
         {/*
           * The approval, wherever the run has got to.
           *
@@ -443,6 +455,8 @@ export function GenerationPanel({
                 ? `${runModel?.name ?? 'This model'}'s daily limit is used up — pick another model in Video`
                 : !canGenerateRole
                 ? 'Your account cannot generate videos — ask an admin to make you a creator'
+                : revenueNeeded
+                  ? 'Add the campaign revenue in Project, or mark this project a trial pack'
                 : !canGenerate
                   ? 'Resolve the blocking pre-flight checks first'
                   : needsCostConfirm && !confirmed

@@ -358,6 +358,9 @@ export type ProjectStatus = 'draft' | 'ready' | 'generating' | 'generated' | 'fa
  */
 export type ProjectStage = 'open' | 'wip' | 'review' | 'delivered';
 
+/** Whether a campaign is sold, or made as a trial. */
+export type PackType = 'paid' | 'trial';
+
 export interface Project {
   id: string;
   name: string;
@@ -480,6 +483,16 @@ export interface Project {
   /** Running totals across every generation ever run for this project. */
   generationCount?: number;
   totalCostInr?: number;
+  /**
+   * Paid or trial. A trial pack is a film made to win a dealer over, or to test the
+   * app with, and Analytics leaves it out unless every pack is asked for. Unset is paid.
+   */
+  packType?: PackType;
+  /**
+   * What the dealer pays for this campaign, in rupees. A paid pack cannot be
+   * generated until it has one: it is the other half of every margin Analytics shows.
+   */
+  campaignRevenueInr?: number;
   createdAt: number;
   updatedAt: number;
 }

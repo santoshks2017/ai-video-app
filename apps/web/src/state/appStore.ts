@@ -23,6 +23,7 @@ export type Section =
   | 'languages'
   | 'models'
   | 'users'
+  | 'analytics'
   | 'whatsnew';
 
 const actorsApi = collection<ActorProfile>('actors');

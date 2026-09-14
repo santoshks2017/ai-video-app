@@ -53,7 +53,7 @@ import { countRequest, markExhausted, usageToday } from './usage.js';
 import { renderEditProject } from './editRender.js';
 import { cleanLogo, findBrandLogo } from './logos.js';
 import { checkVehicleFrame } from './vehicleCheck.js';
-import {
+import { listRunFacts,
   saveJob,
   updateJob,
   getJob,
@@ -235,6 +235,8 @@ function requiredRole(method: string, url: string): Role | null {
   // API credentials and roles are the keys to the kingdom — admin only.
   if (url.startsWith('/api/credentials') || url.startsWith('/api/users')) return 'admin';
   if (url.startsWith('/api/activity')) return 'admin';
+  // Revenue, cost and margin by dealer: admin only.
+  if (url.startsWith('/api/analytics')) return 'admin';
   // Hiding a run changes what the team is told it has spent: admin only.
   if (/^\/api\/generations\/[^/]+\/hide$/.test(url)) return 'admin';
   if (url.startsWith('/api/brands') && method !== 'GET') return 'creator';
@@ -291,7 +293,7 @@ app.addHook('preHandler', async (req, reply) => {
       code: 'forbidden',
       message:
         needed === 'admin'
-          ? 'Only an admin can change API connections, models or roles.'
+          ? 'Only an admin can see analytics or change API connections, models and roles.'
           : 'Your account can view this app but not generate videos or change the libraries. Ask an admin for creator access.',
       role: req.caller?.role,
       needed,
@@ -315,6 +317,11 @@ app.get('/api/session', async (req) => ({
       }
     : null,
 }));
+
+/* ---- analytics (admin only, enforced in the preHandler) ---- */
+
+/** The runs behind every campaign's cost. Projects and clients the app already has. */
+app.get('/api/analytics/runs', async () => ({ items: await listRunFacts() }));
 
 /* ---- user administration (admin only, enforced in the preHandler) ---- */
 

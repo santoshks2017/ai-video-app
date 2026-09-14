@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  packOf,
+  parseRupees,
+  revenueMissing,
   CATEGORIES,
   NARRATION,
   buildPrompt,
@@ -123,6 +126,10 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const dirty = useRef(false);
   /** Set once the project is being deleted, so no pending autosave writes it back. */
   const removed = useRef(false);
+  const latest = useRef(project);
+  latest.current = project;
+  /** Bumped when the revenue arrives from elsewhere, so the box shows it rather than what it held. */
+  const [revenueSync, setRevenueSync] = useState(0);
 
   useEffect(() => {
     if (stored && !project) setProject(stored);
@@ -133,6 +140,17 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (stored?.stage) setProject((cur) => (cur && cur.stage !== stored.stage ? { ...cur, stage: stored.stage } : cur));
   }, [stored?.stage]);
+
+  // The pack and the revenue can be set from Analytics as well. Taken in here, so this
+  // editor's next autosave does not put back what it had — unless it holds unsaved
+  // edits of its own, which are newer.
+  useEffect(() => {
+    const cur = latest.current;
+    if (!stored || !cur || dirty.current) return;
+    if (cur.packType === stored.packType && (cur.campaignRevenueInr ?? 0) === (stored.campaignRevenueInr ?? 0)) return;
+    setProject((c) => (c ? { ...c, packType: stored.packType, campaignRevenueInr: stored.campaignRevenueInr } : c));
+    setRevenueSync((n) => n + 1);
+  }, [stored?.packType, stored?.campaignRevenueInr]);
 
   // Autosave a moment after edits settle.
   useEffect(() => {
@@ -749,7 +767,13 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
       <div className="grid">
         <div className="left-col">
-          <Section num="01" title="Project" step="Name, brief and tags" {...fold('project')}>
+          <Section
+            num="01"
+            title="Project"
+            step="Name, brief and tags"
+            need={revenueMissing(project) ? 'Revenue needed' : undefined}
+            {...fold('project')}
+          >
             <Field label="Project name">
               <input
                 value={project.name}
@@ -757,6 +781,39 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 placeholder="e.g. Sterling Hyundai — Creta feature reel"
               />
             </Field>
+            <div className="row2">
+              <Field
+                label="Pack"
+                hint="A trial pack is a film made to win a dealer over, or to test with. It needs no revenue, and Analytics leaves it out unless all packs are shown."
+              >
+                <div className="seg">
+                  {(['paid', 'trial'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className={packOf(project) === k ? 'on' : ''}
+                      onClick={() => set({ packType: k })}
+                    >
+                      {k === 'paid' ? 'Paid' : 'Trial pack'}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field
+                label={packOf(project) === 'paid' ? 'Campaign revenue (₹) · required' : 'Campaign revenue (₹)'}
+                hint="What the dealer pays for this campaign. Analytics sets it against what the videos cost to make, for the gross margin by dealer, city and state."
+              >
+                <input
+                  key={`${project.id}:${revenueSync}`}
+                  inputMode="numeric"
+                  defaultValue={project.campaignRevenueInr ? project.campaignRevenueInr.toLocaleString('en-IN') : ''}
+                  onChange={(e) => set({ campaignRevenueInr: parseRupees(e.target.value) ?? 0 })}
+                  placeholder={packOf(project) === 'paid' ? 'e.g. 25,000' : 'Optional for a trial'}
+                  aria-invalid={revenueMissing(project)}
+                  className={revenueMissing(project) ? 'needs' : undefined}
+                />
+              </Field>
+            </div>
             <Field
               label="Your brief / prompt"
               hint="A free-text steer. What is still blank below is filled in from it."
@@ -1727,6 +1784,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               parts={parts}
               scenePlan={built?.scenePlan ?? null}
               canGenerate={preflight.canGenerate}
+              revenueNeeded={revenueMissing(project)}
               needsCostConfirm={!!cost?.needsConfirmation}
               costInr={cost?.inr ?? 0}
               modelId={project.spec.modelId ?? activeModel?.id}

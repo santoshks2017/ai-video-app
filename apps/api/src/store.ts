@@ -4,6 +4,7 @@
  * Storage stays private; clips are served back through GET /api/clips/:jobId/:part.
  */
 
+import type { RunFact } from '@ava/shared';
 import { initializeApp, applicationDefault, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
@@ -285,6 +286,41 @@ export async function listAllJobDocs(): Promise<JobRecord[]> {
   ensure();
   const snap = await getFirestore().collection('generations').get();
   return snap.docs.map((d) => ({ ...(d.data() as JobRecord), jobId: (d.data() as JobRecord).jobId ?? d.id }));
+}
+
+/**
+ * Every generation, reduced to the fields Analytics reads. Only those fields are
+ * fetched — a run's record also carries its brief and every prompt, which is most of
+ * its size. Hidden runs are left out, as they are of what the team is told it spent.
+ */
+export async function listRunFacts(): Promise<RunFact[]> {
+  ensure();
+  const snap = await getFirestore()
+    .collection('generations')
+    .select('jobId', 'projectId', 'createdAt', 'startedAt', 'finishedAt', 'status', 'kind', 'approved', 'costInr', 'totalSeconds', 'modelId', 'modelName', 'userEmail', 'userName', 'hidden')
+    .get();
+  return snap.docs.flatMap((d) => {
+    const j = d.data() as Partial<JobRecord>;
+    if (j.hidden) return [];
+    return [
+      {
+        jobId: j.jobId ?? d.id,
+        projectId: j.projectId,
+        createdAt: Number(j.createdAt ?? 0),
+        startedAt: j.startedAt,
+        finishedAt: j.finishedAt,
+        status: j.status ?? 'failed',
+        kind: j.kind,
+        approved: j.approved,
+        costInr: Number(j.costInr ?? 0),
+        totalSeconds: Number(j.totalSeconds ?? 0),
+        modelId: j.modelId,
+        modelName: j.modelName,
+        userEmail: j.userEmail,
+        userName: j.userName,
+      },
+    ];
+  });
 }
 
 /** Every generation for a project, newest first. */

@@ -6,6 +6,7 @@
  * already understand — so the whole generation pipeline stays unchanged.
  */
 
+import { logoLayout } from './logoLayout.js';
 import { adaptTrial, clampPace } from './context.js';
 import { suggestDuration } from './duration.js';
 import type { Brief, DealerPhoto, CategoryId } from './types.js';
@@ -255,6 +256,7 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
       fakeDealer: client.fakeDealer ?? '',
       photos: [],
     };
+    b.logoPlacement = logoLayout(client.logoPlacement);
   }
 
   // A film can be presenter-led in its narration and still want nobody on screen.
@@ -408,8 +410,10 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
       label: `${actor.name || 'The presenter'} — the person on camera`,
     });
   }
-  if (client?.logo) attachments.push(toDealerPhoto(client.logo, 'logo'));
-  if (client?.brandLogo) attachments.push(toDealerPhoto(client.brandLogo, 'brand-logo'));
+  // A logo the client has switched off is not carried at all, so it is neither drawn nor listed.
+  const logos = logoLayout(client?.logoPlacement);
+  if (client?.logo && logos.dealer !== 'off') attachments.push(toDealerPhoto(client.logo, 'logo'));
+  if (client?.brandLogo && logos.brand !== 'off') attachments.push(toDealerPhoto(client.brandLogo, 'brand-logo'));
   /*
    * The dealership as a profile, the same way as the vehicle: one sheet per part
    * of the place where a sheet has been built, the loose photographs where it has

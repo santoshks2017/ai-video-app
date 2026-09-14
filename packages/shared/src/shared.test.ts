@@ -69,6 +69,8 @@ import {
   normalizeActorFill,
   actorSheetPrompt,
   actorFillPrompt,
+  logoLayout,
+  logosOn,
   type RunFact,
   newEditProject,
   addEditClip,
@@ -1521,4 +1523,28 @@ test('the profile sheet letters only what it is given, and keeps a face only whe
   assert.ok(!/""relatable""|"relatable"\./.test(drawn), 'quotes inside a line cannot end its quote early');
   assert.match(actorSheetPrompt(actor, { keepFace: true }), /the person in the attached photograph/);
   assert.match(actorSheetPrompt({ ...actor, gender: 'male', name: '' }), /Indian man/);
+});
+
+/* ---------------------------------------------------------------------------
+ * Where the logos go.
+ * ------------------------------------------------------------------------ */
+
+test('each logo goes where the client wants it, and an unset client keeps the old corners', () => {
+  assert.deepEqual(logoLayout(undefined), { brand: 'left', dealer: 'right' });
+  const onlyDealerLeft = logoLayout({ dealer: 'left', brand: 'off' });
+  assert.deepEqual(logosOn('left', onlyDealerLeft), ['dealer']);
+  assert.deepEqual(logosOn('right', onlyDealerLeft), []);
+  assert.deepEqual(logosOn('right', logoLayout({ dealer: 'right', brand: 'right' })), ['brand', 'dealer'], 'brand first, on either side');
+  assert.deepEqual(logosOn('left', logoLayout({ brand: 'left' }), { brand: false, dealer: true }), [], 'a missing logo takes no place');
+
+  const img = (name: string) => ({ refId: name, storagePath: `refs/${name}/${name}.png`, filename: `${name}.png`, label: name });
+  const client = {
+    id: 'c1', name: 'TC Motors', brand: 'Tata', tier: 'Regional/Volume', photos: [],
+    logo: img('dealer'), brandLogo: img('brand'), logoPlacement: { dealer: 'left', brand: 'off' },
+  } as unknown as Parameters<typeof composeBrief>[1] extends infer I ? I extends { client?: infer C } ? C : never : never;
+  const brief = composeBrief({ ...emptyProject(), id: 'p1', useCases: ['offer'] } as Parameters<typeof composeBrief>[0], { client });
+  assert.deepEqual(brief.logoPlacement, { dealer: 'left', brand: 'off' });
+  const kinds = (brief.attachments ?? []).map((a) => a.kind);
+  assert.ok(kinds.includes('logo'));
+  assert.ok(!kinds.includes('brand-logo'), 'a logo switched off is not carried');
 });

@@ -54,9 +54,11 @@ export interface TextCard {
 export interface BrandOverlay {
   /** Single-line strip across the bottom, e.g. "Dealer | Address | Phone". */
   footerText?: string;
-  /** Transparent PNGs. Brand sits top-left, dealer top-right. */
+  /** Transparent PNGs, placed by `logoPlacement`. */
   brandLogo?: Buffer;
   dealerLogo?: Buffer;
+  /** Which top corner each logo takes. Unset: brand top-left, dealer top-right. */
+  logoPlacement?: { brand?: 'left' | 'right' | 'off'; dealer?: 'left' | 'right' | 'off' };
   endCard?: EndCardSpec;
   /** Timed captions, drawn here rather than by the video model. */
   cards?: TextCard[];
@@ -582,6 +584,15 @@ async function normalizedLogo(
   H: number,
   align: 'left' | 'right',
 ): Promise<Buffer> {
+  return logoStrip([await fitLogo(src, W, H)], align, W, H);
+}
+
+/** A logo trimmed to its artwork and scaled to the shared box, not yet placed. */
+async function fitLogo(
+  src: Buffer,
+  W: number,
+  H: number,
+): Promise<{ art: Buffer; w: number; h: number; boxW: number; boxH: number }> {
   const S = shortSide(W, H);
   const boxW = Math.round(S * LOGO_BOX.w);
   const boxH = Math.round(S * LOGO_BOX.h);
@@ -609,17 +620,35 @@ async function normalizedLogo(
     .png()
     .toBuffer();
   const rm = await sharp(resized).metadata();
-  const rw = Math.min(boxW, rm.width ?? fitW);
-  const rh = Math.min(boxH, rm.height ?? boxH);
+  return { art: resized, w: Math.min(boxW, rm.width ?? fitW), h: Math.min(boxH, rm.height ?? boxH), boxW, boxH };
+}
 
-  // 3. Drop it into the shared box — vertically centred, pinned to the frame
-  //    edge — so left and right logos sit on an identical baseline.
-  return sharp({
-    create: { width: boxW, height: boxH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-  })
-    .composite([
-      { input: resized, left: align === 'left' ? 0 : Math.max(0, boxW - rw), top: Math.max(0, Math.round((boxH - rh) / 2)) },
-    ])
+/**
+ * The logos for one top corner, as a single transparent strip.
+ *
+ * One logo keeps the shared box — vertically centred, pinned to the frame edge —
+ * so logos in opposite corners sit on an identical baseline. Two logos in one
+ * corner, when a client wants them together, sit side by side on that baseline in
+ * reading order, a fixed gap apart: the strip is as wide as their artwork, so the
+ * second is never a whole empty box away from the first.
+ */
+async function logoStrip(
+  fits: Awaited<ReturnType<typeof fitLogo>>[],
+  align: 'left' | 'right',
+  W: number,
+  H: number,
+): Promise<Buffer> {
+  const { boxW, boxH } = fits[0]!;
+  const gap = Math.round(shortSide(W, H) * 0.035);
+  const width = fits.length === 1 ? boxW : fits.reduce((a, f) => a + f.w, 0) + gap * (fits.length - 1);
+  let x = fits.length === 1 && align === 'right' ? Math.max(0, boxW - fits[0]!.w) : 0;
+  const layers = fits.map((f) => {
+    const layer = { input: f.art, left: x, top: Math.max(0, Math.round((boxH - f.h) / 2)) };
+    x += f.w + gap;
+    return layer;
+  });
+  return sharp({ create: { width, height: boxH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite(layers)
     .png()
     .toBuffer();
 }
@@ -1153,18 +1182,25 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
      * logos were cleaned still carries its white canvas — and that is what put two
      * white boxes on a navy end card. A logo that cannot be cleaned is used as it is.
      */
-    const logoPair = async (src: Buffer | undefined, align: 'left' | 'right'): Promise<{ colour: number; white: number } | null> => {
-      if (!src) return null;
-      const cleaned = await cleanLogo(src).catch(() => null);
-      const colour = await addOverlayInput(`${align}-logo.png`, await normalizedLogo(cleaned?.colour ?? src, W, H, align));
+    const placement = { brand: overlay.logoPlacement?.brand ?? 'left', dealer: overlay.logoPlacement?.dealer ?? 'right' };
+    const cornerLogos = async (align: 'left' | 'right'): Promise<{ colour: number; white: number } | null> => {
+      // The brand before the dealership, whichever corner they share.
+      const srcs = ([['brand', overlay.brandLogo], ['dealer', overlay.dealerLogo]] as const)
+        .filter(([k, b]) => b && placement[k] === align)
+        .map(([, b]) => b!);
+      if (!srcs.length) return null;
+      const cleaned = await Promise.all(srcs.map((b) => cleanLogo(b).catch(() => null)));
+      const strip = async (pick: (i: number) => Buffer): Promise<Buffer> =>
+        logoStrip(await Promise.all(srcs.map((_, i) => fitLogo(pick(i), W, H))), align, W, H);
+      const colour = await addOverlayInput(`${align}-logos.png`, await strip((i) => cleaned[i]?.colour ?? srcs[i]!));
       const white =
-        cleaned && endCardFile
-          ? await addOverlayInput(`${align}-logo-white.png`, await normalizedLogo(cleaned.white, W, H, align))
+        endCardFile && cleaned.some(Boolean)
+          ? await addOverlayInput(`${align}-logos-white.png`, await strip((i) => cleaned[i]?.white ?? srcs[i]!))
           : -1;
       return { colour, white };
     };
-    const brandLogos = await logoPair(overlay.brandLogo, 'left');
-    const dealerLogos = await logoPair(overlay.dealerLogo, 'right');
+    const leftLogos = await cornerLogos('left');
+    const rightLogos = await cornerLogos('right');
 
     // --- lay the brand furniture on top ---
     // Both logo inputs are the same normalised box, so a single margin puts them
@@ -1224,8 +1260,8 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     const onFilm = endCardFile ? `:enable='lt(t,${bodyEnd.toFixed(3)})'` : '';
     const onCard = `:enable='gte(t,${bodyEnd.toFixed(3)})'`;
     for (const [logos, x, tag] of [
-      [brandLogos, `${margin}`, 'b'],
-      [dealerLogos, `W-w-${margin}`, 'd'],
+      [leftLogos, `${margin}`, 'b'],
+      [rightLogos, `W-w-${margin}`, 'd'],
     ] as const) {
       if (!logos) continue;
       parts.push(`[${vCur}][${logos.colour}:v]overlay=${x}:${margin}${onFilm}[v${tag}]`);

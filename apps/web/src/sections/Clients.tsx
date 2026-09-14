@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import {
+import { LOGO_SLOTS, logoLayout, logosOn,
   suggestDisplayName,
   defaultFooterText,
   usualActorFor,
@@ -541,7 +541,7 @@ export function ClientsSection() {
               <div className="field-grid">
                 <Field
                   label="Dealership logo"
-                  hint="Overlaid top-right on every video — in colour over the film, in white over the end card. Any file works: the background is taken off when it is uploaded."
+                  hint="Overlaid on every video where Logo placement below puts it — in colour over the film, in white over the end card. Any file works: the background is taken off when it is uploaded."
                 >
                   <div className="thumbs">
                     {draft.logo && (
@@ -567,7 +567,7 @@ export function ClientsSection() {
                   hint={
                     draft.brandLogoSource
                       ? `Pulled from ${draft.brandLogoSource}. Upload the dealership's own file if this is not the one they use.`
-                      : 'Overlaid top-left — in colour over the film, in white over the end card. Pulled automatically when there is none, or upload one: the background is taken off.'
+                      : 'Overlaid where Logo placement below puts it — in colour over the film, in white over the end card. Pulled automatically when there is none, or upload one: the background is taken off.'
                   }
                 >
                   <div className="thumbs">
@@ -597,6 +597,52 @@ export function ClientsSection() {
                   </div>
                 </Field>
               </div>
+              <Field
+                label="Logo placement"
+                hint="Which top corner each logo takes on this client's films, or Off to leave it out. Two logos on one side sit next to each other, the brand first. The end card uses the same places."
+              >
+                <div className="logo-place">
+                  <div className="logo-place-rows">
+                    {(['dealer', 'brand'] as const).map((k) => {
+                      const place = logoLayout(draft.logoPlacement);
+                      return (
+                        <div className="logo-place-row" key={k}>
+                          <span>{k === 'dealer' ? 'Dealership logo' : 'Brand logo'}</span>
+                          <div className="seg">
+                            {LOGO_SLOTS.map((slot) => (
+                              <button
+                                key={slot.id}
+                                type="button"
+                                className={place[k] === slot.id ? 'on' : ''}
+                                onClick={() => set({ logoPlacement: { ...place, [k]: slot.id } })}
+                              >
+                                {slot.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="logo-frame" role="img" aria-label="Where the logos sit on the film">
+                    {(['left', 'right'] as const).map((side) => (
+                      <div key={side} className={`logo-corner ${side}`}>
+                        {logosOn(side, logoLayout(draft.logoPlacement)).map((k) => {
+                          const img = k === 'brand' ? draft.brandLogo : draft.logo;
+                          return img ? (
+                            <img key={k} src={logoView(img).url} alt={k === 'brand' ? 'Brand logo' : 'Dealership logo'} />
+                          ) : (
+                            <span key={k} className="logo-ph">
+                              {k === 'brand' ? 'Brand' : 'Dealer'}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ))}
+                    <div className="logo-frame-foot" />
+                  </div>
+                </div>
+              </Field>
               <div className="toolbar">
                 <button
                   className="btn small"

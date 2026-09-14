@@ -5,7 +5,7 @@
  * layer on top.
  */
 
-import type { Beat, Gender, CategoryId, NarrationKey, AspectRatio, Resolution, TextLang } from './types.js';
+import type { Beat, Gender, CategoryId, NarrationKey, AspectRatio, Resolution, TextLang, LogoPlacement } from './types.js';
 
 /** A stored image: bytes live in Cloud Storage, this is the handle. */
 export interface StoredImage {
@@ -273,6 +273,12 @@ export interface ClientProfile {
   brandLogoWhite?: StoredImage;
   /** Where an automatically pulled brand logo came from, so it can be checked and replaced. */
   brandLogoSource?: string;
+  /**
+   * Where each logo goes on this client's films: top-left, top-right or off. Most
+   * clients want only their own logo, and not always on the right. Unset is the
+   * brand top-left and the dealership top-right.
+   */
+  logoPlacement?: Partial<LogoPlacement>;
   /** Showroom / delivery / team photos, each filed under the part of the place it shows. */
   photos: StoredImage[];
   /**

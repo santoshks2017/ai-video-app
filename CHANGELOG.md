@@ -1,10 +1,19 @@
 # Changelog
 
-Current version: **3.5**
+Current version: **3.6**
 
 Minor bumps for every shipped change; the major number moves only for an
 overhaul of how the app works. Generated from `packages/shared/src/changelog.ts`
 — edit that, then run `npm run changelog`.
+
+## 3.6 — What each campaign earns, actors drawn from a sentence, and logos where the client wants them
+_2026-09-14_
+
+- Analytics, for admins: what every campaign brought in, what it cost to make, and the gross margin that leaves — margin % is (revenue − cost) ÷ revenue — by dealer, city, state, brand and use case. Pick today, this week, this month, last month, the last 30 or 90 days, this year, all time or a date range, and see revenue and cost over time daily, weekly or monthly. Cost is what every generation run was billed, failed runs and retakes included; runs an admin has hidden are left out.
+- Behind the money, how the making went. Quality shows first-time right against the 90% target, attempts per campaign, the failure rate, and what the retries and failures cost. Models shows each model’s success rate, cost, rupees per second of video and render time; Team shows each person’s attempts, failures and spend. Every table sorts, and downloads as a CSV.
+- A campaign is a paid pack or a trial pack. Project now asks for both: the pack, and for a paid pack the campaign revenue, which it needs before it can be generated. Analytics shows paid packs by default, with trial packs or everything a click away, and the Campaigns table takes a campaign’s revenue and its pack right where you read them — saved onto the project, and taken in by an open project rather than written back over.
+- An actor from a sentence. Describe the presenter in Actors and the profile is filled in from it — name, gender, age, attire, look, voice, and the new personality and key traits — and Google’s image model, Nano Banana 2 where the key has it, draws the profile sheet that becomes the reference photo: a hero shot with the profile, five expressions, four full views and a close-up of the same person. A redraw can keep the face in the photo the actor already has. Fields can still be edited by hand and a photo uploaded instead, nothing is kept until the actor is saved, and Undo puts the last profile back.
+- Each logo goes where the client wants it. A client’s dealership logo and brand logo each take the top-left corner, the top-right, or neither — most clients want only their own logo, and not always on the right. Two logos on one side sit next to each other, the brand first, and the end card uses the same places. Clients shows a small frame of where they will land. A client left as it was keeps the brand top-left and the dealership top-right.
 
 ## 3.5 — A real editor, logos without boxes, and a closing line that finishes
 _2026-09-14_

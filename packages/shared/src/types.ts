@@ -223,6 +223,14 @@ export interface BrandLineup {
 }
 
 /** The structured brief — the single user input (P0.3). */
+/** One logo's place on the film: a top corner, or not shown at all. */
+export type LogoSlot = 'left' | 'right' | 'off';
+
+export interface LogoPlacement {
+  brand: LogoSlot;
+  dealer: LogoSlot;
+}
+
 export interface Brief {
   /** Set when the brief names no specific model. */
   lineup?: BrandLineup;
@@ -236,6 +244,8 @@ export interface Brief {
   modelSpecific: boolean;
   /** False when this film deliberately has nobody on camera, whatever the narration mode. */
   useActor?: boolean;
+  /** Where the client's logos go on the film. Unset: brand top-left, dealership top-right. */
+  logoPlacement?: LogoPlacement;
   carModel?: string;
   /**
    * The hero car's paint, as a person says it ("Stealth Black"). The library's

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
-import {
+import { logoLayout,
   brandMatches,
   isPromptOnly,
   estimateCost,
@@ -1629,10 +1629,13 @@ function buildOverlay(
 ): BrandOverlay {
   const copy = overlayCopy(brief);
   const plan = buildPrompt(brief, { sceneOverrides })?.scenePlan;
+  // Each logo in the corner the client asked for — and a logo switched off, nowhere.
+  const logos = logoLayout(brief.logoPlacement);
   return {
     footerText: copy.footerText,
-    dealerLogo,
-    brandLogo,
+    dealerLogo: logos.dealer === 'off' ? undefined : dealerLogo,
+    brandLogo: logos.brand === 'off' ? undefined : brandLogo,
+    logoPlacement: logos,
     cards: plan ? overlayCards(plan, sceneOverrides ?? {}) : [],
     endCard:
       brief.endCardOn && copy.endCardLines.length ? { lines: copy.endCardLines, seconds: 3 } : undefined,

@@ -18,10 +18,25 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '3.6';
+export const APP_VERSION = '3.7';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '3.7',
+    date: '2026-09-15',
+    title: 'Explore everything, change nothing: viewers, a welcome and tours',
+    changes: [
+      "Viewers see everything and change nothing. A viewer is somebody being shown the app, so every section is in their menu except APIs & models. Instructions, Languages, People, Analytics and What’s new open on a blurred sketch of the page, saying the section is not available for viewer access and what it does — a sketch, never the real page, since a blur comes off with one line of CSS. In Projects, Clients, Vehicles and Actors every field reads as filled in and none can be changed: no new, save, delete, import, sync or draw.",
+      "A viewer opening a project sees how the film was made, not what it cost. Sections open and close, but nothing can be edited and the stage cannot be moved, on the board or in the project. Only the latest cut plays, without a download button; history, cost, the master prompt and its checks are not shown. The video editor opens on that cut with every tool to try — uploading and exporting say they are for creators.",
+      "What a viewer is never sent. The server leaves out of a viewer’s answers what a film cost and earned, its prompts and run details, the house instructions, the pronunciation guides and locked spellings, and each model’s pricing — so none of it can be read in the browser either. Source maps are no longer published with the app.",
+      "A welcome the first time a viewer signs in: one brief in, a finished dealer film out — the three steps from brief to storyboard to film, and twelve things the app does. It opens again from Welcome in the menu.",
+      "A tour of every page. Tour this page, in the tab bar, walks through whatever is open with a spotlight on each part: in a project, the three steps a film is made in, ending in the video editor; on a locked section, what happens there. A viewer is shown each page’s tour the first time they open it.",
+      "Admins can see the app as a viewer does, from See as a viewer in the menu, and go back with one click. It hides on screen what a viewer is not sent; the server still knows you as an admin.",
+      "The Gemini key can be changed in APIs & models, the way the Seedance key is: Save key, Test and Remove on the Gemini connection. A saved key is used for every Google call — scripts, storyboard drawings, photo checks, imports and every Gemini video model — and Remove goes back to the key set on the service. Saving a connection’s name can no longer undo whether it has a key.",
+      "The Premium pass works, at any length. Seedance takes a reference video only as a web link and only at 720p and up, so each part is uploaded and handed over as a link, scaled up from smaller cuts. A film over 30 seconds is cut at its scene changes into parts under 30 seconds, rendered three at a time, each held to the exact length it replaces, joined, and given back the original film’s sound — the re-rendered picture had been silent. Seedance refuses footage it takes for a real person, and says so.",
+    ],
+  },
   {
     version: '3.6',
     date: '2026-09-14',

@@ -610,10 +610,13 @@ for (const name of COLLECTIONS) {
       return reply.code(400).send({ code: 'bad-request', message: 'Body required' });
     }
     let body = req.body;
-    if (name === 'credentials' && typeof body.id === 'string') {
+    // A new record arrives with a blank id, and upsert makes it one — there is nothing
+    // stored to look up, and Firestore refuses a blank document path outright.
+    const existingId = typeof body.id === 'string' && body.id.trim() ? body.id : undefined;
+    if (name === 'credentials' && existingId) {
       // Whether a connection has a key is the server's to say. A page opened before the
       // key was saved still holds the old answer, and saving the name would put it back.
-      const prior = await getOne<Record<string, unknown>>('credentials', body.id);
+      const prior = await getOne<Record<string, unknown>>('credentials', existingId);
       if (prior) {
         body = { ...body };
         for (const k of ['hasKey', 'usesEnvKey'] as const) {
@@ -622,11 +625,11 @@ for (const name of COLLECTIONS) {
         }
       }
     }
-    if (name === 'projects' && typeof body.id === 'string') {
+    if (name === 'projects' && existingId) {
       // What a project has cost is a running total the server keeps. The editor saves
       // the whole project, and a copy loaded before the last run finished — or a
       // creator's, who is never sent the total — would write the old figure back over it.
-      const prior = await getOne<Record<string, unknown>>('projects', body.id);
+      const prior = await getOne<Record<string, unknown>>('projects', existingId);
       if (prior) body = { ...body, totalCostInr: prior.totalCostInr, generationCount: prior.generationCount };
     }
     return await upsert(name, body);

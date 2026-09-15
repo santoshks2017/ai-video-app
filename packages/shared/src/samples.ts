@@ -51,6 +51,65 @@ export const SAMPLE_FIELDS: Record<CategoryId, Record<string, string>> = {
     customerContext: 'a first-time buyer who bought the car for a daily 40 km commute',
     specificMoment: 'how quick and paperless the loan approval was — sorted in one visit',
   },
+
+  oemlaunch: {
+    launchPhase: 'Unveil — the full reveal',
+    launchDate: '15 October',
+    hook: 'a new design language for the brand’s electric range',
+    priceOrAmount: 'starting at seven lakh ninety nine thousand',
+  },
+  oemproduct: {
+    promise: 'the SUV that makes a long drive feel short',
+    proof1: '600 km of range on a charge',
+    proof2: 'level 2 ADAS as standard',
+    proof3: 'ventilated seats front and rear',
+    setting: 'a coastal highway at first light',
+  },
+  oemdesign: {
+    designIdea: 'the brand’s new electric design language, drawn around light',
+    designLine1: 'connected LED signature across the nose',
+    designLine2: 'flush door handles and a single shoulder line',
+    designLine3: 'full-width tail bar',
+  },
+  oemtech: {
+    featureName: 'level 2 ADAS',
+    howItWorks: 'a radar and camera watch the lane and the car ahead, holding speed and distance for you',
+    whyItMatters: 'a two-hour highway run stops being tiring',
+  },
+  oemev: {
+    concern: 'Charging time and access',
+    numbers: '20 to 80 percent in 20 minutes on a fast charger',
+    proofDrive: 'a Delhi to Jaipur run with one coffee stop',
+  },
+  oemsafety: {
+    rating: '5-star Bharat NCAP, adult and child',
+    safetyKit1: 'six airbags as standard',
+    safetyKit2: 'electronic stability control',
+    scenario: 'the school run in the rain',
+  },
+  oemowner: {
+    owner: 'a Coimbatore textile trader, eight years with the brand',
+    whatFor: '300 km a week between the mill and the city',
+    moment: 'a monsoon night drive home with the family asleep',
+  },
+  oembrand: {
+    occasion: '30 years in India, ten million cars',
+    idea: 'the cars people grew up in are still on the road',
+    proofPoint1: 'built in India since 1996',
+    proofPoint2: 'a service network in 1,200 towns',
+  },
+  oemoffer: {
+    offer1: 'benefits up to fifty thousand',
+    onModels1: 'across the SUV range',
+    period: 'until 31 October',
+    terms: 'on select variants',
+  },
+  oemservice: {
+    campaign: 'monsoon care camp',
+    included1: 'free 40-point check',
+    included2: 'wiper and brake inspection',
+    period: '10 to 20 July, at all authorised workshops',
+  },
 };
 
 /** Shared brief essentials — the prefill fills any of these that are still blank. */

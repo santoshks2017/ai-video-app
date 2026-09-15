@@ -93,6 +93,8 @@ export interface ScriptRequest {
   subject: ScriptSubject;
   gender: 'female' | 'male';
   dealerName: string;
+  /** A dealership's film, or the manufacturer's own. Unset is a dealership. */
+  clientKind?: 'dealer' | 'oem';
   brandModel: string;
   city?: string;
   cta?: string;
@@ -301,7 +303,7 @@ function sceneBlock(req: ScriptRequest): string[] {
 
 function angleInstruction(req: ScriptRequest): string {
   return [
-    `You are a creative director at an advertising agency, working on a ${req.subject.useCase} film for an Indian car dealership. Before anyone writes a line, you decide what the film is actually about.`,
+    `You are a creative director at an advertising agency, working on a ${req.subject.useCase} film for ${req.clientKind === 'oem' ? 'an Indian vehicle manufacturer' : 'an Indian car dealership'}. Before anyone writes a line, you decide what the film is actually about.`,
     '',
     ...subjectBlock(req),
     '',
@@ -336,7 +338,7 @@ function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string
       : 'The presenter is a man — masculine verb forms throughout.';
 
   return [
-    `You are a senior advertising copywriter who writes ${lang} scripts for Indian car dealership films. Your lines sound like a person who knows cars talking to someone who is thinking of buying one — never like a brochure being read aloud.`,
+    `You are a senior advertising copywriter who writes ${lang} scripts for ${req.clientKind === 'oem' ? 'Indian automotive brand films' : 'Indian car dealership films'}. Your lines sound like a person who knows cars talking to someone who is thinking of buying one — never like a brochure being read aloud.`,
     '',
     ...subjectBlock(req),
     '',
@@ -425,7 +427,7 @@ function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string
 function editInstruction(req: ScriptRequest, angle: ScriptAngle | null, draft: { index: number; line: string }[]): string {
   const budget = new Map(req.scenes.map((sc) => [sc.index, sc.words]));
   return [
-    `You are the copy chief. A writer has handed you a ${req.language.name} script for an Indian car dealership film. Your job is to make it publishable — cut what is weak, keep what works, and hand back the same number of lines.`,
+    `You are the copy chief. A writer has handed you a ${req.language.name} script for ${req.clientKind === 'oem' ? 'an Indian automotive brand film' : 'an Indian car dealership film'}. Your job is to make it publishable — cut what is weak, keep what works, and hand back the same number of lines.`,
     '',
     ...subjectBlock(req),
     '',

@@ -249,6 +249,8 @@ export function ClientsSection() {
    * logo fields are taken back, so nothing being typed into the client is lost.
    */
   const canEdit = useApp((s) => s.can('creator'));
+  /** A manufacturer has no counter to walk into: no phone, no address, no listing. */
+  const isOem = (draft?.kind ?? 'dealer') === 'oem';
   const isAdmin = useApp((s) => s.can('admin'));
   useEffect(() => {
     const d = draft;
@@ -518,6 +520,21 @@ export function ClientsSection() {
           <Lock>
           {err && <Banner kind="bad">{err}</Banner>}
 
+          <Field label="Client type" hint="A dealership sells in one city, and its films send you to its showroom. A manufacturer's films are the marque's own and run everywhere.">
+            <div className="seg">
+              {(['dealer', 'oem'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={(draft.kind ?? 'dealer') === k ? 'on' : ''}
+                  onClick={() => set({ kind: k })}
+                >
+                  {k === 'dealer' ? 'Dealership' : 'Manufacturer'}
+                </button>
+              ))}
+            </div>
+          </Field>
+
           <Field
             label="Import details"
             hint="The website is read first — the logo, phone and address come from there — and the Google listing fills in whatever the website does not have, and brings showroom photos. Only a Google link? The website it names is read too."
@@ -529,12 +546,14 @@ export function ClientsSection() {
                 placeholder="Website — www.dealer.com"
                 aria-label="Website"
               />
-              <input
-                value={gmbInput}
-                onChange={(e) => setGmbInput(e.target.value)}
-                placeholder="Google Maps link, or “Dealer name, city”"
-                aria-label="Google Business Profile"
-              />
+              {!isOem && (
+                <input
+                  value={gmbInput}
+                  onChange={(e) => setGmbInput(e.target.value)}
+                  placeholder="Google Maps link, or “Dealer name, city”"
+                  aria-label="Google Business Profile"
+                />
+              )}
               <button
                 className="btn small"
                 type="button"
@@ -572,7 +591,10 @@ export function ClientsSection() {
           <div className="divider" />
 
           <div className="field-grid">
-            <Field label="Client / showroom name" hint="Full name, as on the Google listing.">
+            <Field
+              label={isOem ? 'Brand name' : 'Client / showroom name'}
+              hint={isOem ? 'The manufacturer, as it is written.' : 'Full name, as on the Google listing.'}
+            >
               <input
                 value={draft.name}
                 onChange={(e) => set({ name: e.target.value })}
@@ -609,6 +631,53 @@ export function ClientsSection() {
                 <option value="bike">Bikes &amp; scooters</option>
               </select>
             </Field>
+            {isOem && (
+              <>
+                <Field label="Segment" hint="Mass, premium or luxury. It sets the tone of the copy — a luxury film never mentions price — never which use cases exist.">
+                  <select
+                    value={draft.segment ?? 'mass'}
+                    onChange={(e) => set({ segment: e.target.value as ClientProfile['segment'] })}
+                  >
+                    <option value="mass">Mass</option>
+                    <option value="premium">Premium</option>
+                    <option value="luxury">Luxury</option>
+                  </select>
+                </Field>
+                <Field label="Tagline" hint="The brand line a film signs off with, under the marque on the end card.">
+                  <input
+                    value={draft.tagline ?? ''}
+                    onChange={(e) => set({ tagline: e.target.value })}
+                    placeholder="e.g. Beyond Mobility"
+                  />
+                </Field>
+                <Field label="YouTube" hint="Where their own films are posted — kept for reference, and to judge the house style against.">
+                  <input
+                    value={draft.social?.youtube ?? ''}
+                    onChange={(e) => set({ social: { ...draft.social, youtube: e.target.value } })}
+                    placeholder="e.g. youtube.com/@brand"
+                  />
+                </Field>
+                <Field label="Instagram">
+                  <input
+                    value={draft.social?.instagram ?? ''}
+                    onChange={(e) => set({ social: { ...draft.social, instagram: e.target.value } })}
+                    placeholder="e.g. instagram.com/brand"
+                  />
+                </Field>
+                <div className="span">
+                  <Field
+                    label="How their films look"
+                    hint="A sentence or two on the house style — it goes into every prompt for this brand, so write what a director would need: the look, the pace, what they never do."
+                  >
+                    <textarea
+                      value={draft.styleNote ?? ''}
+                      onChange={(e) => set({ styleNote: e.target.value })}
+                      placeholder="e.g. cinematic, wide landscapes at golden hour, minimal voice-over, never a price on screen"
+                    />
+                  </Field>
+                </div>
+              </>
+            )}
             <Field label="City">
               <input value={draft.city ?? ''} onChange={(e) => set({ city: e.target.value })} placeholder="e.g. Jaipur" />
             </Field>
@@ -620,12 +689,16 @@ export function ClientsSection() {
                 list="ava-states"
               />
             </Field>
+            {!isOem && (
+              <>
             <Field label="Phone">
               <input value={draft.phone ?? ''} onChange={(e) => set({ phone: e.target.value })} placeholder="98765 43210" />
             </Field>
             <Field label="Address">
               <input value={draft.address ?? ''} onChange={(e) => set({ address: e.target.value })} placeholder="MG Road" />
             </Field>
+              </>
+            )}
             <div className="span">
               <Field
                 label="Brands"
@@ -697,6 +770,7 @@ export function ClientsSection() {
                 <div className="footer-preview">{draft.footerText?.trim() || defaultFooterText(draft) || '—'}</div>
               </Field>
 
+              {!isOem && (
               <Field label="Dealer tier" hint="Sets the copy tone on generated cards.">
                 <select value={draft.tier} onChange={(e) => set({ tier: e.target.value as ClientProfile['tier'] })}>
                   <option value="Metro Premium">Metro Premium (long, narrative)</option>
@@ -704,6 +778,7 @@ export function ClientsSection() {
                   <option value="Hyperlocal">Hyperlocal (short, minimal)</option>
                 </select>
               </Field>
+              )}
 
               <div className="field-grid">
                 <Field

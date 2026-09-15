@@ -8,6 +8,12 @@ import type { OverlayTheme } from './overlayLook.js';
  * (`legacy/dealer-video-prompt-builder.html`) and extended per PRD-ai-video-app.md.
  */
 
+/** Who the film is for: a dealership selling down the road, or the manufacturer itself. */
+export type ClientKind = 'dealer' | 'oem';
+
+/** Where a manufacturer sits. It sets the tone of the copy, never the format. */
+export type OemSegment = 'mass' | 'premium' | 'luxury';
+
 export type CategoryId =
   | 'walkaround'
   | 'feature'
@@ -17,7 +23,19 @@ export type CategoryId =
   | 'delivery'
   | 'festival'
   | 'offer'
-  | 'testimonial';
+  | 'testimonial'
+  // A manufacturer's own formats. A dealership never sees these, and an OEM never
+  // sees the showroom ones — the list follows the client.
+  | 'oemlaunch'
+  | 'oemproduct'
+  | 'oemdesign'
+  | 'oemtech'
+  | 'oemev'
+  | 'oemsafety'
+  | 'oemowner'
+  | 'oembrand'
+  | 'oemoffer'
+  | 'oemservice';
 
 /**
  * Whether a category is wired to a real video-gen API call (`automated`) or
@@ -74,7 +92,13 @@ export interface MandatoryField {
 }
 
 export interface BeatContext {
+  /** The client as a film says it: the dealership's short name, or the marque. */
   dealerShort: string;
+  /** The marque a manufacturer's film signs off with. Same as `dealerShort` for a dealership. */
+  brandName: string;
+  /** The brand line under the marque, where there is one. */
+  tagline?: string;
+  clientKind: ClientKind;
   displayDealer: string;
   displayBrandModel: string;
   cta: string;
@@ -137,6 +161,12 @@ export interface CategoryDef {
    * wish closes it.
    */
   layer?: 'theme';
+  /**
+   * Whose list this use case appears in. Unset is a dealership's, which is every use
+   * case that existed before manufacturers did; 'both' is for the ones that serve
+   * either, like a festival.
+   */
+  audience?: ClientKind | 'both';
 }
 
 export interface NarrationMode {
@@ -185,6 +215,9 @@ export interface DealerPhoto {
 
 export interface Dealer {
   id?: string;
+  /** A dealership, or the manufacturer. Unset is a dealership. */
+  kind?: ClientKind;
+  /** The dealership's trading name, or the marque. */
   dealerName: string;
   brandModel: string;
   phone?: string;
@@ -196,6 +229,14 @@ export interface Dealer {
   fakeDealer?: string;
   logo?: string;
   photos: DealerPhoto[];
+  /* ---- a manufacturer's own identity, unset for a dealership ---- */
+  /** The brand line that closes a film. */
+  tagline?: string;
+  /** Where the film sends the viewer, in place of a dealership's address and phone. */
+  website?: string;
+  segment?: OemSegment;
+  /** How this brand's own films look and sound, in the team's words. */
+  styleNote?: string;
 }
 
 /** The language rules in force for this brief, resolved from the library. */

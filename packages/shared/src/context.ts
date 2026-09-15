@@ -62,9 +62,13 @@ export function buildContext(brief: Brief): RenderContext {
     ? d.fakeDealer || d.dealerName || '[Dealership]'
     : d.dealerName || '[Dealership]';
 
+  const oem = d.kind === 'oem';
   const footer =
     brief.footer.trim() ||
-    [onScreenDealer, d.address, d.phone].map((x) => (x ?? '').trim()).filter(Boolean).join(' | ');
+    (oem ? [onScreenDealer, d.tagline, d.website] : [onScreenDealer, d.address, d.phone])
+      .map((x) => (x ?? '').trim())
+      .filter(Boolean)
+      .join(' | ');
 
   return {
     brief,
@@ -73,10 +77,15 @@ export function buildContext(brief: Brief): RenderContext {
     maxChunk: Math.max(3, Math.round(brief.maxChunkSec) || 10),
     aspect: brief.aspect,
     music: brief.music.trim(),
-    cta: adaptTrial(brief.cta.trim() || 'Book your test drive today', vehicle),
+    cta: adaptTrial(
+      brief.cta.trim() || (oem ? 'Find your nearest authorised showroom' : 'Book your test drive today'),
+      vehicle,
+    ),
     visStyle:
       brief.visualStyle.trim() ||
-      'Bright premium modern showroom, glossy floors, realistic reflections, energetic dealership-ad feel',
+      (oem
+        ? 'Cinematic brand film — real locations, natural light, the car as the hero, nothing of a showroom in frame'
+        : 'Bright premium modern showroom, glossy floors, realistic reflections, energetic dealership-ad feel'),
     endcardOn: brief.endCardOn,
     endcard: brief.endCard.trim(),
     footer,
@@ -96,6 +105,9 @@ export function buildContext(brief: Brief): RenderContext {
 export function beatContext(ctx: RenderContext) {
   return {
     dealerShort: ctx.dealerShort,
+    brandName: ctx.brief.dealer.kind === 'oem' ? ctx.dealerShort : ctx.displayBrandModel,
+    tagline: ctx.brief.dealer.tagline,
+    clientKind: ctx.brief.dealer.kind ?? 'dealer',
     displayDealer: ctx.displayDealer,
     displayBrandModel: ctx.displayBrandModel,
     cta: ctx.cta,

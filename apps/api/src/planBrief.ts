@@ -14,7 +14,9 @@
 
 import type { TokenUsage } from '@ava/shared';
 import { recordUsage } from './spendLog.js';
-import { CATEGORIES, CATEGORY_BY_ID, NARRATION, type BriefPlan, type CategoryId } from '@ava/shared';
+import { CATEGORIES, CATEGORY_BY_ID, NARRATION, type BriefPlan, type CategoryId,
+  categoriesFor,
+} from '@ava/shared';
 import { resolveTextModel } from './script.js';
 
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
@@ -31,14 +33,26 @@ export class PlanError extends Error {
 
 export interface PlanContext {
   prompt: string;
-  client?: { name?: string; displayName?: string; brand?: string; brands?: string[]; city?: string; vehicleKind?: string } | null;
+  client?: {
+    name?: string;
+    displayName?: string;
+    brand?: string;
+    brands?: string[];
+    city?: string;
+    vehicleKind?: string;
+    /** A dealership, or the manufacturer itself. Unset is a dealership. */
+    kind?: 'dealer' | 'oem';
+    segment?: string;
+    tagline?: string;
+    styleNote?: string;
+  } | null;
   cars: { brand: string; model: string; kind?: string; colours?: { name: string }[]; variants?: { name: string }[] }[];
   actors: { name: string; gender?: string; style?: string }[];
 }
 
 /** What each use case is, and the exact keys its fields are stored under. */
-function useCaseBlock(): string {
-  return CATEGORIES.map((c) => {
+function useCaseBlock(kind: 'dealer' | 'oem'): string {
+  return categoriesFor(kind).map((c) => {
     const fields = c.fields.map((f) => {
       if (f.type === 'list' && f.list) {
         const sub = f.list.sub ? `, and ${f.list.sub.id}1…${f.list.sub.id}${f.list.max} — ${f.list.sub.label}` : '';
@@ -54,6 +68,7 @@ function useCaseBlock(): string {
 }
 
 function instruction(ctx: PlanContext): string {
+  const oem = ctx.client?.kind === 'oem';
   const cars = ctx.cars
     .slice(0, 80)
     .map(
@@ -67,7 +82,9 @@ function instruction(ctx: PlanContext): string {
   const brands = ctx.client?.brands?.length ? ctx.client.brands.join(', ') : (ctx.client?.brand ?? '');
 
   return [
-    'You set up a video project for an Indian vehicle dealership from the brief its designer wrote.',
+    oem
+      ? 'You set up a video project for an Indian vehicle manufacturer from the brief its marketing team wrote.'
+      : 'You set up a video project for an Indian vehicle dealership from the brief its designer wrote.',
     'You decide which use cases the film needs and fill in what the brief actually says. You do not write the script.',
     '',
     '## THE BRIEF',
@@ -75,17 +92,21 @@ function instruction(ctx: PlanContext): string {
     '',
     ...(ctx.client
       ? [
-          '## THE DEALER',
-          `  ${ctx.client.displayName || ctx.client.name || 'this dealership'}${brands ? ` — ${brands}` : ''}${
-            ctx.client.city ? `, ${ctx.client.city}` : ''
-          }. Sells ${ctx.client.vehicleKind === 'bike' ? 'bikes and scooters' : 'cars'}.`,
+          oem ? '## THE BRAND' : '## THE DEALER',
+          `  ${ctx.client.displayName || ctx.client.name || (oem ? 'this manufacturer' : 'this dealership')}${
+            brands ? ` — ${brands}` : ''
+          }${oem ? '' : ctx.client.city ? `, ${ctx.client.city}` : ''}. ${
+            oem ? 'Makes' : 'Sells'
+          } ${ctx.client.vehicleKind === 'bike' ? 'bikes and scooters' : 'cars'}.${
+            oem && ctx.client.segment ? ` A ${ctx.client.segment} brand.` : ''
+          }${oem && ctx.client.styleNote ? ` Their films: ${ctx.client.styleNote}` : ''}`,
           '',
         ]
       : []),
     ...(cars ? ['## VEHICLES IN THE LIBRARY — pick only from these', cars, ''] : []),
     ...(actors ? ['## PRESENTERS IN THE LIBRARY — pick only from these', actors, ''] : []),
     '## THE USE CASES AND THEIR FIELDS',
-    useCaseBlock(),
+    useCaseBlock(oem ? 'oem' : 'dealer'),
     '',
     '## HOW TO CHOOSE',
     '- One or two use cases is the usual answer; three at the very most. A festival, a season or an occasion is festival.',

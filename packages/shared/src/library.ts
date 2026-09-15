@@ -6,7 +6,7 @@
  */
 
 import { VIDEO_PRICES } from './pricing.js';
-import type { Beat, Gender, CategoryId, NarrationKey, AspectRatio, Resolution, TextLang, LogoPlacement } from './types.js';
+import type { Beat, Gender, CategoryId, NarrationKey, AspectRatio, Resolution, TextLang, LogoPlacement, ClientKind, OemSegment } from './types.js';
 import type { CardPosition } from './overlayLook.js';
 
 /** A stored image: bytes live in Cloud Storage, this is the handle. */
@@ -230,6 +230,11 @@ export interface CarModelProfile {
 
 export interface ClientProfile {
   id: string;
+  /**
+   * A dealership, or a manufacturer. Unset is a dealership — every client saved
+   * before manufacturers existed is one, and nothing about their films changes.
+   */
+  kind?: ClientKind;
   /** Full/legal name, e.g. as it appears on the Google listing. */
   name: string;
   /**
@@ -304,7 +309,16 @@ export interface ClientProfile {
    * composited in post, so it is always legible.
    */
   footerText?: string;
-  /** The dealership's own website — read first when details are imported. */
+  /* ---- a manufacturer: no showroom, no counter, a country-wide audience ---- */
+  /** Mass, premium or luxury. It sets the tone of the copy, never the format. */
+  segment?: OemSegment;
+  /** The brand line a film signs off with, e.g. "Sabka Sapna". */
+  tagline?: string;
+  /** Where their own films are posted. Kept for reference, and to judge the style against. */
+  social?: { youtube?: string; instagram?: string; facebook?: string; x?: string };
+  /** How their films look and sound, in a sentence or two. It reaches every prompt. */
+  styleNote?: string;
+  /** The dealership's own website — read first when details are imported. For a manufacturer, the brand site. */
   website?: string;
   websiteSyncedAt?: number;
   /** Google Business Profile import. */

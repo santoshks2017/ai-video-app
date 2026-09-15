@@ -128,6 +128,8 @@ import {
   miscReport,
   type UsageFact,
   scriptOf,
+  categoriesFor,
+  CATEGORIES,
 } from '@ava/shared';
 
 function base(overrides: Partial<Brief> = {}): Brief {
@@ -1760,4 +1762,34 @@ test('every built-in language is a plain-spelled guide for the respelling pass, 
   assert.equal(scriptOf('ta'), 'Tamil script');
   assert.equal(scriptOf('mr'), 'Devanagari');
   assert.equal(scriptOf(undefined), 'Devanagari', 'a project with no language speaks Hindi');
+});
+
+test('a manufacturer picks from its own use cases, and its films sign off with the marque', () => {
+  const dealerIds = categoriesFor('dealer').map((c) => c.id);
+  const oemIds = categoriesFor('oem').map((c) => c.id);
+  assert.ok(dealerIds.includes('walkaround') && !dealerIds.includes('oemlaunch'), 'a dealership sees its own');
+  assert.ok(oemIds.includes('oemlaunch') && !oemIds.includes('walkaround'), 'a manufacturer sees its own');
+  assert.ok(dealerIds.includes('festival') && oemIds.includes('festival'), 'a festival serves both');
+  assert.equal(new Set([...dealerIds, ...oemIds]).size, CATEGORIES.length, 'every use case belongs to somebody');
+
+  const brief: Brief = {
+    ...base({ categories: ['oemproduct'], narration: 'presenter', durationSec: 20, maxChunkSec: 10 }),
+  };
+  brief.dealer = {
+    ...brief.dealer,
+    kind: 'oem',
+    dealerName: 'Hyundai',
+    tagline: 'Beyond Mobility',
+    website: 'hyundai.co.in',
+    address: '',
+    phone: '',
+  };
+  const copy = overlayCopy(brief);
+  assert.equal(copy.footerText, 'Hyundai  ·  Beyond Mobility  ·  hyundai.co.in', 'the marque, its line and its site');
+  assert.deepEqual(copy.endCardLines, ['Hyundai', 'Beyond Mobility', 'hyundai.co.in']);
+
+  const text = buildPrompt(brief)!.parts[0]!.text;
+  assert.match(text, /automotive brand film/, 'it is a brand film, not a dealership video');
+  assert.match(text, /Manufacturer: Hyundai/);
+  assert.doesNotMatch(text, /Dealership: /);
 });

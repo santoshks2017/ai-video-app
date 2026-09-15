@@ -7,6 +7,7 @@ import {
   NARRATION,
   buildPrompt,
   applyBriefPlan,
+  categoriesFor,
   scriptOf,
   buildBeats,
   buildContext,
@@ -691,6 +692,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const fit = formatFit(brief?.durationSec ?? project.spec.durationSec, project.spec.aspect);
   const parts = built?.parts ?? [];
   const sells = client?.vehicleKind ?? 'car';
+  // A dealership and a manufacturer make different films, so each picks from its own list.
+  const pickableCategories = categoriesFor(client?.kind);
   // A dealer can sell several brands; every one of them can be filmed.
   const clientBrands = (client?.brands?.length ? client.brands : [client?.brand]).filter((b): b is string => Boolean(b?.trim()));
   const pickableVehicles = cars.filter(
@@ -1086,7 +1089,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               </Banner>
             )}
             <div className="cat-grid">
-              {CATEGORIES.map((c) => {
+              {pickableCategories.map((c) => {
                 const on = project.useCases.includes(c.id);
                 return (
                   <div key={c.id} className={`cat${on ? ' on' : ''}`} onClick={() => toggleUseCase(c.id)}>

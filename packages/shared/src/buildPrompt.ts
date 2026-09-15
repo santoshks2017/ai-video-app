@@ -307,7 +307,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
 
     if (isFirst) {
       L.push(
-        `Create a ${partDuration}-second ${ctx.aspect} photorealistic Indian automotive dealership video` +
+        `Create a ${partDuration}-second ${ctx.aspect} photorealistic Indian automotive ${
+          brief.dealer.kind === 'oem' ? 'brand film' : 'dealership video'
+        }` +
           (brief.dealer.dealerName ? ` for ${brief.dealer.dealerName}` : '') +
           '.',
       );
@@ -317,6 +319,12 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         );
       else if (mode.speaks) L.push(CLOSING_BEAT);
       L.push(`Video type: ${catLabels.join(' + ')}.`);
+      if (brief.dealer.styleNote?.trim())
+        L.push(`House style, taken from the brand's own films: ${brief.dealer.styleNote.trim()}`);
+      if (brief.dealer.kind === 'oem')
+        L.push(
+          "This is the manufacturer's own film, not a dealership's: no showroom signage, no dealership name, no local address and no phone number anywhere in frame.",
+        );
     } else {
       L.push(
         `EXTEND the previously generated video by exactly ${partDuration} more seconds. Continue seamlessly from the exact last frame — same subject, same car, same location, same lighting and camera language. Do not restart, reset, cut back to the beginning, or reintroduce the scene.`,
@@ -420,14 +428,22 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     L.push('');
     L.push('## BRANDING');
     if (ctx.useFake) {
-      L.push(`Use fictional branding only: ${ctx.displayBrandModel} — Dealership: ${ctx.displayDealer}.`);
+      L.push(
+        `Use fictional branding only: ${ctx.displayBrandModel} — ${
+          brief.dealer.kind === 'oem' ? 'Manufacturer' : 'Dealership'
+        }: ${ctx.displayDealer}.`,
+      );
       L.push(
         'Do NOT render any real automotive manufacturer logo, wordmark or badge anywhere in this clip' +
           (brief.dealer.dealerName ? `, and do not use ${brief.dealer.dealerName}'s real branding` : '') +
           '.',
       );
     } else {
-      L.push(`Brand and model: ${ctx.displayBrandModel}. Dealership: ${ctx.displayDealer}.`);
+      L.push(
+        `Brand and model: ${ctx.displayBrandModel}. ${
+          brief.dealer.kind === 'oem' ? 'Manufacturer' : 'Dealership'
+        }: ${ctx.displayDealer}.`,
+      );
     }
 
     L.push('');
@@ -565,7 +581,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     important.push('No warped text, no garbled letters, no distorted vehicle geometry.');
     important.push('Realistic human motion — natural walking, natural gestures, no floating or sliding.');
     if (isFirst)
-      important.push('The result must look like a professionally filmed Indian dealership reel, not an AI montage.');
+      important.push(
+        `The result must look like a professionally filmed Indian ${
+          brief.dealer.kind === 'oem' ? 'brand film' : 'dealership reel'
+        }, not an AI montage.`,
+      );
     if (!isFirst) important.push('Continue the previous clip exactly — same subject, same location, same grade.');
     if (attachments.length)
       important.push(
@@ -601,7 +621,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     // reference frame so the character / car / setting don't change across the cut.
     const C: string[] = [];
     C.push(
-      `Generate a ${partDuration}-second ${ctx.aspect} segment that continues an ongoing Indian car-dealership video.`,
+      `Generate a ${partDuration}-second ${ctx.aspect} segment that continues an ongoing Indian ${
+        brief.dealer.kind === 'oem' ? 'automotive brand film' : 'car-dealership video'
+      }.`,
     );
     C.push(
       'The FIRST frame must match the supplied reference frame EXACTLY: ' +

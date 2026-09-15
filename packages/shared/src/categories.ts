@@ -17,7 +17,8 @@
  *  - role     : its place in one ad's arc (open / setup / point / proof / close)
  */
 
-import type { Beat, BeatContext, CategoryDef, CategoryId } from './types.js';
+import type { Beat, BeatContext, CategoryDef, CategoryId, ClientKind } from './types.js';
+import { OEM_CATEGORIES } from './oemCategories.js';
 
 export function stripSuffix(value: string | undefined, suffix: string): string {
   let v = String(value ?? '').trim();
@@ -521,6 +522,7 @@ export const CATEGORIES: CategoryDef[] = [
   {
     id: 'festival',
     label: 'Festival / Occasion',
+    audience: 'both',
     // Picked with other use cases, the festival is the setting — see buildBeats.
     layer: 'theme',
     mode: 'automated',
@@ -746,7 +748,21 @@ export const CATEGORIES: CategoryDef[] = [
       },
     ],
   },
+
+  ...OEM_CATEGORIES,
 ];
+
+/**
+ * The use cases a client of this kind picks from.
+ *
+ * A dealership's films and a manufacturer's are different work — a showroom
+ * walkaround means nothing to a marque, and a national offer means nothing to one
+ * showroom — so each sees only its own, with the festival theme serving both.
+ */
+export function categoriesFor(kind: ClientKind | undefined): CategoryDef[] {
+  const want: ClientKind = kind === 'oem' ? 'oem' : 'dealer';
+  return CATEGORIES.filter((c) => (c.audience ?? 'dealer') === want || c.audience === 'both');
+}
 
 export const CATEGORY_BY_ID: Record<CategoryId, CategoryDef> = Object.fromEntries(
   CATEGORIES.map((c) => [c.id, c]),

@@ -10,7 +10,7 @@ import { overlayTheme } from './overlayLook.js';
 import { logoLayout } from './logoLayout.js';
 import { adaptTrial, clampPace } from './context.js';
 import { suggestDuration } from './duration.js';
-import type { Brief, DealerPhoto, CategoryId } from './types.js';
+import type { Brief, DealerPhoto, CategoryId, ClientKind } from './types.js';
 import type {
   VehicleKind,
   ActorProfile,
@@ -247,7 +247,12 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   if (client) {
     b.dealer = {
       id: client.id,
+      kind: client.kind ?? 'dealer',
       dealerName: client.displayName?.trim() || client.name,
+      tagline: client.tagline?.trim() || undefined,
+      website: client.website?.trim() || undefined,
+      segment: client.segment,
+      styleNote: client.styleNote?.trim() || undefined,
       brandModel: car ? `${car.brand} ${car.model}` : client.brand,
       phone: client.phone ?? '',
       tier: client.tier,
@@ -494,16 +499,31 @@ export function overlayCopy(brief: Brief): { footerText: string; endCardLines: s
   // city, phone. A full postal address (what a Google Business import returns)
   // wraps to two dense lines and reads as noise. The end card carries the
   // address in full instead.
+  // A manufacturer has no counter to walk into: its strip carries the marque, its
+  // line and its site, where a dealership's carries the name, the city and the phone.
   const footerText =
     brief.footer.trim() ||
-    defaultFooterText({ displayName: shown, city: d.city, address: d.address, phone: d.phone });
+    defaultFooterText({
+      kind: d.kind,
+      displayName: shown,
+      city: d.city,
+      address: d.address,
+      phone: d.phone,
+      tagline: d.tagline,
+      website: d.website,
+    });
 
   const endCardLines = brief.endCard.trim()
     ? brief.endCard
         .split(/\r?\n|\s*\|\s*/)
         .map((x) => adaptTrial(x.trim(), brief.vehicleKind))
         .filter(Boolean)
-    : [shown, adaptTrial(brief.cta, brief.vehicleKind), d.address, d.phone].map((x) => (x ?? '').trim()).filter(Boolean);
+    : (d.kind === 'oem'
+        ? [shown, d.tagline || adaptTrial(brief.cta, brief.vehicleKind), d.website]
+        : [shown, adaptTrial(brief.cta, brief.vehicleKind), d.address, d.phone]
+      )
+        .map((x) => (x ?? '').trim())
+        .filter(Boolean);
 
   return { footerText, endCardLines };
 }
@@ -540,13 +560,17 @@ export function suggestDisplayName(fullName: string): string {
 
 /** The short contact strip suggested for a client: name · city · phone. */
 export function defaultFooterText(c: {
+  kind?: ClientKind;
   displayName?: string;
   name?: string;
   city?: string;
   address?: string;
   phone?: string;
+  tagline?: string;
+  website?: string;
 }): string {
   const shown = (c.displayName?.trim() || c.name?.trim()) ?? '';
+  if (c.kind === 'oem') return [shown, c.tagline?.trim(), c.website?.trim()].filter(Boolean).join('  ·  ');
   const place = c.city?.trim() || lastAddressPart(c.address);
   return [shown, place, c.phone?.trim()].filter(Boolean).join('  ·  ');
 }

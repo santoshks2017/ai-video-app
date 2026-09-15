@@ -986,6 +986,7 @@ app.post<{
           presenter: [brief.actor?.style, brief.actor?.age].filter(Boolean).join(', ') || undefined,
         },
         gender: brief.actor?.gender === 'male' ? 'male' : 'female',
+        clientKind: brief.dealer.kind,
         dealerName: ctx.brief.dealer.fictionalize
           ? ctx.brief.dealer.fakeDealer || ctx.brief.dealer.dealerName
           : ctx.brief.dealer.dealerName,

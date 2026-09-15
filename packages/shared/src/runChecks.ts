@@ -87,7 +87,10 @@ export function runChecks(brief: Brief, opts: RunChecksOptions = {}): PreflightR
     checks.push({
       level: promptOnly ? 'warn' : 'bad',
       code: 'no-dealer-name',
-      text: 'No dealer name — the footer and end card will be incomplete, and the branding overlays have nothing to show.',
+      text:
+        ctx.brief.dealer.kind === 'oem'
+          ? 'No brand name — the footer and end card will be incomplete, and the branding overlays have nothing to show.'
+          : 'No dealer name — the footer and end card will be incomplete, and the branding overlays have nothing to show.',
     });
   }
 

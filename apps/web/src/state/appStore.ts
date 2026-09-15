@@ -74,6 +74,9 @@ interface AppState {
   me: SessionUser | null;
   /** Convenience: does the signed-in person clear this bar? */
   can: (needed: Role) => boolean;
+  /** An admin seeing the app as a lower role would. It only ever lowers what `can` allows. */
+  viewAs: Role | null;
+  setViewAs: (role: Role | null) => void;
   /** Every open tab stays mounted, so a generation running in one keeps running
    *  while the designer works in another. */
   tabs: Tab[];
@@ -113,7 +116,28 @@ export const useApp = create<AppState>()((set, get) => ({
   me: null,
   can: (needed) => {
     const order = { viewer: 0, creator: 1, admin: 2 } as const;
-    return order[get().me?.role ?? 'viewer'] >= order[needed];
+    const real = get().me?.role ?? 'viewer';
+    const seen = get().viewAs;
+    const role = seen && order[seen] < order[real] ? seen : real;
+    return order[role] >= order[needed];
+  },
+  viewAs: (() => {
+    try {
+      const v = sessionStorage.getItem('ava.viewAs');
+      return v === 'viewer' || v === 'creator' ? v : null;
+    } catch {
+      return null;
+    }
+  })(),
+  setViewAs: (role) => {
+    try {
+      if (role) sessionStorage.setItem('ava.viewAs', role);
+      else sessionStorage.removeItem('ava.viewAs');
+    } catch {
+      /* storage unavailable — it lasts until the page is reloaded */
+    }
+    set({ viewAs: role });
+    void get().refresh();
   },
   tabs: [HOME],
   activeTabId: HOME.id,
@@ -189,6 +213,7 @@ export const useApp = create<AppState>()((set, get) => ({
       busyProjects: {},
       signedIn: false,
       me: null,
+      viewAs: null,
       actors: [],
       cars: [],
       clients: [],

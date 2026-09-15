@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AGE_BANDS, ageBandOf, type ActorProfile, type AgeBand } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty } from '../components/ui.js';
+import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Lock, useReadOnly } from '../components/ui.js';
 import { drawActorProfile, fillActorProfile, isApiError } from '../lib/client.js';
 
 /** Common enough to be worth offering; anything else can still be typed. */
@@ -14,6 +14,7 @@ function blank(): ActorProfile {
 
 export function ActorsSection() {
   const actors = useApp((s) => s.actors);
+  const readOnly = useReadOnly();
   const refresh = useApp((s) => s.refresh);
   const projects = useApp((s) => s.projects);
   const clients = useApp((s) => s.clients);
@@ -161,13 +162,20 @@ export function ActorsSection() {
             <span className="step">
               {shown.length === actors.length ? `${actors.length} saved` : `${shown.length} of ${actors.length}`}
             </span>
-            <button className="btn small primary" type="button" onClick={() => setDraft(blank())}>
+            <button
+              className="btn small primary"
+              type="button"
+              data-tour="actors-new"
+              disabled={readOnly}
+              title={readOnly ? 'Not available for viewer access' : undefined}
+              onClick={() => setDraft(blank())}
+            >
               New actor
             </button>
           </div>
         </div>
         <div className="body tight">
-          <div className="browse-bar">
+          <div className="browse-bar" data-tour="actors-filters">
             <input
               className="browse-search"
               value={q}
@@ -214,7 +222,7 @@ export function ActorsSection() {
       </div>
 
       <div className={`browse-cols${draft?.id ? ' three' : ' two'}`}>
-        <div className="browse-col">
+        <div className="browse-col" data-tour="actors-list">
           <div className="browse-col-head">
             <span>People</span>
             <span>{shown.length}</span>
@@ -245,6 +253,7 @@ export function ActorsSection() {
           title={draft.id ? 'Edit actor' : 'New actor'}
           actions={draft.id ? <Confirm onConfirm={() => del(draft.id)}>Delete</Confirm> : undefined}
         >
+          <Lock>
           {err && <div className="hint" style={{ color: 'var(--bad)', marginBottom: 8 }}>{err}</div>}
           <div className="actor-ai">
             <Field
@@ -427,8 +436,9 @@ export function ActorsSection() {
             </Section>
           </div>
 
+          </Lock>
           <div className="toolbar">
-            <button className="btn primary" type="button" disabled={saving} onClick={save}>
+            <button className="btn primary" type="button" disabled={saving || readOnly} onClick={save}>
               {saving ? 'Saving…' : 'Save actor'}
             </button>
             <button className="btn ghost" type="button" onClick={() => setDraft(null)}>

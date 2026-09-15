@@ -1515,6 +1515,105 @@ export async function hasAudio(file: string): Promise<boolean> {
 }
 
 /**
+ * Where a film cuts from one shot to the next, in seconds.
+ *
+ * Read at low resolution from how much each frame differs from the one before it. A
+ * film that has to go through Seedance in pieces is split on these, so two pieces
+ * rendered separately meet on a cut the film already had, not mid-shot, where a
+ * change in the rendering would show.
+ */
+export async function sceneCuts(clip: Buffer, threshold = 0.3): Promise<number[]> {
+  const dir = await mkdtemp(join(tmpdir(), 'ava-cuts-'));
+  try {
+    const f = join(dir, 'in.mp4');
+    await writeFile(f, clip);
+    const out = await run('ffmpeg', [
+      '-v', 'error', '-threads', FF_THREADS, '-i', f, '-an',
+      '-vf', `scale=160:-2,select='gt(scene,${threshold})',metadata=print:file=-`,
+      '-f', 'null', '-',
+    ]);
+    return [...out.matchAll(/pts_time:(\d+(?:\.\d+)?)/g)].map((m) => Number(m[1])).filter((t) => t > 0.5);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Cut a film at the given times — [0, 26.3, 42] makes two pieces. Re-encoded, so every
+ * cut lands exactly. With `shortSide`, every piece is also scaled so its shorter side is
+ * that many pixels: Seedance refuses a reference video under about 408 thousand pixels,
+ * and a film made at 360p is 230 thousand.
+ */
+export async function cutVideo(clip: Buffer, bounds: number[], shortSide?: number): Promise<Buffer[]> {
+  if (bounds.length <= 2 && !shortSide) return [clip];
+  const dir = await mkdtemp(join(tmpdir(), 'ava-cut-'));
+  try {
+    const inF = join(dir, 'in.mp4');
+    await writeFile(inF, clip);
+    const out: Buffer[] = [];
+    for (let i = 0; i + 1 < bounds.length; i++) {
+      const outF = join(dir, `piece-${i}.mp4`);
+      await run('ffmpeg', [
+        '-v', 'error', '-y', '-threads', FF_THREADS,
+        '-ss', bounds[i]!.toFixed(3), '-i', inF, '-t', (bounds[i + 1]! - bounds[i]!).toFixed(3),
+        ...(shortSide
+          ? ['-vf', `scale='if(gt(iw,ih),-2,${shortSide})':'if(gt(iw,ih),${shortSide},-2)':flags=lanczos,setsar=1`]
+          : []),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-movflags', '+faststart', outF,
+      ]);
+      out.push(await readFile(outF));
+    }
+    return out;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * A piece of picture made exactly `seconds` long: trimmed if it came back long, its
+ * last frame held if it came back short. A model rounds the length it renders, and a
+ * piece off by half a second puts every word after it out of step with the sound.
+ */
+export async function conformLength(clip: Buffer, seconds: number): Promise<Buffer> {
+  const dir = await mkdtemp(join(tmpdir(), 'ava-conform-'));
+  try {
+    const inF = join(dir, 'in.mp4');
+    const outF = join(dir, 'out.mp4');
+    await writeFile(inF, clip);
+    await run('ffmpeg', [
+      '-v', 'error', '-y', '-threads', FF_THREADS, '-i', inF, '-an',
+      '-vf', `fps=24,tpad=stop_mode=clone:stop_duration=3,trim=duration=${seconds.toFixed(3)},setpts=PTS-STARTPTS,format=yuv420p`,
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-movflags', '+faststart', outF,
+    ]);
+    return await readFile(outF);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/** One film's picture under another's sound: the approved film's sound, laid back over its re-rendered picture. */
+export async function withSoundOf(picture: Buffer, source: Buffer): Promise<Buffer> {
+  const dir = await mkdtemp(join(tmpdir(), 'ava-sound-'));
+  try {
+    const pic = join(dir, 'picture.mp4');
+    const src = join(dir, 'source.mp4');
+    const outF = join(dir, 'out.mp4');
+    await writeFile(pic, picture);
+    await writeFile(src, source);
+    if (!(await hasAudio(src))) return picture;
+    await run('ffmpeg', [
+      '-v', 'error', '-y', '-threads', FF_THREADS, '-i', pic, '-i', src,
+      '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+      '-shortest', '-movflags', '+faststart', outF,
+    ]);
+    return await readFile(outF);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
  * Put pieces back together, cut to cut.
  *
  * The pieces need not match: films joined here can come from different runs, at

@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { APP_VERSION, type Role } from '@ava/shared';
 import { useApp, type Section } from '../state/appStore.js';
+import { useOnboarding } from './Onboarding.js';
 
 export const SECTION_META: Record<Section, { label: string; icon: string }> = {
   projects: { label: 'Projects', icon: '🎬' },
@@ -15,15 +16,24 @@ export const SECTION_META: Record<Section, { label: string; icon: string }> = {
   whatsnew: { label: "What's new", icon: '✨' },
 };
 
-/** The rail. What's new is reached from the version in the foot instead. */
-/** Rail entries, with the role each needs. What's new lives in the foot. */
-const NAV: { id: Section; label: string; icon: string; needs?: Role }[] = (
+/**
+ * What each section needs to be used. A section somebody cannot use is still in the
+ * menu — it opens on a page that says so, and what the section does — so a viewer can
+ * see everything the app has. APIs & models alone is left out for anyone not an admin.
+ */
+export const SECTION_NEEDS: Partial<Record<Section, Role>> = {
+  instructions: 'creator',
+  languages: 'creator',
+  whatsnew: 'creator',
+  users: 'admin',
+  analytics: 'admin',
+  models: 'admin',
+};
+
+/** Rail entries. What's new lives in the foot. */
+const NAV: { id: Section; label: string; icon: string }[] = (
   ['projects', 'clients', 'cars', 'actors', 'instructions', 'languages', 'models', 'users', 'analytics'] as Section[]
-).map((id) => ({
-  id,
-  ...SECTION_META[id],
-  needs: id === 'models' || id === 'users' || id === 'analytics' ? ('admin' as Role) : undefined,
-}));
+).map((id) => ({ id, ...SECTION_META[id] }));
 
 export function SignIn() {
   const signInGoogle = useApp((s) => s.signInGoogle);
@@ -70,7 +80,9 @@ export function SignIn() {
 }
 
 export function Shell({ children }: { children: ReactNode }) {
-  const { tabs, activeTabId, go, signOut, loading, me, can } = useApp();
+  const { tabs, activeTabId, go, signOut, loading, me, can, viewAs, setViewAs } = useApp();
+  const openWelcome = useOnboarding((s) => s.openWelcome);
+  const locked = (id: Section): boolean => Boolean(SECTION_NEEDS[id]) && !can(SECTION_NEEDS[id]!);
   const active = tabs.find((t) => t.id === activeTabId);
   // Collapsed unless someone expands it with the toggle; that choice is remembered on
   // this device. Collapsed, the rail opens over the page on hover instead of pushing it.
@@ -103,20 +115,23 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="rail-nav">
-          {NAV.filter((n) => !n.needs || can(n.needs)).map((n) => (
+          {NAV.filter((n) => n.id !== 'models' || can('admin')).map((n) => (
             <button
               key={n.id}
               type="button"
-              title={n.label}
-              className={`rail-item${
-                active?.kind === 'section' && active.section === n.id ? ' on' : ''
+              title={locked(n.id) ? `${n.label} — not available for your access` : n.label}
+              className={`rail-item${active?.kind === 'section' && active.section === n.id ? ' on' : ''}${
+                locked(n.id) ? ' locked' : ''
               }`}
               onClick={() => go(n.id, null)}
             >
               <span className="rail-icon" aria-hidden>
                 {n.icon}
               </span>
-              <span className="rail-label">{n.label}</span>
+              <span className="rail-label">
+                {n.label}
+                {locked(n.id) && <span className="rail-lock" aria-label="locked" />}
+              </span>
             </button>
           ))}
         </nav>
@@ -132,10 +147,29 @@ export function Shell({ children }: { children: ReactNode }) {
               )}
               <span>
                 <b>{me.name || me.email || 'Team password'}</b>
-                <em>{me.role}</em>
+                <em>{viewAs ? `${viewAs} view` : me.role}</em>
               </span>
             </div>
           )}
+          {me?.role === 'admin' && (
+            <button
+              className={`rail-item${viewAs ? ' on' : ''}`}
+              type="button"
+              onClick={() => setViewAs(viewAs ? null : 'viewer')}
+              title={viewAs ? 'Back to your own view' : 'See the app exactly as a viewer does'}
+            >
+              <span className="rail-icon" aria-hidden>
+                👁
+              </span>
+              <span className="rail-label">{viewAs ? 'Back to admin view' : 'See as a viewer'}</span>
+            </button>
+          )}
+          <button className="rail-item" type="button" onClick={openWelcome} title="What this app does, and how a film is made">
+            <span className="rail-icon" aria-hidden>
+              ✦
+            </span>
+            <span className="rail-label">Welcome</span>
+          </button>
           <button
             className="rail-item version"
             type="button"

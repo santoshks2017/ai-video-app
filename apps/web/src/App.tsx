@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useApp, type Tab } from './state/appStore.js';
-import { Shell, SignIn } from './components/Shell.js';
+import { Shell, SignIn, SECTION_META, SECTION_NEEDS } from './components/Shell.js';
+import { LockedSection, Onboarding } from './components/Onboarding.js';
 import { Tabs } from './components/Tabs.js';
 import { ProjectsSection } from './sections/Projects.js';
 import { ProjectEditor } from './sections/ProjectEditor.js';
@@ -15,7 +16,10 @@ import { UsersSection } from './sections/Users.js';
 import { AnalyticsSection } from './sections/Analytics.js';
 
 function TabBody({ tab }: { tab: Tab }) {
+  const needs = tab.kind === 'section' ? SECTION_NEEDS[tab.section] : undefined;
+  const allowed = useApp((s) => !needs || s.can(needs));
   if (tab.kind === 'project') return <ProjectEditor projectId={tab.projectId!} />;
+  if (!allowed) return <LockedSection section={tab.section} label={SECTION_META[tab.section].label} />;
   switch (tab.section) {
     case 'projects':
       return <ProjectsSection />;
@@ -41,7 +45,7 @@ function TabBody({ tab }: { tab: Tab }) {
 }
 
 export default function App() {
-  const { signedIn, previewOpen, tabs, activeTabId, init } = useApp();
+  const { signedIn, previewOpen, tabs, activeTabId, init, viewAs, setViewAs } = useApp();
 
   useEffect(() => {
     void init();
@@ -64,6 +68,17 @@ export default function App() {
           libraries.
         </div>
       )}
+      {viewAs && (
+        <div className="viewas-banner" role="note">
+          <span>
+            Seeing the app as a {viewAs} does. The server still knows you as an admin, so what a {viewAs} is never
+            sent is only hidden here.
+          </span>
+          <button className="btn small" type="button" onClick={() => setViewAs(null)}>
+            Back to admin view
+          </button>
+        </div>
+      )}
       <Tabs />
       {/* Every tab stays mounted: hiding rather than unmounting is what keeps a
           generation running while the designer works somewhere else. */}
@@ -72,6 +87,7 @@ export default function App() {
           <TabBody tab={t} />
         </div>
       ))}
+      <Onboarding />
     </Shell>
   );
 }

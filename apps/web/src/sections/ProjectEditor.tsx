@@ -46,7 +46,7 @@ import {
   remainingLabel,
 } from '@ava/shared';
 import { useApp, api, projectTabId } from '../state/appStore.js';
-import { Field, Panel, Section, Dropdown, ImageUpload, Thumb, Confirm, Banner } from '../components/ui.js';
+import { Field, Panel, Section, Dropdown, ImageUpload, Thumb, Confirm, Banner, Lock, useReadOnly } from '../components/ui.js';
 import { ListField } from '../components/ListField.js';
 import { isApiError, abs, getModelUsage, type ModelUsageItem } from '../lib/client.js';
 // `api` above is the library CRUD client; this one owns generation + scripting.
@@ -121,6 +121,7 @@ function RefRow({
 export function ProjectEditor({ projectId }: { projectId: string }) {
   const { projects, clients, actors, cars, instructions, languages, models, refresh, go, closeTab } =
     useApp();
+  const readOnly = useReadOnly();
   const stored = projects.find((p) => p.id === projectId);
   const [project, setProject] = useState<Project | null>(stored ?? null);
   const [savedAt, setSavedAt] = useState<number>(0);
@@ -169,6 +170,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   }, [project, refresh]);
 
   const set = (p: Partial<Project>) => {
+    // A viewer's editor changes nothing, so there is never anything waiting to be saved.
+    if (readOnly) return;
     dirty.current = true;
     setProject((cur) => (cur ? { ...cur, ...p, updatedAt: Date.now() } : cur));
   };
@@ -729,8 +732,15 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           ← All projects
         </button>
         <span className="hint">
-          {savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : 'Changes save automatically'}
+          {readOnly ? (
+            <span className="view-chip">View only</span>
+          ) : savedAt ? (
+            `Saved ${new Date(savedAt).toLocaleTimeString()}`
+          ) : (
+            'Changes save automatically'
+          )}
         </span>
+        <Lock inline>
         <div className="stage-pick">
           <span>Stage</span>
           <div className="seg">
@@ -747,6 +757,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             ))}
           </div>
         </div>
+        </Lock>
+        {!readOnly && (
         <Confirm
           onConfirm={async () => {
             removed.current = true;
@@ -764,15 +776,18 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
         >
           Delete project
         </Confirm>
+        )}
       </div>
 
       <div className="grid">
         <div className="left-col">
+          <Lock>
           <Section
             num="01"
+            tour="ed-project"
             title="Project"
             step="Name, brief and tags"
-            need={revenueMissing(project) ? 'Revenue needed' : undefined}
+            need={!readOnly && revenueMissing(project) ? 'Revenue needed' : undefined}
             {...fold('project')}
           >
             <Field label="Project name">
@@ -1043,6 +1058,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
           <Section
             num="02"
+            tour="ed-usecase"
             title="Use case"
             step={promptOnly ? 'Prompt-only — no video generation' : 'Composable — pick 1 or more'}
             {...fold('usecase')}
@@ -1170,7 +1186,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             </div>
           </Section>
 
-          <Section num="03" title="Video" step="Length, shape, language, model" {...fold('video')}>
+          <Section num="03" tour="ed-video" title="Video" step="Length, shape, language, model" {...fold('video')}>
             <div className="field-grid">
               <Field label="Length">
                 <div className="length-pick">
@@ -1231,7 +1247,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 label="Model"
                 hint={
                   activeModel
-                    ? `${activeModel.minClipSec}–${activeModel.maxClipSec}s per clip · $${activeModel.usdPerSecond}/s${
+                    ? `${activeModel.minClipSec}–${activeModel.maxClipSec}s per clip${readOnly ? '' : ` · $${activeModel.usdPerSecond}/s`}${
                         usageLabel(activeModel.id) ? ` · ${usageLabel(activeModel.id)}` : ''
                       }. Counted by this app, so requests made elsewhere on the same key are not in it — but a model Google has said is used up shows as used up.`
                     : 'None registered — add one in APIs & models.'
@@ -1421,6 +1437,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
           <Section
             num="04"
+            tour="ed-refs"
             title="References"
             step="What the model is handed"
             note={`The vehicle, the presenter and the dealership come in on their own — there is nothing to pick. The list below is everything in scope, in the order ${
@@ -1704,6 +1721,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
           {built?.scenePlan && built.scenePlan.scenes.length > 0 && (
             <Section
               num="05"
+              tour="ed-storyboard"
               title="Storyboard"
               open={storyboardOpen}
               onOpenChange={setStoryboardOpen}
@@ -1754,11 +1772,12 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
               />
             </Section>
           )}
+          </Lock>
         </div>
 
         <div className="right-col">
           {!project.clientId && <Banner kind="warn">No client selected — footer and end card will be empty.</Banner>}
-          {preflight && (
+          {preflight && !readOnly && (
             <OutputPanel parts={parts} preflight={preflight} cost={cost} promptOnly={promptOnly} />
           )}
           {promptOnly && parts.length > 0 && (
@@ -1777,6 +1796,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 master prompt — copy it into Lumina to finish there. Remove{' '}
                 {presenterPicked.length > 1 ? 'them' : 'it'} to generate automatically.
               </div>
+              <Lock>
               <div className="toolbar" style={{ marginTop: 0 }}>
                 {presenterPicked.map((id) => (
                   <button
@@ -1789,6 +1809,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                   </button>
                 ))}
               </div>
+              </Lock>
             </Panel>
           )}
 

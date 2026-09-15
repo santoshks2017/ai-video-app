@@ -2850,3 +2850,211 @@ textarea.guide {
 .sb-caption-pos { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 4px 0 0; font-size: 11px; font-weight: 500; color: var(--ink-faint); }
 .sb-caption-pos > span { flex: none; }
 .sb-caption-pos select { flex: 1 1 0; width: 100%; min-width: 0; padding: 3px 6px; font-size: 11.5px; text-overflow: ellipsis; }
+
+/* ============================================================================
+   View only, the welcome and the tours.
+
+   A viewer is shown everything and can change nothing: fields stay readable (a
+   disabled field is usually greyed to the point of not being read), and a section
+   they may not open is a sketch of itself behind a note. The welcome is the one
+   loud moment — a strip of film whose three frames develop as it opens — and the
+   tours are quiet cards beside what they describe.
+   ========================================================================= */
+fieldset.lock { border: 0; margin: 0; padding: 0; min-width: 0; }
+fieldset.lock.inline { display: contents; }
+.lock input:disabled,
+.lock select:disabled,
+.lock textarea:disabled {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--ink);
+  -webkit-text-fill-color: var(--ink);
+  opacity: 1;
+  cursor: default;
+}
+.lock button:disabled { cursor: not-allowed; }
+.lock .upload-zone { opacity: 0.55; }
+.sec-head { cursor: pointer; user-select: none; }
+.view-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--line-strong); background: var(--surface-2);
+  color: var(--ink-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+}
+.view-chip::before {
+  content: ''; width: 9px; height: 9px; background: currentColor;
+  -webkit-mask: var(--lock-glyph) center / contain no-repeat; mask: var(--lock-glyph) center / contain no-repeat;
+}
+:root {
+  --lock-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 10V8a5 5 0 0 1 10 0v2h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1zm2 0h6V8a3 3 0 0 0-6 0v2z'/%3E%3C/svg%3E");
+}
+.rail-item.locked { color: var(--ink-faint); }
+.rail-lock {
+  display: inline-block; width: 9px; height: 9px; margin-left: 7px; vertical-align: -0.5px;
+  background: currentColor; opacity: 0.7;
+  -webkit-mask: var(--lock-glyph) center / contain no-repeat; mask: var(--lock-glyph) center / contain no-repeat;
+}
+.viewas-banner {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 8px; padding: 6px 8px 6px 12px;
+  border: 1px dashed var(--line-strong); border-radius: 8px; background: var(--surface-2);
+  color: var(--ink-muted); font-size: 12.5px;
+}
+.viewas-banner span { flex: 1; min-width: 0; }
+.viewer-edit {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.viewer-edit .hint { flex: 1; min-width: 180px; margin: 0; }
+
+/* The tab bar carries the way into the tour of whatever is open. */
+.tabbar { flex: none; display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--bg); }
+.tabbar > .tabstrip { flex: 1; min-width: 0; border-bottom: none; }
+.tab-tour {
+  flex: none; align-self: center; margin: 5px 14px 0 8px;
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px;
+  border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface);
+  color: var(--ink-muted); font-size: 12px; font-weight: 500; white-space: nowrap;
+}
+.tab-tour span { color: var(--accent); }
+.tab-tour:hover { color: var(--ink); border-color: var(--accent); }
+@media (max-width: 640px) { .tab-tour { margin-right: 8px; padding: 4px 9px; } }
+
+/* ---- a section somebody may not open ---- */
+.locked-page { position: relative; min-height: calc(100vh - 130px); border-radius: var(--radius); overflow: hidden; }
+.locked-mock { filter: blur(7px) saturate(0.85); opacity: 0.8; pointer-events: none; user-select: none; padding: 2px; }
+.locked-veil {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 24px 16px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 30%, transparent), color-mix(in srgb, var(--bg) 72%, transparent));
+}
+.lock-card {
+  width: min(520px, 100%); padding: 26px 26px 20px; text-align: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-pop);
+}
+.lock-badge {
+  width: 44px; height: 44px; margin: 0 auto 12px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--accent-wash); color: var(--accent);
+}
+.lock-eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+.lock-card h2 { margin: 6px 0 6px; font-family: var(--font-display); font-size: 22px; line-height: 1.25; font-weight: 600; }
+.lock-msg { margin: 0 0 16px; color: var(--ink-muted); font-size: 13.5px; }
+.lock-what { margin: 0 0 16px; padding-top: 14px; border-top: 1px solid var(--line); text-align: left; }
+.lock-what h3 { margin: 0 0 8px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+.lock-what ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.lock-what li { position: relative; padding-left: 16px; font-size: 13px; line-height: 1.5; color: var(--ink); }
+.lock-what li::before { content: ''; position: absolute; left: 2px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+.mock-grid { display: grid; gap: 12px; }
+.mock-two { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 12px; }
+.mock-card { display: grid; gap: 10px; align-content: start; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.mock-line { display: block; height: 9px; border-radius: 5px; background: var(--line-strong); }
+.mock-line.ink { height: 12px; background: var(--ink-faint); }
+.mock-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.mock-num { display: block; width: 62%; height: 26px; border-radius: 6px; background: var(--ink-faint); }
+.mock-bars { display: flex; align-items: flex-end; gap: 10px; height: 180px; }
+.mock-bars span { flex: 1; border-radius: 4px 4px 0 0; background: var(--accent); opacity: 0.45; }
+.mock-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 80px; gap: 12px; align-items: center; padding: 6px 0; }
+.mock-dot { width: 34px; height: 34px; border-radius: 50%; background: var(--line-strong); }
+.mock-stack { display: grid; gap: 7px; }
+.mock-chip { display: block; height: 20px; border-radius: 999px; background: var(--accent-wash); }
+.mock-chips { display: flex; gap: 8px; }
+.mock-chips .mock-chip { width: 70px; }
+.mock-item { display: grid; gap: 7px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.mock-release { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 760px) { .mock-two { grid-template-columns: 1fr; } .mock-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---- the tour ---- */
+.tour-layer { position: fixed; inset: 0; z-index: 1200; }
+.tour-dim { position: absolute; inset: 0; background: rgba(24, 18, 17, 0.55); }
+.tour-spot {
+  position: fixed; border-radius: 12px; pointer-events: none;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px rgba(24, 18, 17, 0.55);
+}
+.tour-card {
+  position: fixed; width: min(360px, calc(100vw - 24px)); padding: 16px 16px 12px; outline: none;
+  background: var(--surface); color: var(--ink); border-radius: 14px;
+  box-shadow: 0 0 0 1px var(--line), 0 24px 60px -18px rgba(0, 0, 0, 0.5);
+}
+.tour-eyebrow { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
+.tour-kicker { font-family: var(--font-ui); font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.tour-card h3 { margin: 0 0 6px; font-family: var(--font-display); font-size: 19px; line-height: 1.25; font-weight: 600; }
+.tour-body { font-size: 13px; line-height: 1.55; color: var(--ink-muted); }
+.tour-points { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.tour-three { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 9px; }
+.tour-three li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; }
+.tour-three b { display: block; color: var(--ink); font-size: 13px; }
+.tour-progress { display: flex; gap: 4px; margin: 14px 0 10px; }
+.tour-progress i { flex: 1; height: 3px; border-radius: 2px; background: var(--line); }
+.tour-progress i.on { background: var(--accent); }
+.tour-acts { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.tour-progress + .tour-acts { margin-top: 0; }
+.tour-acts .skip { margin-right: auto; }
+
+/* ---- the welcome ---- */
+.welcome-wrap {
+  position: fixed; inset: 0; z-index: 1300; display: grid; place-items: center; padding: 20px 16px;
+  background: rgba(22, 16, 15, 0.62); backdrop-filter: blur(3px);
+  animation: welcome-fade 0.25s ease both;
+}
+.welcome {
+  width: min(980px, 100%); max-height: calc(100vh - 40px); overflow: auto; outline: none;
+  background: var(--surface); border-radius: 18px; box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.6);
+  animation: welcome-rise 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.welcome-screen { padding: 34px 36px 30px; background: #191413; color: #f4ece7; }
+.welcome-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #dba49d; }
+.welcome-screen h1 {
+  margin: 12px 0; color: #fbf5f1;
+  font-family: var(--font-display); font-weight: 600; font-size: clamp(30px, 4.4vw, 46px); line-height: 1.04; letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.welcome-lede { max-width: 640px; margin: 0 0 24px; font-size: 14.5px; line-height: 1.6; color: #c9bbb5; }
+/* A strip of film: sprocket holes along both edges, three frames in between. */
+.filmstrip {
+  list-style: none; margin: 0; padding: 20px 12px;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;
+  border-radius: 6px; background-color: #2c2422;
+  background-image: radial-gradient(circle, #191413 2.6px, transparent 3.1px), radial-gradient(circle, #191413 2.6px, transparent 3.1px);
+  background-size: 16px 10px, 16px 10px;
+  background-position: 4px 3px, 4px calc(100% - 3px);
+  background-repeat: repeat-x;
+}
+.frame {
+  display: grid; gap: 4px; align-content: start; padding: 14px 14px 13px;
+  border-radius: 3px; background: #f4ece7; color: #1d1a1a;
+  animation: frame-develop 0.7s ease both;
+}
+.frame-n { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: #c2564f; }
+.frame b { font-family: var(--font-display); font-size: 19px; font-weight: 600; color: #1d1a1a; }
+.frame-body { font-size: 12.5px; line-height: 1.5; color: #5f5653; }
+.welcome-body { padding: 26px 36px 10px; }
+.welcome-body h2 { margin: 0 0 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
+.welcome-features { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 28px; }
+.welcome-features li { display: grid; gap: 3px; align-content: start; padding: 12px 0 14px; border-top: 1px solid var(--line); }
+.welcome-features b { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.welcome-features span { font-size: 12.5px; line-height: 1.5; color: var(--ink-muted); }
+.welcome-foot {
+  position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 14px 36px 18px; background: var(--surface); border-top: 1px solid var(--line);
+}
+.welcome-foot .hint { flex: 1; min-width: 220px; margin: 0; }
+@keyframes welcome-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes welcome-rise { from { opacity: 0; transform: translateY(14px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes frame-develop {
+  from { opacity: 0; transform: translateY(6px); filter: brightness(1.9) blur(2px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@media (max-width: 860px) { .welcome-features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) {
+  .filmstrip, .welcome-features { grid-template-columns: 1fr; }
+  .welcome-screen, .welcome-body { padding-left: 20px; padding-right: 20px; }
+  .welcome-foot { padding: 12px 20px 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .welcome-wrap, .welcome, .frame { animation: none; }
+}
+/* A dialog that takes focus to be read is not a field: no focus ring round the whole of it. */
+.welcome:focus-visible,
+.tour-card:focus-visible { outline: none; }
+/* Grid tracks size to their content unless told otherwise, which pushed both cards off a phone's screen. */
+.welcome-wrap { grid-template-columns: minmax(0, 980px); justify-content: center; }
+.locked-veil { grid-template-columns: minmax(0, 520px); justify-content: center; }

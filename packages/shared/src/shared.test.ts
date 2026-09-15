@@ -78,6 +78,7 @@ import {
   overlayTheme,
   contrast,
   CUSTOM_THEME_ID,
+  pieceBounds,
   type RunFact,
   newEditProject,
   addEditClip,
@@ -1624,4 +1625,20 @@ test('a scene’s caption placement reaches the render, and Auto leaves it to th
   assert.equal(cards.find((c) => c.text === 'Ten-inch screen')?.position, undefined);
   assert.equal(cards.find((c) => c.text === 'Six airbags')?.position, undefined, 'a place that does not exist is Auto');
   assert.equal(composeBrief({ ...emptyProject(), id: 'p', useCases: ['offer'], spec: { ...emptyProject().spec, overlayThemeId: 'emerald' } } as Parameters<typeof composeBrief>[0]).overlayTheme?.id, 'emerald');
+});
+
+/* ---------------------------------------------------------------------------
+ * A long film through Seedance, in pieces that meet on the film's own cuts.
+ * ------------------------------------------------------------------------ */
+
+test('a long film is split on its own cuts, under the limit, with no scrap left over', () => {
+  assert.deepEqual(pieceBounds(25, [6, 12], 29), [0, 25], 'short enough for one pass');
+  assert.deepEqual(pieceBounds(42, [6.2, 16.1, 26.3, 36], 29), [0, 26.3, 42], 'the latest cut that fits');
+  assert.deepEqual(pieceBounds(70, [], 29), [0, 24, 47, 70], 'no cuts: evenly, what is left shared out again');
+  assert.deepEqual(pieceBounds(30, [28.8], 29), [0, 26, 30], 'never a piece shorter than the model takes');
+  assert.deepEqual(pieceBounds(30, [], 14), [0, 10, 20, 30]);
+  for (const b of [pieceBounds(88.4, [3, 9, 31, 33, 58, 61, 80], 29), pieceBounds(61, [1, 2, 59], 14)]) {
+    const lengths = b.slice(1).map((x, i) => x - b[i]!);
+    assert.ok(lengths.every((l) => l <= 29 + 1e-9 && l >= 4 - 1e-9), `pieces ${lengths.join(', ')}`);
+  }
 });

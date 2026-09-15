@@ -87,18 +87,25 @@ export function ModelsSection() {
     if (!cred?.id || !keyInput.trim()) return;
     const r = await post<{ hasKey: boolean }>(`/api/credentials/${cred.id}/key`, { key: keyInput.trim() });
     if (isApiError(r)) return setNote(r.message);
+    const gemini = cred.provider === 'google-gemini';
     setKeyInput('');
-    setNote('Key saved. It is stored server-side and never sent back to the browser.');
+    setNote(
+      gemini
+        ? 'Key saved. Every Gemini call now uses it, on live and preview alike. Press Test to check it.'
+        : 'Key saved. It is stored server-side and never sent back to the browser.',
+    );
     await refresh();
-    setCred({ ...cred, hasKey: true });
+    setCred({ ...cred, hasKey: true, ...(gemini ? { usesEnvKey: false } : {}) });
   };
 
   const clearKey = async () => {
     if (!cred?.id) return;
+    const gemini = cred.provider === 'google-gemini';
+    if (gemini && !window.confirm('Remove this key? Gemini goes back to the GOOGLE_API_KEY set on the service, on live and preview alike.')) return;
     await del(`/api/credentials/${cred.id}/key`);
-    setNote('Key removed.');
+    setNote(gemini ? 'Key removed. Gemini is back on the service’s GOOGLE_API_KEY.' : 'Key removed.');
     await refresh();
-    setCred({ ...cred, hasKey: false });
+    setCred({ ...cred, hasKey: false, ...(gemini ? { usesEnvKey: true } : {}) });
   };
 
   const saveModel = async () => {
@@ -169,7 +176,7 @@ export function ModelsSection() {
             <Panel
               title={cred.id ? 'Edit API connection' : 'New API connection'}
               actions={
-                cred.id && !cred.usesEnvKey ? (
+                cred.id && !(cred.provider === 'google-gemini' && models.some((m) => m.credentialId === cred.id)) ? (
                   <Confirm
                     onConfirm={async () => {
                       await api.credentials.remove(cred.id);
@@ -227,44 +234,53 @@ export function ModelsSection() {
                 </>
               )}
 
-              {cred.usesEnvKey ? (
+              {cred.provider === 'google-gemini' && cred.id && (
                 <Banner kind="ok">
-                  This connection uses the <code>GOOGLE_API_KEY</code> set on the Cloud Run service. Manage it
-                  with <code>gcloud secrets versions add GOOGLE_API_KEY</code>.
-                </Banner>
-              ) : (
-                <Field
-                  label={cred.hasKey ? 'Replace API key' : 'API key'}
-                  hint="Stored server-side. It is never returned to the browser or written into the frontend bundle."
-                >
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <input
-                      type="password"
-                      value={keyInput}
-                      onChange={(e) => setKeyInput(e.target.value)}
-                      placeholder={cred.hasKey ? '•••••••• (a key is saved)' : 'Paste the key'}
-                      disabled={!cred.id}
-                    />
-                    <button className="btn small" type="button" disabled={!cred.id || !keyInput.trim()} onClick={saveKey}>
-                      Save key
-                    </button>
-                    {cred.hasKey && (
-                      <>
-                        <button className="btn ghost small" type="button" disabled={testing} onClick={testKey}>
-                          {testing ? 'Testing…' : 'Test'}
-                        </button>
-                        <button className="btn ghost small" type="button" onClick={clearKey}>
-                          Remove
-                        </button>
-                      </>
-                    )}
-                  </div>
-                  {!cred.id && <div className="hint">Save the connection first, then add its key.</div>}
-                  {cred.hasKey && (
-                    <div className="hint">Test is a free read — it checks the key without generating anything.</div>
+                  {cred.usesEnvKey ? (
+                    <>
+                      Using the <code>GOOGLE_API_KEY</code> set on the Cloud Run service. Save a key below to use it
+                      instead — for scripts, storyboard drawings, photo checks and every Gemini video model.
+                    </>
+                  ) : (
+                    <>
+                      Using the key saved here — for scripts, storyboard drawings, photo checks and every Gemini video
+                      model. Remove it to go back to the service’s <code>GOOGLE_API_KEY</code>.
+                    </>
                   )}
-                </Field>
+                </Banner>
               )}
+              <Field
+                label={cred.hasKey && !cred.usesEnvKey ? 'Replace API key' : 'API key'}
+                hint="Stored server-side. It is never returned to the browser or written into the frontend bundle. Live and preview share one database, so a key saved here is used by both straight away."
+              >
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={keyInput}
+                    onChange={(e) => setKeyInput(e.target.value)}
+                    placeholder={cred.hasKey && !cred.usesEnvKey ? '•••••••• (a key is saved)' : 'Paste the key'}
+                    disabled={!cred.id}
+                  />
+                  <button className="btn small" type="button" disabled={!cred.id || !keyInput.trim()} onClick={saveKey}>
+                    Save key
+                  </button>
+                  {(cred.hasKey || cred.usesEnvKey) && (
+                    <button className="btn ghost small" type="button" disabled={testing} onClick={testKey}>
+                      {testing ? 'Testing…' : 'Test'}
+                    </button>
+                  )}
+                  {cred.hasKey && !cred.usesEnvKey && (
+                    <button className="btn ghost small" type="button" onClick={clearKey}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+                {!cred.id && <div className="hint">Save the connection first, then add its key.</div>}
+                {(cred.hasKey || cred.usesEnvKey) && (
+                  <div className="hint">Test is a free read — it checks the key without generating anything.</div>
+                )}
+              </Field>
 
               <Field label="Notes">
                 <textarea value={cred.notes ?? ''} onChange={(e) => setCred({ ...cred, notes: e.target.value })} />

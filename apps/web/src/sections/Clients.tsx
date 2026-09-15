@@ -14,7 +14,7 @@ import { LOGO_CLEAN_VERSION, LOGO_SLOTS, logoLayout, logosOn,
   type StoredImage,
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
+import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner, Lock } from '../components/ui.js';
 import { isApiError, post, get, abs, buildClientSheets, cleanClientLogos } from '../lib/client.js';
 
 function blank(): ClientProfile {
@@ -401,6 +401,9 @@ export function ClientsSection() {
             <button
               className="btn small primary"
               type="button"
+              data-tour="clients-new"
+              disabled={!canEdit}
+              title={canEdit ? undefined : 'Not available for viewer access'}
               onClick={() => { setDraft(blank()); setGmbNote(''); setGmbInput(''); }}
             >
               New client
@@ -408,7 +411,7 @@ export function ClientsSection() {
           </div>
         </div>
         <div className="body tight">
-          <div className="browse-bar">
+          <div className="browse-bar" data-tour="clients-filters">
             <input
               className="browse-search"
               value={q}
@@ -459,7 +462,7 @@ export function ClientsSection() {
       </div>
 
       <div className={`browse-cols${draft?.id ? ' three' : ' two'}`}>
-        <div className="browse-col">
+        <div className="browse-col" data-tour="clients-list">
           <div className="browse-col-head">
             <span>Dealers</span>
             <span>{shown.length}</span>
@@ -496,6 +499,7 @@ export function ClientsSection() {
       {draft ? (
         <Panel
           title={draft.id ? 'Edit client' : 'New client'}
+          tour="clients-detail"
           actions={
             draft.id ? (
               <Confirm
@@ -510,6 +514,7 @@ export function ClientsSection() {
             ) : undefined
           }
         >
+          <Lock>
           {err && <Banner kind="bad">{err}</Banner>}
 
           <Field
@@ -970,8 +975,9 @@ export function ClientsSection() {
             </Section>
           </div>
 
+          </Lock>
           <div className="toolbar">
-            <button className="btn primary" type="button" onClick={save}>
+            <button className="btn primary" type="button" disabled={!canEdit} onClick={save}>
               Save client
             </button>
             <button className="btn ghost" type="button" onClick={() => setDraft(null)}>
@@ -1023,7 +1029,7 @@ export function ClientsSection() {
                       {' · '}
                       {new Date(p.updatedAt).toLocaleDateString()}
                       {p.generationCount ? ` · ${p.generationCount} run${p.generationCount === 1 ? '' : 's'}` : ''}
-                      {p.totalCostInr ? ` · ${formatInr(p.totalCostInr)}` : ''}
+                      {canEdit && p.totalCostInr ? ` · ${formatInr(p.totalCostInr)}` : ''}
                     </span>
                   </button>
                 ))}

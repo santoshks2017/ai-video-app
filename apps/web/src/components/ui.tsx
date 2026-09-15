@@ -1,7 +1,31 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { isApiError, uploadRef } from '../lib/client.js';
+import { useApp } from '../state/appStore.js';
 import type { StoredImage } from '@ava/shared';
+
+/** True for somebody who may look at everything and change nothing — a viewer. */
+export function useReadOnly(): boolean {
+  return useApp((s) => !s.can('creator'));
+}
+
+/**
+ * Everything inside, locked for a viewer.
+ *
+ * A disabled fieldset turns off every input, select, textarea and button inside it at
+ * once, so a viewer sees each field exactly as it is filled in and can change none of
+ * it — without every control in the app having to be told. Sections still open and
+ * close inside one, because their headers are not buttons.
+ */
+export function Lock({ children, inline }: { children: ReactNode; inline?: boolean }) {
+  const readOnly = useReadOnly();
+  if (!readOnly) return <>{children}</>;
+  return (
+    <fieldset disabled className={`lock${inline ? ' inline' : ''}`}>
+      {children}
+    </fieldset>
+  );
+}
 
 /**
  * The explanation, out of the way until it is wanted.
@@ -123,10 +147,13 @@ export function Panel({
   step,
   note,
   actions,
+  tour,
   children,
 }: {
   /** The step's place in the sequence, shown as a scene slate. */
   num?: string;
+  /** The mark a tour step points at. */
+  tour?: string;
   title: string;
   step?: string;
   /** What this panel is for. Behind the mark, not spread across the top of it. */
@@ -135,7 +162,7 @@ export function Panel({
   children: ReactNode;
 }) {
   return (
-    <div className="card">
+    <div className="card" data-tour={tour}>
       <div className="head">
         <div className="head-left">
           {num && <span className="slate">{num}</span>}
@@ -170,9 +197,12 @@ export function Section({
   defaultOpen = false,
   open,
   onOpenChange,
+  tour,
   children,
 }: {
   num?: string;
+  /** The mark a tour step points at. */
+  tour?: string;
   title: string;
   step?: string;
   /** A short count of what is still missing, shown instead of `step`. */
@@ -194,13 +224,21 @@ export function Section({
     onOpenChange?.(!isOpen);
   };
   return (
-    <div className={`sec${isOpen ? ' open' : ''}${sub ? ' sub' : ''}`}>
-      <button
-        type="button"
+    <div className={`sec${isOpen ? ' open' : ''}${sub ? ' sub' : ''}`} data-tour={tour}>
+      {/* Not a <button>: a viewer's form is a disabled fieldset, which disables every
+          button inside it, and a section still has to open for somebody who may only read it. */}
+      <div
+        role="button"
+        tabIndex={0}
         className="sec-head"
         aria-expanded={isOpen}
         aria-controls={bodyId}
         onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+          e.preventDefault();
+          toggle();
+        }}
       >
         <span className="sec-caret" aria-hidden>
           ▶
@@ -215,7 +253,7 @@ export function Section({
           </span>
         )}
         {need ? <span className="sec-need">{need}</span> : step ? <span className="sec-step">{step}</span> : null}
-      </button>
+      </div>
       {isOpen && (
         <div className="sec-body" id={bodyId}>
           {children}
@@ -325,6 +363,7 @@ export function ImageUpload({
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [armed, setArmed] = useState(false);
+  const readOnly = useReadOnly();
   const what = accept.startsWith('video') ? 'video' : 'image';
 
   const upload = async (list: File[]) => {
@@ -356,6 +395,7 @@ export function ImageUpload({
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setArmed(false);
         }}
         onPaste={(e) => {
+          if (readOnly) return;
           const files = filesFrom(e.clipboardData, accept);
           if (!files.length) {
             setErr(`There is no ${what} on the clipboard to paste.`);
@@ -365,7 +405,7 @@ export function ImageUpload({
           if (!busy) void upload(multiple ? files : files.slice(0, 1));
         }}
       >
-        <button className="btn small" type="button" disabled={Boolean(busy)} onClick={() => ref.current?.click()}>
+        <button className="btn small" type="button" disabled={readOnly || Boolean(busy)} onClick={() => ref.current?.click()}>
           {busy || buttonText}
         </button>
         <span className="upload-paste">{armed ? `Paste now · ${PASTE_KEYS}` : 'or paste'}</span>
@@ -399,6 +439,13 @@ export function Thumb({ img, onRemove }: { img: StoredImage; onRemove?: () => vo
 
 export function Confirm({ onConfirm, children }: { onConfirm: () => void; children: ReactNode }) {
   const [armed, setArmed] = useState(false);
+  const readOnly = useReadOnly();
+  if (readOnly)
+    return (
+      <button className="btn ghost small" type="button" disabled title="Not available for viewer access">
+        {children}
+      </button>
+    );
   if (!armed)
     return (
       <button className="btn ghost small" type="button" onClick={() => setArmed(true)}>

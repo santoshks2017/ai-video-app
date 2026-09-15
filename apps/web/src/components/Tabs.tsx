@@ -1,5 +1,6 @@
 import { useApp, type Tab } from '../state/appStore.js';
 import { SECTION_META } from './Shell.js';
+import { TourButton } from './Onboarding.js';
 
 /**
  * The workspace tab strip.
@@ -24,6 +25,7 @@ export function Tabs() {
   const icon = (t: Tab): string => (t.kind === 'section' ? SECTION_META[t.section].icon : '📄');
 
   return (
+    <div className="tabbar">
     <div className="tabstrip" role="tablist">
       {tabs.map((t) => {
         const on = t.id === activeTabId;
@@ -62,6 +64,8 @@ export function Tabs() {
           </div>
         );
       })}
+    </div>
+    <TourButton />
     </div>
   );
 }

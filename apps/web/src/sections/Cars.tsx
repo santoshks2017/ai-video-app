@@ -4,7 +4,7 @@ import { BRAND_CATALOGUE, CAR_VIEWS,
   colourName,
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner } from '../components/ui.js';
+import { Field, Panel, Section, ImageUpload, Thumb, Confirm, Empty, Banner, Lock, useReadOnly } from '../components/ui.js';
 import { isApiError, post, get, abs, recheckCarPhotos, refreshCarColours } from '../lib/client.js';
 
 const ANGLES: CarAngle[] = ['front', 'side', 'rear', 'interior'];
@@ -22,6 +22,7 @@ function withAbsUrls(car: CarModelProfile): CarModelProfile {
 
 export function CarsSection() {
   const cars = useApp((s) => s.cars);
+  const readOnly = useReadOnly();
   const refresh = useApp((s) => s.refresh);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -300,8 +301,9 @@ export function CarsSection() {
             />
           </div>
 
+          <Lock>
           <div className="sec-stack" style={{ marginTop: 10 }}>
-            <Section sub title="Add a brand" step="Sync its whole current line-up">
+            <Section sub tour="cars-brand" title="Add a brand" step="Sync its whole current line-up">
               <div className="brandgrid">
                 {brands.map((b) => (
                   <button
@@ -386,7 +388,7 @@ export function CarsSection() {
               )}
             </Section>
 
-            <Section sub title="Add one model" step="By name, or a manufacturer link">
+            <Section sub tour="cars-one" title="Add one model" step="By name, or a manufacturer link">
               <div style={{ display: 'flex', gap: 8 }}>
                 <input
                   value={query}
@@ -405,6 +407,7 @@ export function CarsSection() {
               {note && <div className="hint">{note}</div>}
             </Section>
           </div>
+          </Lock>
         </div>
       </div>
 
@@ -452,6 +455,7 @@ export function CarsSection() {
           {brandRows.reduce((n, b) => n + b.models.length, 0)} {kind === 'bike' ? 'bikes & scooters' : 'cars'} in the
           library
         </span>
+        <Lock inline>
         <button
           className="btn ghost small"
           type="button"
@@ -490,10 +494,11 @@ export function CarsSection() {
             Refresh every colour list
           </button>
         )}
+        </Lock>
       </div>
 
       {/* Brand, then model, then the vehicle — each column narrowing the last. */}
-      <div className="browse-cols">
+      <div className="browse-cols" data-tour="cars-list">
         <div className="browse-col">
           <div className="browse-col-head">
             <span>Brands</span>
@@ -555,7 +560,7 @@ export function CarsSection() {
               title={`${active.brand} ${active.model}`}
               step={active.syncedAt ? `synced ${new Date(active.syncedAt).toLocaleDateString()}` : undefined}
               actions={
-                <>
+                <Lock inline>
                   <button
                     className="btn ghost small"
                     type="button"
@@ -593,9 +598,10 @@ export function CarsSection() {
                   >
                     Delete
                   </Confirm>
-                </>
+                </Lock>
               }
             >
+              <Lock>
               {active.syncStatus !== 'ok' && (
                 <Banner kind="warn">
                   {active.syncNote ?? 'Incomplete image set — add the missing angles below.'}
@@ -786,6 +792,7 @@ export function CarsSection() {
                   </div>
                 </Section>
               </div>
+              </Lock>
             </Panel>
           ) : (
             <Panel title="Vehicle details">

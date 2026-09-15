@@ -368,6 +368,7 @@ export function GenerationPanel({
     {editing?.finalUrl && (
       <VideoEditor
         run={editing}
+        demo={!canGenerateRole}
         brief={brief}
         others={history.filter((h) => h.jobId !== editing.jobId && h.finalUrl)}
         onClose={() => setEditingRun(null)}
@@ -378,7 +379,7 @@ export function GenerationPanel({
         }}
       />
     )}
-    <div className="card">
+    <div className="card" data-tour="ed-generate">
       <div className="head">
         <h2>Generate &amp; preview</h2>
         <span className="step">{modelLabel ?? 'default model'}</span>
@@ -388,8 +389,8 @@ export function GenerationPanel({
           <div className="check warn" style={{ marginBottom: 10 }}>
             <span className="icon">!</span>
             <span>
-              Your account can watch videos but not generate them — generating spends real money. Ask an admin
-              to make you a creator in People.
+              View only — generating is not available for viewer access. Watch the latest cut below, and open it
+              in the video editor to try the finishing tools.
             </span>
           </div>
         )}
@@ -411,7 +412,7 @@ export function GenerationPanel({
           * still required it, and Regenerate could not be pressed at all. It is
           * shown now whenever the spend needs approving and nothing is in flight.
           */}
-        {needsCostConfirm && status !== 'running' && (
+        {canGenerateRole && needsCostConfirm && status !== 'running' && (
           <label className={`cost-approve${confirmed ? ' on' : ''}`}>
             <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
             <span>
@@ -421,7 +422,7 @@ export function GenerationPanel({
           </label>
         )}
 
-        {runModel && runRequests && parts.length > 0 && status !== 'running' && (
+        {canGenerateRole && runModel && runRequests && parts.length > 0 && status !== 'running' && (
           <div className={`req-cost${dayOver ? ' out' : ''}`}>
             {dayOver && usage ? (
               <>
@@ -535,6 +536,15 @@ export function GenerationPanel({
               src={finalSrc}
               controls
               playsInline
+              data-tour="ed-player"
+              // Watching is what a viewer is for; saving the file is not.
+              {...(canGenerateRole
+                ? {}
+                : {
+                    controlsList: 'nodownload',
+                    disablePictureInPicture: true,
+                    onContextMenu: (e: { preventDefault: () => void }) => e.preventDefault(),
+                  })}
               style={{ marginTop: 10 }}
             />
 
@@ -558,7 +568,16 @@ export function GenerationPanel({
               </div>
             )}
 
-            {clips.length > 1 && (
+            {!canGenerateRole && activeJobId && history.some((h) => h.jobId === activeJobId && h.finalUrl) && (
+              <div className="viewer-edit">
+                <button type="button" className="btn small" data-tour="ed-edit" onClick={() => setEditingRun(activeJobId)}>
+                  Open in the video editor
+                </button>
+                <span className="hint">Trim, reorder, add text, transitions, filters and sound. Exporting is for creators.</span>
+              </div>
+            )}
+
+            {canGenerateRole && clips.length > 1 && (
               <details style={{ marginTop: 10 }}>
                 <summary className="hint" style={{ cursor: 'pointer' }}>
                   Built from {doneClips.length}/{clips.length} segments
@@ -595,7 +614,7 @@ export function GenerationPanel({
           )
         )}
 
-        {finalSrc && activeJobId && status !== 'running' && (
+        {canGenerateRole && finalSrc && activeJobId && status !== 'running' && (
           <details className="refine">
             <summary>Almost right? Fix a detail without paying for a full regenerate</summary>
             <div className="refine-body">
@@ -711,7 +730,7 @@ export function GenerationPanel({
           </details>
         )}
 
-        {history.length > 0 && (
+        {canGenerateRole && history.length > 0 && (
           <div className="history">
             <div className="history-head">
               <span>
@@ -823,6 +842,7 @@ export function GenerationPanel({
                         type="button"
                         className="btn ghost small"
                         disabled={Boolean(versionBusy)}
+                        data-tour="ed-edit"
                         title="Trim this video — no model, no cost"
                         onClick={() => {
                           setEditingRun(editingRun === h.jobId ? null : h.jobId);
@@ -983,7 +1003,7 @@ export function GenerationPanel({
           </div>
         )}
 
-        {status === 'idle' && !result && (
+        {canGenerateRole && status === 'idle' && !result && (
           <div className="hint" style={{ marginTop: 8 }}>
             {parts.length > 1
               ? `~${totalDuration}s video: generated in ${parts.length} segments (extend where possible, ffmpeg-stitched otherwise) and returned as one clip.`

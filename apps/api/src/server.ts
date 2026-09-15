@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
-import { overlayTheme, LOGO_CLEAN_VERSION, logoLayout,
+import { pieceBounds, overlayTheme, LOGO_CLEAN_VERSION, logoLayout,
   brandMatches,
   isPromptOnly,
   estimateCost,
@@ -72,7 +72,7 @@ import { listRunFacts,
   listAllJobDocs,
 } from './store.js';
 import { scrapeModel, getCarModel } from './scraper.js';
-import {
+import { sceneCuts, cutVideo, conformLength, withSoundOf,
   composeFinal,
   contactSheet,
   joinVideos,
@@ -80,7 +80,6 @@ import {
   lastFrame,
   posterFrame,
   selfTest,
-  splitVideo,
   trimClip,
   upscaleVideo,
   videoFacts,
@@ -438,20 +437,73 @@ const COLLECTIONS: Collection[] = [
   'models',
 ];
 
+/**
+ * What a viewer is shown of a library record, or null for none of it.
+ *
+ * A viewer is somebody exploring the app. They see the work — the projects, dealers,
+ * vehicles and presenters — but not what a film cost or earned, and not the house
+ * rules and pronunciation guides the films are made with: those are how the product
+ * works, and a viewer account is the easiest one to be given.
+ */
+function forViewer(name: Collection, doc: Record<string, unknown>): Record<string, unknown> | null {
+  const out = { ...doc };
+  switch (name) {
+    case 'instructions':
+    case 'credentials':
+      return null;
+    case 'languages':
+      out.spokenGuide = '';
+      out.writtenGuide = '';
+      out.glossary = [];
+      return out;
+    case 'projects':
+      delete out.totalCostInr;
+      delete out.campaignRevenueInr;
+      return out;
+    case 'models':
+      delete out.usdPerSecond;
+      delete out.usdPerSecondByResolution;
+      return out;
+    default:
+      return out;
+  }
+}
+
+const VIEWER_BLOCKED = { code: 'forbidden', message: 'This section is not available for viewer access.' };
+
 for (const name of COLLECTIONS) {
-  app.get(`/api/${name}`, async () => ({ items: await listAll(name) }));
+  app.get(`/api/${name}`, async (req) => {
+    const items = await listAll<Record<string, unknown>>(name);
+    if (allows(req.caller ?? null, 'creator')) return { items };
+    return { items: items.map((d) => forViewer(name, d)).filter((d): d is Record<string, unknown> => d !== null) };
+  });
 
   app.get<{ Params: { id: string } }>(`/api/${name}/:id`, async (req, reply) => {
-    const doc = await getOne(name, req.params.id);
+    const doc = await getOne<Record<string, unknown>>(name, req.params.id);
     if (!doc) return reply.code(404).send({ code: 'not-found', message: `No such ${name} record` });
-    return doc;
+    if (allows(req.caller ?? null, 'creator')) return doc;
+    const shown = forViewer(name, doc);
+    return shown ?? reply.code(403).send(VIEWER_BLOCKED);
   });
 
   app.post<{ Body: Record<string, unknown> }>(`/api/${name}`, async (req, reply) => {
     if (!req.body || typeof req.body !== 'object') {
       return reply.code(400).send({ code: 'bad-request', message: 'Body required' });
     }
-    return await upsert(name, req.body);
+    let body = req.body;
+    if (name === 'credentials' && typeof body.id === 'string') {
+      // Whether a connection has a key is the server's to say. A page opened before the
+      // key was saved still holds the old answer, and saving the name would put it back.
+      const prior = await getOne<Record<string, unknown>>('credentials', body.id);
+      if (prior) {
+        body = { ...body };
+        for (const k of ['hasKey', 'usesEnvKey'] as const) {
+          if (prior[k] === undefined) delete body[k];
+          else body[k] = prior[k];
+        }
+      }
+    }
+    return await upsert(name, body);
   });
 
   app.patch<{ Params: { id: string }; Body: Record<string, unknown> }>(
@@ -477,18 +529,23 @@ app.post<{ Params: { id: string }; Body: { key?: string } }>(
   async (req, reply) => {
     const key = (req.body?.key ?? '').trim();
     if (!key) return reply.code(400).send({ code: 'bad-request', message: 'key required' });
-    const cred = await getOne<{ id: string }>('credentials', req.params.id);
+    const cred = await getOne<{ id: string; provider?: string }>('credentials', req.params.id);
     if (!cred) return reply.code(404).send({ code: 'not-found', message: 'No such credential' });
     await putCredentialKey(req.params.id, key);
-    await patch('credentials', req.params.id, { hasKey: true });
-    return { ok: true, hasKey: true };
+    // A Gemini connection with a key of its own stops using the service's GOOGLE_API_KEY.
+    const gemini = cred.provider === 'google-gemini';
+    await patch('credentials', req.params.id, { hasKey: true, ...(gemini ? { usesEnvKey: false } : {}) });
+    return { ok: true, hasKey: true, usesEnvKey: gemini ? false : undefined };
   },
 );
 
 app.delete<{ Params: { id: string } }>('/api/credentials/:id/key', async (req) => {
+  const cred = await getOne<{ id: string; provider?: string }>('credentials', req.params.id);
   await deleteCredentialKey(req.params.id);
-  await patch('credentials', req.params.id, { hasKey: false });
-  return { ok: true, hasKey: false };
+  // Without a key of its own, a Gemini connection goes back to the service's GOOGLE_API_KEY.
+  const gemini = cred?.provider === 'google-gemini';
+  await patch('credentials', req.params.id, { hasKey: false, ...(gemini ? { usesEnvKey: true } : {}) });
+  return { ok: true, hasKey: false, usesEnvKey: gemini ? true : undefined };
 });
 
 /**
@@ -580,12 +637,17 @@ async function resolveLanguage(languageId?: string): Promise<ScriptLanguage> {
   };
 }
 
-/** The Gemini key that writes scripts, whichever model renders the video. */
-async function scriptKey(): Promise<string | undefined> {
+/**
+ * The Gemini key for every Google call that is not a video render — scripts, storyboard
+ * drawings, photo checks, imports. A key saved on the Gemini connection in APIs & models
+ * wins; without one, the GOOGLE_API_KEY set on the service is used.
+ */
+async function googleKey(): Promise<string | undefined> {
   const creds = await listAll<Record<string, any>>('credentials');
   const google = creds.find((c) => c.provider === 'google-gemini' && c.enabled !== false);
   return google && google.usesEnvKey === false ? await getCredentialKey(google.id) : config.googleApiKey;
 }
+const scriptKey = googleKey;
 
 /**
  * Read the brief and propose the project: which use cases, what goes in their fields,
@@ -937,7 +999,7 @@ app.post<{ Body: { brand?: string; kind?: VehicleKind; limit?: number; refresh?:
         continue;
       }
       try {
-        const profile = await syncVehicleModel(`${b.slug}/${m.slug}`, { kind: b.kind, apiKey: config.googleApiKey });
+        const profile = await syncVehicleModel(`${b.slug}/${m.slug}`, { kind: b.kind, apiKey: await googleKey() });
         const prior = existing.find((c) => c.id === profile.id);
         await upsert('cars', { ...profile, source: 'cardekho', createdAt: prior?.createdAt ?? profile.createdAt });
         results.push({
@@ -1030,7 +1092,7 @@ app.post<{
     // With a key, every photo is looked at and filed under what it shows.
     const profile = await syncVehicleModel(query, {
       kind: req.body?.kind ?? held?.kind ?? 'car',
-      apiKey: config.googleApiKey,
+      apiKey: await googleKey(),
     });
     // Switching an existing vehicle back to CarDekho writes into the same record; the
     // manufacturer's page is kept so the switch can be made again without retyping it.
@@ -1126,12 +1188,13 @@ async function resolveModel(requestedId?: string): Promise<ResolvedModel | { err
 
   // Nothing configured yet — fall back to the deploy-time Gemini setup.
   if (!chosen) {
-    if (!config.googleApiKey)
+    const fallbackKey = await googleKey();
+    if (!fallbackKey)
       return { code: 'omni-flash-not-configured', error: 'No model configured and GOOGLE_API_KEY is not set.' };
     return {
       provider: 'google-gemini',
       modelId: config.omniFlashModel,
-      apiKey: config.googleApiKey,
+      apiKey: fallbackKey,
       maxReferenceImages: 3,
       usdPerSecond: config.usdPerSecond,
       supportsImageToVideo: true,
@@ -2207,11 +2270,17 @@ app.post<{ Params: { jobId: string } }>('/api/generate/:jobId/stop', async (req,
 app.get<{ Params: { jobId: string } }>('/api/generate/:jobId', async (req, reply) => {
   const job = await getJob(req.params.jobId);
   if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such job' });
-  return {
-    ...job,
-    finalUrl: job.finalStoragePath ? `/api/clips/${job.jobId}/final` : undefined,
-    clips: clipsForClient(job.jobId, job.clips),
-  };
+  const finalUrl = job.finalStoragePath ? `/api/clips/${job.jobId}/final` : undefined;
+  // A viewer follows a run to watch it — not to read its prompts, its brief or what it cost.
+  if (!allows(req.caller ?? null, 'creator')) {
+    return {
+      jobId: job.jobId,
+      status: job.status,
+      finalUrl,
+      clips: clipsForClient(job.jobId, job.clips).map((c) => ({ ...c, error: undefined })),
+    };
+  }
+  return { ...job, finalUrl, clips: clipsForClient(job.jobId, job.clips) };
 });
 
 /**
@@ -2700,8 +2769,9 @@ app.post<{ Params: { jobId: string }; Body: { resolution?: Resolution } }>(
  * Omni writes and speaks the language; Seedance makes the better-looking picture.
  * So the film is made and approved on Omni, then passed through Seedance with one
  * instruction — change nothing, improve the rendering — and its own audio left
- * off, because the sound is already right. Seedance takes 30 seconds at a time,
- * so a longer film goes through in pieces and is joined again here.
+ * off, because the sound is already right — it is laid back over the new picture.
+ * Seedance takes a limited length at a time, so a longer film goes through in pieces
+ * split on its own cuts, all rendered at once, and joined again here.
  */
 app.post<{ Params: { jobId: string }; Body: { modelId?: string } }>(
   '/api/generations/:jobId/enhance',
@@ -2724,8 +2794,6 @@ app.post<{ Params: { jobId: string }; Body: { modelId?: string } }>(
     const want = (job.resolution === '360p' ? '720p' : (job.resolution as Resolution)) ?? '720p';
     const { render } = renderResolution(picked.modelId, want, picked.resolutions);
     const seedanceRes = render === '360p' ? '480p' : render;
-    // A whole second under the cap: ModelArk rounds, and 30.0 is refused.
-    const CHUNK = 29;
 
     const instruction = [
       'Re-render this video at a higher standard of finish. It is a finished television commercial that has already been approved.',
@@ -2740,34 +2808,75 @@ app.post<{ Params: { jobId: string }; Body: { modelId?: string } }>(
     ].join('\n');
 
     try {
-      const pieces = await splitVideo(obj.bytes, CHUNK);
-      const done: Buffer[] = [];
-      for (const piece of pieces) {
-        const facts = await videoFacts(piece);
-        // A link if the bucket will sign one; the bytes themselves if it will not.
-        const path = await uploadClip(`enhance-${job.jobId}`, done.length + 1, piece, 'video/mp4');
-        const url = await signedUrlFor(path, 180);
+      const { duration } = await videoFacts(obj.bytes);
+      // A second under the model's own ceiling: ModelArk rounds, and a length at the ceiling is refused.
+      const ceiling = Math.max(5, Math.min(29, picked.maxClipSec - 1));
+      const shortest = Math.max(4, picked.minClipSec);
+      const cuts = await sceneCuts(obj.bytes).catch(() => [] as number[]);
+      const base = `${String(req.headers['x-forwarded-proto'] ?? 'https').split(',')[0]}://${String(req.headers['x-forwarded-host'] ?? req.headers.host)}`;
+
+      const passPiece = async (piece: Buffer, index: number, seconds: number): Promise<Buffer> => {
+        const name = `enhance-${job.jobId}-${index + 1}.mp4`;
+        const stored = await putRef(name, 'video/mp4', piece);
+        // ModelArk fetches the video itself and takes nothing else: sent inline, every pass
+        // was refused with "reference_video must be provided as a web url". A signed storage
+        // link needs a permission the service account may not have, so where signing fails
+        // the app's own reference route serves the piece, at an unguessable address.
+        const url = (await signedUrlFor(stored.storagePath, 180)) ?? `${base}/api/refs/${stored.refId}/${safeRefName(name)}`;
         const out = await enhanceSeedanceClip(
           {
             prompt: instruction,
             model: picked.modelId,
             resolution: seedanceRes as '480p' | '720p' | '1080p',
-            duration: facts.duration,
-            videoUrl: url ?? undefined,
-            videoData: url ? undefined : piece.toString('base64'),
+            duration: seconds,
+            videoUrl: url,
             mimeType: 'video/mp4',
           },
           picked.apiKey,
         );
-        done.push(out.bytes);
+        // Back to exactly the length it went in at, so the approved sound still lines up.
+        return conformLength(out.bytes, seconds);
+      };
+
+      /** Every piece at once, three at a time, split on the film's own cuts. */
+      const render = async (longest: number): Promise<Buffer[]> => {
+        const bounds = pieceBounds(duration, cuts, longest, shortest);
+        // Sent at the size it is rendered at: a 360p film is under Seedance's minimum, and
+        // a reference no sharper than the render gives it nothing to work from.
+        const pieces = await cutVideo(obj.bytes, bounds, seedanceRes === '1080p' ? 1080 : 720);
+        const done: Buffer[] = new Array(pieces.length);
+        let next = 0;
+        await Promise.all(
+          Array.from({ length: Math.min(3, pieces.length) }, async () => {
+            for (;;) {
+              const i = next++;
+              if (i >= pieces.length) return;
+              done[i] = await passPiece(pieces[i]!, i, bounds[i + 1]! - bounds[i]!);
+            }
+          }),
+        );
+        return done;
+      };
+
+      let rendered: Buffer[];
+      try {
+        rendered = await render(ceiling);
+      } catch (err) {
+        const message = (err as Error).message ?? '';
+        // A reference longer than ModelArk will take: the whole pass again, in pieces it will.
+        if (ceiling > 14 && /duration|second|length|too long|exceed/i.test(message) && !/web url/i.test(message)) {
+          rendered = await render(14);
+        } else {
+          throw err;
+        }
       }
-      const joined = await joinVideos(done);
+      const joined = await withSoundOf(await joinVideos(rendered), obj.bytes);
       const seconds = (await videoFacts(joined)).duration;
-      const cost = estimateSegmentsCost(seconds, pieces.length, { usdPerSecond: picked.usdPerSecond });
+      const cost = estimateSegmentsCost(seconds, rendered.length, { usdPerSecond: picked.usdPerSecond });
       const saved = await saveDerived(job, joined, {
         kind: 'enhance',
         label: `Premium pass · ${picked.label}`,
-        note: `Re-rendered for finish by ${picked.label} in ${pieces.length} pass${pieces.length === 1 ? '' : 'es'}; the cut, the people, the vehicle and the sound are the approved ones.`,
+        note: `Re-rendered for finish by ${picked.label} in ${rendered.length} piece${rendered.length === 1 ? '' : 's'}, split on the film's own cuts and rendered together; the cut, the people, the vehicle and the sound are the approved ones.`,
         caller: req.caller,
         costInr: cost.inr,
         costUsd: cost.usd,
@@ -2889,6 +2998,7 @@ app.post<{ Body: { project?: EditProject; label?: string } }>('/api/edits/render
 });
 
 app.get<{ Params: { jobId: string } }>('/api/generations/:jobId', async (req, reply) => {
+  if (!allows(req.caller ?? null, 'creator')) return reply.code(403).send(VIEWER_BLOCKED);
   const job = await getJob(req.params.jobId);
   if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such generation' });
   return {
@@ -2956,7 +3066,8 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/colours', async (req, reply)
 app.post<{ Params: { id: string } }>('/api/cars/:id/recheck', async (req, reply) => {
   const car = await getOne<CarModelProfile>('cars', req.params.id);
   if (!car) return reply.code(404).send({ code: 'not-found', message: 'No such vehicle' });
-  if (!config.googleApiKey) {
+  const checkKey = await googleKey();
+  if (!checkKey) {
     return reply.code(503).send({ code: 'no-key', message: 'Checking photos needs the Google key.' });
   }
 
@@ -2970,7 +3081,7 @@ app.post<{ Params: { id: string } }>('/api/cars/:id/recheck', async (req, reply)
   if (!flat.length) return reply.code(400).send({ code: 'no-photos', message: 'No photos to look at.' });
 
   const subject = `${car.brand} ${car.model}`;
-  const seen = await seePhotos(flat.map((f) => ({ bytes: f.bytes })), subject, config.googleApiKey);
+  const seen = await seePhotos(flat.map((f) => ({ bytes: f.bytes })), subject, checkKey);
   if (!seen.length) {
     return reply.code(502).send({ code: 'check-failed', message: 'The photo check did not come back.' });
   }
@@ -3034,11 +3145,12 @@ app.post<{ Params: { id: string }; Body?: { relabel?: boolean } }>(
     const relabel = req.body?.relabel === true;
     const toLook = loaded.filter((l) => relabel || !l.img.view);
     let looked: string[] = [];
-    if (toLook.length && config.googleApiKey) {
+    const lookKey = await googleKey();
+    if (toLook.length && lookKey) {
       looked = await seeDealerPhotos(
         toLook.map((l) => ({ bytes: l.bytes })),
         client.displayName || client.name,
-        config.googleApiKey,
+        lookKey,
       );
     }
     const guessed = new Map<string, DealerView | 'other'>();
@@ -3084,7 +3196,7 @@ app.post<{ Params: { id: string }; Body?: { relabel?: boolean } }>(
       sheets: Object.keys(sheets),
       unfiled: photos.filter((p) => !p.view).length,
       looked: toLook.length,
-      note: config.googleApiKey
+      note: lookKey
         ? undefined
         : 'No Google key, so nothing could be looked at — file the photos by hand and build the sheets again.',
     };
@@ -3171,6 +3283,34 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req)
   // be put back.
   const admin = allows(req.caller ?? null, 'admin');
   const jobs = admin ? all : all.filter((j) => !j.hidden);
+  if (!allows(req.caller ?? null, 'creator')) {
+    // Only the latest cut, to watch: no cost, no model, no retake notes, no older versions.
+    const latest = jobs
+      .filter((j) => j.finalStoragePath && !(j.status === 'running' && !interrupted(j)))
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    return {
+      items: latest
+        ? [
+            {
+              jobId: latest.jobId,
+              status: 'done' as const,
+              createdAt: latest.createdAt,
+              totalSeconds: latest.totalSeconds,
+              aspect: latest.aspect,
+              resolution: latest.resolution,
+              segments: 0,
+              kind: 'generate' as const,
+              approved: false,
+              hidden: false,
+              canHide: false,
+              restorable: false,
+              finalUrl: `/api/clips/${latest.jobId}/final`,
+              posterUrl: latest.posterPath ? `/api/clips/${latest.jobId}/poster` : null,
+            },
+          ]
+        : [],
+    };
+  }
   return {
     items: jobs.map((j) => ({
       jobId: j.jobId,

@@ -20,6 +20,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // No source maps: they publish the original source, comments and all, next to the bundle.
+    sourcemap: false,
   },
 });

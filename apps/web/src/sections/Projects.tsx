@@ -11,7 +11,7 @@ import {
   type ProjectStage,
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
-import { Field, Empty } from '../components/ui.js';
+import { Field, Empty, useReadOnly } from '../components/ui.js';
 import { isApiError } from '../lib/client.js';
 
 const STATUS_LABEL: Record<Project['status'], string> = {
@@ -34,6 +34,7 @@ const readView = (): View => {
 
 export function ProjectsSection() {
   const { projects, clients, actors, cars, refresh, go } = useApp();
+  const readOnly = useReadOnly();
   const [q, setQ] = useState('');
   const [clientId, setClientId] = useState('');
   const [useCase, setUseCase] = useState('');
@@ -132,7 +133,7 @@ export function ProjectsSection() {
   );
 
   const filters = (
-    <div className="list-head">
+    <div className="list-head" data-tour="projects-filters">
       <Field label="Search">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, client, car…" />
       </Field>
@@ -170,7 +171,7 @@ export function ProjectsSection() {
   );
 
   const board = (
-    <div className="board">
+    <div className="board" data-tour="projects-board">
       {PROJECT_STAGES.map((st, col) => {
         const cards = filtered.filter((p) => stageOf(p) === st.id);
         return (
@@ -189,7 +190,7 @@ export function ProjectsSection() {
               setDragId(null);
               const id = e.dataTransfer.getData('text/plain');
               const p = projects.find((x) => x.id === id);
-              if (p) void move(p, st.id);
+              if (p && !readOnly) void move(p, st.id);
             }}
           >
             <header className="kcol-head" title={st.hint}>
@@ -204,7 +205,7 @@ export function ProjectsSection() {
                 <article
                   key={p.id}
                   className={`kcard${dragId === p.id ? ' dragging' : ''}`}
-                  draggable
+                  draggable={!readOnly}
                   onDragStart={(e) => {
                     e.dataTransfer.setData('text/plain', p.id);
                     e.dataTransfer.effectAllowed = 'move';
@@ -228,11 +229,12 @@ export function ProjectsSection() {
                   <div className="kcard-foot">
                     <span>
                       {p.generationCount
-                        ? `${p.generationCount} video${p.generationCount > 1 ? 's' : ''} · ${formatInr(
-                            p.totalCostInr ?? 0,
-                          )}`
+                        ? `${p.generationCount} video${p.generationCount > 1 ? 's' : ''}${
+                            readOnly ? '' : ` · ${formatInr(p.totalCostInr ?? 0)}`
+                          }`
                         : `${p.spec.durationAuto ? 'Auto' : `${p.spec.durationSec}s`} · ${p.spec.aspect}`}
                     </span>
+                    {!readOnly && (
                     <span className="kcard-move">
                       <button
                         type="button"
@@ -255,6 +257,7 @@ export function ProjectsSection() {
                         ›
                       </button>
                     </span>
+                    )}
                   </div>
                 </article>
               ))}
@@ -266,7 +269,7 @@ export function ProjectsSection() {
   );
 
   const list = (
-    <div className="proj-grid">
+    <div className="proj-grid" data-tour="projects-board">
       {filtered.map((p) => (
         <button key={p.id} className="proj-card" type="button" onClick={() => go('projects', p.id)}>
           <div className="proj-top">
@@ -284,7 +287,8 @@ export function ProjectsSection() {
               <>
                 {' · '}
                 <b>
-                  {p.generationCount} video{p.generationCount > 1 ? 's' : ''} · {formatInr(p.totalCostInr ?? 0)}
+                  {p.generationCount} video{p.generationCount > 1 ? 's' : ''}
+                  {readOnly ? '' : ` · ${formatInr(p.totalCostInr ?? 0)}`}
                 </b>
               </>
             )}
@@ -305,7 +309,7 @@ export function ProjectsSection() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="step">
               {filtered.length} of {projects.length}
-              {totalSpend ? ` · ${formatInr(totalSpend)} spent` : ''}
+              {totalSpend && !readOnly ? ` · ${formatInr(totalSpend)} spent` : ''}
             </span>
             <div className="seg quiet">
               <button type="button" className={view === 'board' ? 'on' : ''} onClick={() => pickView('board')}>
@@ -315,7 +319,14 @@ export function ProjectsSection() {
                 List
               </button>
             </div>
-            <button className="btn small primary" type="button" disabled={creating} onClick={create}>
+            <button
+              className="btn small primary"
+              type="button"
+              data-tour="projects-new"
+              disabled={creating || readOnly}
+              title={readOnly ? 'Not available for viewer access' : undefined}
+              onClick={create}
+            >
               {creating ? 'Creating…' : 'New project'}
             </button>
           </div>

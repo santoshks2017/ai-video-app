@@ -182,6 +182,7 @@ export function VideoEditor({
   brief,
   onClose,
   onExported,
+  demo = false,
 }: {
   run: GenerationHistoryItem;
   /** Other finished films in this project, to lay out alongside it. */
@@ -190,6 +191,8 @@ export function VideoEditor({
   brief?: Brief;
   onClose: () => void;
   onExported: (jobId: string) => void;
+  /** A viewer trying the editor: every tool works, and nothing is uploaded or exported. */
+  demo?: boolean;
 }) {
   const draftKey = `ava.edit.v1.${run.jobId}`;
   const [ready, setReady] = useState(false);
@@ -404,6 +407,10 @@ export function VideoEditor({
   };
 
   const onFiles = async (files: FileList | File[] | null): Promise<void> => {
+    if (demo) {
+      setNotice('Uploading material is not available for viewer access.');
+      return;
+    }
     const list = [...(files ?? [])];
     for (const [i, f] of list.entries()) {
       setUploading(list.length > 1 ? `Uploading ${i + 1} of ${list.length}…` : 'Uploading…');
@@ -776,7 +783,7 @@ export function VideoEditor({
   /* ---- export ---- */
 
   const doExport = async (): Promise<void> => {
-    if (!exporting) return;
+    if (!exporting || demo) return;
     setExporting({ ...exporting, busy: true, error: '' });
     const r = await api.renderEdit(projectRef.current, exporting.label);
     if (isApiError(r)) {
@@ -997,7 +1004,7 @@ export function VideoEditor({
       <header className="ve-head">
         <div>
           <h2>Video Editor</h2>
-          <span>{run.label ?? 'this film'} · a draft is kept on this device</span>
+          <span>{demo ? 'Try every tool — nothing done here changes the film' : `${run.label ?? 'this film'} · a draft is kept on this device`}</span>
         </div>
         <div className="ve-head-actions">
           {notice && <span className="ve-notice">{notice}</span>}
@@ -1431,7 +1438,23 @@ export function VideoEditor({
         />
       ))}
 
-      {exporting && (
+      {exporting && demo && (
+        <div className="ve-modal-wrap" role="dialog" aria-label="Export this edit">
+          <div className="ve-modal">
+            <h3>Export this edit</h3>
+            <div className="ve-hint">
+              Exporting is not available for viewer access. A creator exports an edit as a new version of the film,
+              rendered on the server — the film it started from is always kept.
+            </div>
+            <div className="ve-row end">
+              <button type="button" className="ve-btn primary" onClick={() => setExporting(null)}>
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {exporting && !demo && (
         <div className="ve-modal-wrap" role="dialog" aria-label="Export this edit">
           <div className="ve-modal">
             <h3>Export this edit</h3>

@@ -215,7 +215,7 @@ export function ActorsSection() {
             )}
           </div>
           <div className="hint" style={{ marginTop: 6 }}>
-            Presenters and customers who appear on camera. Gender locks the Hindi verb forms; the styling text goes
+            Presenters and customers who appear on camera. Gender sets the verb forms in languages that mark it, like Hindi, Marathi and Punjabi; the styling text goes
             into every prompt as written.
           </div>
         </div>
@@ -309,7 +309,7 @@ export function ActorsSection() {
                 placeholder="e.g. Meera — Metro Premium promoter"
               />
             </Field>
-            <Field label="Gender" hint="Locks the Hindi verb forms.">
+            <Field label="Gender" hint="Sets the verb forms in languages that mark gender — Hindi, Marathi and Punjabi.">
               <select
                 value={draft.gender}
                 onChange={(e) => set({ gender: e.target.value as ActorProfile['gender'] })}

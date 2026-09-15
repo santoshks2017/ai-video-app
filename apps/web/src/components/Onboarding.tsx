@@ -281,7 +281,7 @@ const TOURS: Partial<Record<TourId, TourStep[]>> = {
     { target: 'actors-filters', title: 'Find the right face', body: 'Filter by gender, age range and attire.' },
     {
       title: 'Delivery that sounds right',
-      body: 'Gender sets the Hindi verb forms, and the voice and styling notes go into every film the actor appears in.',
+      body: 'Gender sets the verb forms in languages that mark it, and the voice and styling notes go into every film the actor appears in.',
     },
   ],
 };
@@ -772,7 +772,7 @@ function Sketch({ section, label }: { section: Section; label: string }) {
       <ListAndDetail
         label={label}
         action="New language"
-        items={['English', 'Hindi', 'Marathi', 'Gujarati', 'Tamil', 'Telugu', 'Kannada', 'Bengali']}
+        items={['English', 'Hindi', 'Bengali', 'Kannada', 'Malayalam', 'Marathi', 'Punjabi', 'Tamil', 'Telugu']}
         active={1}
       >
         <SketchField label="How it is spoken" lines={6} />

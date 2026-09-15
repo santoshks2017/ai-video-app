@@ -65,6 +65,7 @@ export function Tabs() {
         );
       })}
     </div>
+    <span className="tab-credit">Built and maintained by Santosh Sharma</span>
     <TourButton />
     </div>
   );

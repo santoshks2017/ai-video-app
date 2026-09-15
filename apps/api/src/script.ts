@@ -18,7 +18,7 @@
  * rupee against Rs 100+ for a video segment.
  */
 
-import type { TokenUsage } from '@ava/shared';
+import { scriptOf, type TokenUsage } from '@ava/shared';
 import { recordUsage } from './spendLog.js';
 import { plainSpoken, speechRate, DEFAULT_WPM } from '@ava/shared';
 
@@ -329,6 +329,7 @@ function angleInstruction(req: ScriptRequest): string {
 
 function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string {
   const lang = req.language.name;
+  const script = scriptOf(req.language.code);
   const verbs =
     req.gender === 'female'
       ? 'The presenter is a woman — feminine verb forms throughout.'
@@ -377,13 +378,24 @@ function linesInstruction(req: ScriptRequest, angle: ScriptAngle | null): string
     ...DEAD_PHRASES.map((d) => `  ✗ ${d}`),
     '  ✗ any adjective with no fact behind it',
     '',
-    '**SCRIPT — this one is absolute.** Every English word and every proper noun stays in LATIN letters, spelled the ordinary English way, inside the Devanagari sentence. Never transliterate them into Devanagari.',
-    '  Right: "New Delhi में Tata Punch Pure CNG, seven lakh sixty eight thousand से शुरू।"',
-    '  Wrong: "न्यू दिल्ली में टाटा पंच प्योर सीएनजी।"',
-    '  This covers brand and model names, place names, the dealership name, and the English words Indians say in English: test drive, test ride, EMI, on-road price, booking, offer, showroom, variant, service, down payment, airbags, manual, automatic, safety, family, mileage.',
-    '',
+    ...(script === 'Latin'
+      ? []
+      : [
+          `**SCRIPT — this one is absolute.** Every English word and every proper noun stays in LATIN letters, spelled the ordinary English way, inside the ${script} sentence. Never transliterate them into ${script}.`,
+          ...(script === 'Devanagari'
+            ? [
+                '  Right: "New Delhi में Tata Punch Pure CNG, seven lakh sixty eight thousand से शुरू।"',
+                '  Wrong: "न्यू दिल्ली में टाटा पंच प्योर सीएनजी।"',
+              ]
+            : [
+                `  Right: "New Delhi", "Tata Punch Pure CNG" and "seven lakh sixty eight thousand" written exactly like that, in Latin letters, inside the ${script} line.`,
+                `  Wrong: the same names and numbers spelled out in ${script} letters.`,
+              ]),
+          '  This covers brand and model names, place names, the dealership name, and the English words Indians say in English: test drive, test ride, EMI, on-road price, booking, offer, showroom, variant, service, down payment, airbags, manual, automatic, safety, family, mileage.',
+          '',
+        ]),
     '- Never invent a price, EMI, discount, mileage, interest rate or waiting period. Only the facts above exist.',
-    '- Write every number, price and unit as plain ENGLISH words in Latin letters — "fifteen lakh four thousand", "six airbags", "seventy kmpl". Never digits, never the ₹ symbol, never the word "rupees", and never a Devanagari number. The price is the line that has to land, and a respelled price does not survive the video model.',
+    '- Write every number, price and unit as plain ENGLISH words in Latin letters — "fifteen lakh four thousand", "six airbags", "seventy kmpl". Never digits, never the ₹ symbol, never the word "rupees", and never a number written in any other script. The price is the line that has to land, and a respelled price does not survive the video model.',
     ...(req.subject.avoid?.length
       ? ['', 'This format fails when it does these — do not:', ...req.subject.avoid.map((a) => `  - ${a}`)]
       : []),

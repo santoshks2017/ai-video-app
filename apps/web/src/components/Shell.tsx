@@ -53,7 +53,7 @@ export function SignIn() {
           <div className="mark">AV</div>
           <div>
             <h1>AI Video App</h1>
-            <div className="sub">CarDekho design team</div>
+            <div className="sub signin-credit">Built and maintained by Santosh Sharma</div>
           </div>
         </div>
 

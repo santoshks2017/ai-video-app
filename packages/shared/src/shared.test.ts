@@ -127,6 +127,7 @@ import {
   unassignedRuns,
   miscReport,
   type UsageFact,
+  scriptOf,
 } from '@ava/shared';
 
 function base(overrides: Partial<Brief> = {}): Brief {
@@ -1741,4 +1742,22 @@ test('money spent outside any campaign is counted by section, with videos that b
     ],
   );
   assert.equal(miscReport(usage, loose, { from: at, to: at + 86_400_000 }).totalInr, 128.9, 'the video ten days later is out of range');
+});
+
+test('every built-in language is a plain-spelled guide for the respelling pass, in its own script', () => {
+  const codes = LANGUAGE_SEEDS.map((l) => l.code);
+  assert.equal(new Set(codes).size, codes.length, 'one seed per language');
+  for (const code of ['hi', 'en', 'bn', 'kn', 'ml', 'mr', 'pa', 'ta', 'te']) assert.ok(codes.includes(code), code);
+  for (const l of LANGUAGE_SEEDS) {
+    assert.ok(!/CAPS on the stressed syllable/.test(l.spokenGuide), `${l.name} still teaches stress capitals`);
+    assert.ok(l.writtenGuide.trim().length > 0, `${l.name} has on-screen rules`);
+    if (l.code !== 'en') assert.equal(l.needsPhonetics, true, `${l.name} goes through the respelling pass`);
+    for (const g of l.glossary) {
+      assert.ok(!/[A-Z]{2,}/.test(g.say.replace(/\b(SUV|EV|EMI)\b/g, '')), `${l.name}: ${g.say}`);
+      assert.ok(!/[A-Za-z]-[A-Za-z]/.test(g.say), `${l.name}: ${g.say}`);
+    }
+  }
+  assert.equal(scriptOf('ta'), 'Tamil script');
+  assert.equal(scriptOf('mr'), 'Devanagari');
+  assert.equal(scriptOf(undefined), 'Devanagari', 'a project with no language speaks Hindi');
 });

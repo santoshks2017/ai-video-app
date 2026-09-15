@@ -6,6 +6,7 @@
  *  - a CAR MODEL REFERENCE note when the brief is model-specific (P0.2).
  */
 
+import { scriptOf } from './languageScripts.js';
 import type { Brief, PromptPart } from './types.js';
 import { isCardPosition, type CardPosition } from './overlayLook.js';
 import { WORDS_PER_SECOND, speechRate } from './constants.js';
@@ -126,7 +127,7 @@ function spokenLock(brief: Brief): string {
     lines.push(
       '',
       'HOW TO READ THE BRACES:',
-      `- The line is spoken ${lang}. Every word — in Devanagari or in Latin letters — is read as one ordinary, natural word.`,
+      `- The line is spoken ${lang}. Every word — in ${scriptOf(brief.language?.code)} or in Latin letters — is read as one ordinary, natural word.`,
       '- Only acronyms are said letter by letter: EMI, SUV, ABS. No other word is ever spelled out.',
       '- Doubled vowels are long vowels: "aaj" is aaj, "shuru" is shuru.',
       '- An em dash is a short breath, not a spoken word.',
@@ -166,12 +167,16 @@ export function paceDelivery(pace: number, wpm?: number): string {
   return pace > 1.05 ? `${rate.delivery}, with extra energy` : rate.delivery;
 }
 
-function textLangLine(textLang: Brief['textLang']): string {
+function textLangLine(textLang: Brief['textLang'], language?: Brief['language']): string {
+  const name = language?.name ?? 'Hindi';
+  const script = scriptOf(language?.code);
   if (textLang === 'mixed')
-    return 'On-screen text is Hindi and English mixed, exactly as spelled in the list above (this is what the Galaxy Honda reference does: "₹ 2.45 लाख तक" above "Cash Discount"). Devanagari must render cleanly — if a Devanagari string cannot be rendered accurately, use its English equivalent rather than approximating the characters.';
+    return `On-screen text is ${name} and English mixed, exactly as spelled in the list above${
+      script === 'Devanagari' ? ' (this is what the Galaxy Honda reference does: "₹ 2.45 लाख तक" above "Cash Discount")' : ''
+    }. ${script} must render cleanly — if a ${script} string cannot be rendered accurately, use its English equivalent rather than approximating the characters.`;
   if (textLang === 'hindi')
-    return 'On-screen text is Devanagari-led with English only for numbers and technical terms. Devanagari must render cleanly and match the strings above character for character.';
-  return 'All on-screen text is English only, even though the speech is Hindi/Hinglish.';
+    return `On-screen text is ${script}-led with English only for numbers and technical terms. ${script} must render cleanly and match the strings above character for character.`;
+  return `All on-screen text is English only, even though the speech is ${name}.`;
 }
 
 export interface BuildPromptResult {
@@ -554,7 +559,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       );
     if (mode.lipSync)
       important.push(
-        'Hindi lip-sync must match the spoken line precisely; do not speed up the delivery to fit the time.',
+        `${brief.language?.name ?? 'Hindi'} lip-sync must match the spoken line precisely; do not speed up the delivery to fit the time.`,
       );
     if (!mode.speaks) important.push('No lip movement, no talking head, no implied speech anywhere.');
     important.push('No warped text, no garbled letters, no distorted vehicle geometry.');

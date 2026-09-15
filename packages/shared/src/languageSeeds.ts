@@ -8,6 +8,7 @@
  */
 
 import type { LanguageProfile } from './library.js';
+import { REGIONAL_LANGUAGE_SEEDS } from './regionalLanguageSeeds.js';
 
 type LanguageSeed = Omit<LanguageProfile, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -312,4 +313,5 @@ export const LANGUAGE_SEEDS: LanguageSeed[] = [
     writtenGuide: ENGLISH_WRITTEN,
     glossary: [],
   },
+  ...REGIONAL_LANGUAGE_SEEDS,
 ];

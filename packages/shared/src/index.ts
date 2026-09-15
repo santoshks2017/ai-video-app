@@ -32,3 +32,4 @@ export * from './siteSignals.js';
 export * from './overlayLook.js';
 export * from './pieces.js';
 export * from './pricing.js';
+export * from './languageScripts.js';

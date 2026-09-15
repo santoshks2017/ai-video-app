@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { getFirestore } from 'firebase-admin/firestore';
 import { listUsageFacts } from './spendLog.js';
 import Fastify from 'fastify';
 import { pieceBounds, overlayTheme, LOGO_CLEAN_VERSION, logoLayout,
@@ -714,6 +715,30 @@ async function upgradeStoredLanguages(): Promise<void> {
   }
 }
 upgradeStoredLanguages().catch((e) => app.log.warn({ err: (e as Error).message }, 'language upgrade failed'));
+
+/**
+ * Built-in languages an install does not have yet, added on start. Each is added once:
+ * the codes offered are noted, so a language somebody deleted is not put back, and the
+ * languages an install already had count as offered.
+ */
+async function addNewBuiltInLanguages(): Promise<void> {
+  const stored = await listAll<Record<string, any>>('languages');
+  const note = getFirestore().collection('meta').doc('languageSeeds');
+  const offered = new Set<string>([
+    ...(((await note.get()).data()?.codes as string[] | undefined) ?? []),
+    ...stored.map((l) => String(l.code ?? '').trim().toLowerCase()),
+  ]);
+  const added: string[] = [];
+  for (const seed of LANGUAGE_SEEDS) {
+    if (offered.has(seed.code)) continue;
+    await upsert('languages', seed);
+    offered.add(seed.code);
+    added.push(seed.name);
+  }
+  await note.set({ codes: [...offered].filter(Boolean), updatedAt: Date.now() }, { merge: true });
+  if (added.length) app.log.info({ added }, 'built-in languages added');
+}
+addNewBuiltInLanguages().catch((e) => app.log.warn({ err: (e as Error).message }, 'adding built-in languages failed'));
 
 /**
  * Bring an existing install's models up to date, on every start.

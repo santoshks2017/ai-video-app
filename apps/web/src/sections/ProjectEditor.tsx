@@ -7,6 +7,7 @@ import {
   NARRATION,
   buildPrompt,
   applyBriefPlan,
+  scriptOf,
   buildBeats,
   buildContext,
   suggestDuration,
@@ -1342,8 +1343,8 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                       onChange={(e) => setSpec({ textLang: e.target.value as ProjectVideoSpec['textLang'] })}
                     >
                       <option value="english">English only</option>
-                      <option value="mixed">Hindi + English</option>
-                      <option value="hindi">Devanagari-led</option>
+                      <option value="mixed">{language?.name ?? 'Hindi'} + English</option>
+                      <option value="hindi">{scriptOf(language?.code)}-led</option>
                     </select>
                   </Field>
                   <Field label="Copy tone">

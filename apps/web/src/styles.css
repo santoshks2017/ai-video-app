@@ -3073,3 +3073,11 @@ fieldset.lock.inline { display: contents; }
 /* Grid tracks size to their content unless told otherwise, which pushed both cards off a phone's screen. */
 .welcome-wrap { grid-template-columns: minmax(0, 980px); justify-content: center; }
 .locked-veil { grid-template-columns: minmax(0, 520px); justify-content: center; }
+
+/* Who made it, on the sign-in card: readable, not the faint grey of a caption. */
+.signin .signin-credit { color: var(--ink-muted); font-size: 13px; font-weight: 500; margin-top: 2px; }
+/* The same credit inside the app, beside the tour — the tab bar is always on screen, the menu often folded. */
+.tab-credit { flex: none; align-self: center; margin: 5px 14px 0; font-size: 12px; color: var(--ink-muted); white-space: nowrap; }
+/* Beside the tour button the credit's own right margin is the gap; alone, it keeps clear of the edge. */
+.tab-credit + .tab-tour { margin-left: 0; }
+@media (max-width: 900px) { .tab-credit { display: none; } }

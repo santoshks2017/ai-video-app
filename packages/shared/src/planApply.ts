@@ -10,14 +10,15 @@
  *
  * The rule that matters: a filled-in answer is never overwritten. The plan fills what
  * is still empty, so a designer who has already chosen something keeps it — unless
- * they ask for a fresh fill, which replaces the lot.
+ * they ask for a fresh fill, which replaces the lot. And the vehicle, its variant and
+ * its paint come only from what the brief itself names: a reader asked to pick a car
+ * will pick one, and a guess on a dealer's film is the designer's to make, not its.
  */
 
 import type { CarModelProfile, ActorProfile, Project, ProjectVideoSpec } from './library.js';
 import type { CategoryDef, CategoryId } from './types.js';
 import { CATEGORY_BY_ID } from './categories.js';
 import { emptySpec } from './compose.js';
-import { brandMatches } from './compose.js';
 
 /** What reading a brief produces. Everything is optional: an unclear brief says less. */
 export interface BriefPlan {
@@ -25,8 +26,8 @@ export interface BriefPlan {
   /** Per use case, the field values the brief actually states. */
   fieldValues?: Partial<Record<CategoryId, Record<string, string>>>;
   spec?: Partial<ProjectVideoSpec>;
-  /** The vehicle and paint the brief names, as written. */
-  vehicle?: { model?: string; colour?: string };
+  /** The vehicle, variant and paint the brief names, as written. */
+  vehicle?: { model?: string; variant?: string; colour?: string };
   /** The presenter the brief asks for, by name. */
   actor?: string;
   /** One sentence for the designer, on what was understood. */
@@ -66,6 +67,29 @@ const match = (haystack: string, needle: string): boolean => {
   const b = needle.toLowerCase().replace(/[^a-z0-9]+/g, '');
   return Boolean(a && b && (a.includes(b) || b.includes(a)));
 };
+
+const compact = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+/** The words of a name or a brief — a library paint's code prefix ("227_Everest White") dropped. */
+const tokens = (s: string): string[] =>
+  s
+    .toLowerCase()
+    .replace(/^\s*\d+_/, '')
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+/** A model or a trim the brief names: in full, or by a code of it — "3XO", "AX7". */
+export function briefNamesModel(brief: string, name: string): boolean {
+  const n = compact(name);
+  if (n.length >= 3 && compact(brief).includes(n)) return true;
+  const said = new Set(tokens(brief));
+  return tokens(name).some((t) => t.length >= 2 && /\d/.test(t) && /[a-z]/.test(t) && said.has(t));
+}
+
+/** A paint the brief names, by any real word of its name: "yellow" names Citrine Yellow. */
+export function briefNamesColour(brief: string, name: string): boolean {
+  const said = new Set(tokens(brief));
+  return tokens(name).some((t) => t.length >= 3 && !/^\d+$/.test(t) && !['and', 'with', 'dual', 'tone'].includes(t) && said.has(t));
+}
 
 /**
  * The changes a plan makes to a project — nothing else is touched, and the result is
@@ -120,19 +144,30 @@ export function applyBriefPlan(project: Project, plan: BriefPlan, input: ApplyPl
   }
   if (touchedSpec) patch.spec = spec;
 
-  // The vehicle, matched against the library rather than taken on trust.
+  // The vehicle, matched against the library — and only one the brief names. Any car of
+  // the right brand used to stand in for a model the library lacked; that was a guess.
+  const brief = project.prompt ?? '';
   const wanted = plan.vehicle?.model?.trim();
   if (wanted && (force || !project.carIds?.length)) {
     const car =
-      input.cars.find((c) => match(`${c.brand} ${c.model}`, wanted)) ??
-      input.cars.find((c) => match(c.model, wanted)) ??
-      input.cars.find((c) => brandMatches(c.brand, wanted));
-    if (car) {
+      input.cars.find((c) => match(`${c.brand} ${c.model}`, wanted)) ?? input.cars.find((c) => match(c.model, wanted));
+    if (car && (briefNamesModel(brief, wanted) || briefNamesModel(brief, car.model))) {
+      const sameHero = (project.carIds?.[0] ?? project.carId) === car.id;
       patch.carIds = [car.id];
       patch.carId = car.id;
+      // A variant and a paint belong to the hero: a different car does not inherit them.
+      if (!sameHero) {
+        patch.carVariant = undefined;
+        patch.carColour = undefined;
+      }
+      const variant = plan.vehicle?.variant?.trim();
+      const pickedVariant =
+        variant && briefNamesModel(brief, variant) ? car.variants.find((v) => match(v.name, variant)) : undefined;
+      if (pickedVariant && (force || !sameHero || blank(project.carVariant))) patch.carVariant = pickedVariant.name;
       const colour = plan.vehicle?.colour?.trim();
-      const found = colour ? car.colours.find((c) => match(c.name, colour)) : undefined;
-      if (found && (force || blank(project.carColour))) patch.carColour = found.name;
+      const pickedColour =
+        colour && briefNamesColour(brief, colour) ? car.colours.find((c) => match(c.name, colour)) : undefined;
+      if (pickedColour && (force || !sameHero || blank(project.carColour))) patch.carColour = pickedColour.name;
     }
   }
 

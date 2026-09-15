@@ -32,7 +32,7 @@ export class PlanError extends Error {
 export interface PlanContext {
   prompt: string;
   client?: { name?: string; displayName?: string; brand?: string; brands?: string[]; city?: string; vehicleKind?: string } | null;
-  cars: { brand: string; model: string; kind?: string; colours?: { name: string }[] }[];
+  cars: { brand: string; model: string; kind?: string; colours?: { name: string }[]; variants?: { name: string }[] }[];
   actors: { name: string; gender?: string; style?: string }[];
 }
 
@@ -56,7 +56,12 @@ function useCaseBlock(): string {
 function instruction(ctx: PlanContext): string {
   const cars = ctx.cars
     .slice(0, 80)
-    .map((c) => `  ${c.brand} ${c.model}${c.colours?.length ? ` — colours: ${c.colours.slice(0, 10).map((x) => x.name).join(', ')}` : ''}`)
+    .map(
+      (c) =>
+        `  ${c.brand} ${c.model}${c.variants?.length ? ` — variants: ${c.variants.slice(0, 12).map((x) => x.name).join(', ')}` : ''}${
+          c.colours?.length ? ` — colours: ${c.colours.slice(0, 12).map((x) => x.name).join(', ')}` : ''
+        }`,
+    )
     .join('\n');
   const actors = ctx.actors.map((a) => `  ${a.name}${a.gender ? ` (${a.gender})` : ''}${a.style ? ` — ${a.style}` : ''}`).join('\n');
   const brands = ctx.client?.brands?.length ? ctx.client.brands.join(', ') : (ctx.client?.brand ?? '');
@@ -96,13 +101,15 @@ function instruction(ctx: PlanContext): string {
     '- captionStyle: Long Narrative | Short Punchy | Structured.',
     '- cta: the line the film ends on, in English, as a showroom would say it.',
     '- music: a few words describing the bed, matching the occasion and the use cases.',
-    '- vehicle: only a model from the library above, and only if the brief points at one. colour: only one the library lists for it.',
+    '- vehicle: only a model from the library above, and only if the brief names it. variant: only one the library lists for',
+    '  that model, and only if the brief names it. colour: only one the library lists for it, and only if the brief names the',
+    '  colour. Anything the brief does not name, leave out — the designer picks it.',
     '- actor: only a presenter from the library above, and only if the brief points at one.',
     '',
     'Return JSON only:',
     '{"useCases": ["festival"], "fieldValues": {"festival": {"occasionName": "Ganesh Chaturthi"}},',
     ' "spec": {"narration": "presenter", "aspect": "9:16", "cta": "...", "music": "...", "captionStyle": "Short Punchy"},',
-    ' "vehicle": {"model": "...", "colour": "..."}, "actor": "...",',
+    ' "vehicle": {"model": "...", "variant": "...", "colour": "..."}, "actor": "...",',
     ' "why": "<one sentence to the designer on what you understood>"}',
     'Leave out anything the brief does not support. No commentary.',
   ].join('\n');
@@ -148,7 +155,11 @@ function clean(raw: Record<string, any>): BriefPlan {
     fieldValues,
     spec,
     vehicle: raw.vehicle?.model
-      ? { model: String(raw.vehicle.model).trim(), colour: raw.vehicle.colour ? String(raw.vehicle.colour).trim() : undefined }
+      ? {
+          model: String(raw.vehicle.model).trim(),
+          variant: raw.vehicle.variant ? String(raw.vehicle.variant).trim() : undefined,
+          colour: raw.vehicle.colour ? String(raw.vehicle.colour).trim() : undefined,
+        }
       : undefined,
     actor: raw.actor ? String(raw.actor).trim() : undefined,
     why: raw.why ? String(raw.why).trim() : undefined,

@@ -820,7 +820,7 @@ test('a brief fills the blanks, checks what it is told, and never overwrites an 
     updatedAt: 0,
   };
   const actor: ActorProfile = { id: 'meera', name: 'Meera', gender: 'female', createdAt: 0, updatedAt: 0 };
-  const project = { ...emptyProject(), id: 'p1', prompt: 'Ganesh Chaturthi post inviting customers to buy a bike' };
+  const project = { ...emptyProject(), id: 'p1', prompt: 'Ganesh Chaturthi post inviting customers to buy the XUV 3XO in Stealth Black' };
   const plan: BriefPlan = {
     useCases: ['festival', 'offer', 'not-a-use-case' as CategoryId],
     fieldValues: {
@@ -862,6 +862,28 @@ test('a brief fills the blanks, checks what it is told, and never overwrites an 
   assert.deepEqual(forced.useCases, ['festival', 'offer']);
   assert.equal(forced.carColour, 'Stealth Black');
   assert.equal(forced.spec?.cta, 'Visit us this Ganesh Chaturthi');
+
+  // The vehicle, its variant and its paint come only from what the brief names.
+  const trims: CarModelProfile = { ...car, variants: [{ name: 'AX7 L', images: {} }, { name: 'MX1', images: {} }] };
+  const guess: BriefPlan = { ...plan, vehicle: { model: 'XUV 3XO', variant: 'AX7 L', colour: 'Tango Red' } };
+  const vague = { ...emptyProject(), id: 'p2', prompt: 'Ganesh Chaturthi post inviting customers to the showroom' };
+  const unnamed = applyBriefPlan(vague, guess, { cars: [trims], actors: [actor], force: true });
+  assert.equal(unnamed.carIds, undefined, 'a car the brief never names is left for the designer');
+  assert.equal(unnamed.carColour, undefined);
+  const byCode = applyBriefPlan({ ...vague, prompt: 'Promote the Mahindra 3XO AX7 L at the showroom' }, guess, {
+    cars: [trims],
+    actors: [actor],
+    force: true,
+  });
+  assert.deepEqual(byCode.carIds, ['x3xo'], 'a model named by its code is named');
+  assert.equal(byCode.carVariant, 'AX7 L');
+  assert.equal(byCode.carColour, undefined, 'a paint the brief never names is left for the designer');
+  const otherBrand = applyBriefPlan({ ...vague, prompt: 'Promote the new Mahindra Thar' }, { ...plan, vehicle: { model: 'Mahindra Thar' } }, {
+    cars: [trims],
+    actors: [actor],
+    force: true,
+  });
+  assert.equal(otherBrand.carIds, undefined, 'another car of the same brand does not stand in for one the library lacks');
 });
 
 /* ---------------------------------------------------------------------------

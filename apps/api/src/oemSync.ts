@@ -15,6 +15,8 @@
  *  - whatever the JSON-LD leaves out is read from the page's text.
  */
 
+import type { TokenUsage } from '@ava/shared';
+import { recordUsage } from './spendLog.js';
 import { putRef } from './store.js';
 import { contactSheet } from './post.js';
 import { resolveTextModel } from './script.js';
@@ -292,7 +294,9 @@ async function lookAtPhotos(
   const json = (await res.json().catch(() => ({}))) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
     error?: { message?: string };
+    usageMetadata?: TokenUsage;
   };
+  recordUsage('Vehicle sync', model, json.usageMetadata);
   if (!res.ok) {
     // A model that cannot look at the photos is not a reason to lose the sync.
     return loaded.map((l) => ({ url: l.url, view: angleFromName(l.url) ?? 'other', vehicle: true }));
@@ -368,7 +372,11 @@ async function readPageText(html: string, subject: string, apiKey: string): Prom
       }),
     });
     if (!res.ok) return {};
-    const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const json = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      usageMetadata?: TokenUsage;
+    };
+    recordUsage('Vehicle sync', model, json.usageMetadata);
     const out = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
     return JSON.parse(out.replace(/^```json|```$/g, '').trim()) as ReadPage;
   } catch {

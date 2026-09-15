@@ -249,6 +249,7 @@ export function ClientsSection() {
    * logo fields are taken back, so nothing being typed into the client is lost.
    */
   const canEdit = useApp((s) => s.can('creator'));
+  const isAdmin = useApp((s) => s.can('admin'));
   useEffect(() => {
     const d = draft;
     if (!d?.id || !canEdit || !(d.logo || d.brandLogo) || (d.logoCleanVersion ?? 1) >= LOGO_CLEAN_VERSION) return;
@@ -1029,7 +1030,7 @@ export function ClientsSection() {
                       {' · '}
                       {new Date(p.updatedAt).toLocaleDateString()}
                       {p.generationCount ? ` · ${p.generationCount} run${p.generationCount === 1 ? '' : 's'}` : ''}
-                      {canEdit && p.totalCostInr ? ` · ${formatInr(p.totalCostInr)}` : ''}
+                      {isAdmin && p.totalCostInr ? ` · ${formatInr(p.totalCostInr)}` : ''}
                     </span>
                   </button>
                 ))}

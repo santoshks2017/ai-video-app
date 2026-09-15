@@ -31,3 +31,4 @@ export * from './logoLayout.js';
 export * from './siteSignals.js';
 export * from './overlayLook.js';
 export * from './pieces.js';
+export * from './pricing.js';

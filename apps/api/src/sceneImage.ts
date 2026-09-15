@@ -12,6 +12,8 @@
  * travels to the renderer as the first reference for the part its scene falls in.
  */
 
+import type { TokenUsage } from '@ava/shared';
+import { recordUsage, type UsageSection } from './spendLog.js';
 import { narrationMode, sceneRules, type AspectRatio, type Brief } from '@ava/shared';
 
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
@@ -183,6 +185,7 @@ export async function requestImage(
   apiKey: string,
   imageConfigs: Record<string, unknown>[],
   temperature = 0.4,
+  section: UsageSection = 'Storyboard drawings',
 ): Promise<{ bytes: Buffer; mimeType: string; model: string }> {
   const configs: Record<string, unknown>[] = [
     ...imageConfigs.map((imageConfig) => ({ temperature, responseModalities: ['IMAGE'], imageConfig })),
@@ -198,6 +201,7 @@ export async function requestImage(
       finishReason?: string;
     }[];
     error?: { message?: string; status?: string };
+    usageMetadata?: TokenUsage;
   };
   for (const [i, generationConfig] of configs.entries()) {
     res = await fetch(`${GEMINI}/models/${model}:generateContent`, {
@@ -217,6 +221,7 @@ export async function requestImage(
       json.error?.message ?? `The image model returned ${res.status}.`,
     );
   }
+  recordUsage(section, model, json.usageMetadata);
   for (const part of json.candidates?.[0]?.content?.parts ?? []) {
     const data = part.inlineData?.data ?? part.inline_data?.data;
     if (!data) continue;

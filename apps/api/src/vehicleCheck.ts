@@ -12,6 +12,8 @@
  * call costs a fraction of a paisa against ₹300–1,000 for a film nobody can use.
  */
 
+import type { TokenUsage } from '@ava/shared';
+import { recordUsage } from './spendLog.js';
 import { resolveTextModel } from './script.js';
 
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
@@ -78,7 +80,9 @@ export async function checkVehicleFrame(
     if (!res.ok) return UNCHECKED;
     const body = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
+      usageMetadata?: TokenUsage;
     };
+    recordUsage('Vehicle checks', model, body.usageMetadata);
     const text = body.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
     const parsed = JSON.parse(text) as {
       car_in_frame?: boolean;

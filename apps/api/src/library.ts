@@ -64,6 +64,14 @@ export async function patch<T>(name: Collection, id: string, fields: Partial<T>)
     .set(stripUndefined({ ...fields, updatedAt: Date.now() }), { merge: true });
 }
 
+/**
+ * Running totals the server keeps on a record, set without marking the record edited —
+ * a project's spend corrected must not jump it to the top of the board.
+ */
+export async function patchTotals<T>(name: Collection, id: string, fields: Partial<T>): Promise<void> {
+  await col(name).doc(id).set(stripUndefined(fields), { merge: true });
+}
+
 export async function remove(name: Collection, id: string): Promise<void> {
   await col(name).doc(id).delete();
 }

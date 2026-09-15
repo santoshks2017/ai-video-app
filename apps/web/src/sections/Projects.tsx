@@ -35,6 +35,8 @@ const readView = (): View => {
 export function ProjectsSection() {
   const { projects, clients, actors, cars, refresh, go } = useApp();
   const readOnly = useReadOnly();
+  /** What a film cost is for admins. */
+  const isAdmin = useApp((s) => s.can('admin'));
   const [q, setQ] = useState('');
   const [clientId, setClientId] = useState('');
   const [useCase, setUseCase] = useState('');
@@ -230,7 +232,7 @@ export function ProjectsSection() {
                     <span>
                       {p.generationCount
                         ? `${p.generationCount} video${p.generationCount > 1 ? 's' : ''}${
-                            readOnly ? '' : ` · ${formatInr(p.totalCostInr ?? 0)}`
+                            isAdmin ? ` · ${formatInr(p.totalCostInr ?? 0)}` : ''
                           }`
                         : `${p.spec.durationAuto ? 'Auto' : `${p.spec.durationSec}s`} · ${p.spec.aspect}`}
                     </span>
@@ -288,7 +290,7 @@ export function ProjectsSection() {
                 {' · '}
                 <b>
                   {p.generationCount} video{p.generationCount > 1 ? 's' : ''}
-                  {readOnly ? '' : ` · ${formatInr(p.totalCostInr ?? 0)}`}
+                  {isAdmin ? ` · ${formatInr(p.totalCostInr ?? 0)}` : ''}
                 </b>
               </>
             )}
@@ -309,7 +311,7 @@ export function ProjectsSection() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="step">
               {filtered.length} of {projects.length}
-              {totalSpend && !readOnly ? ` · ${formatInr(totalSpend)} spent` : ''}
+              {totalSpend && isAdmin ? ` · ${formatInr(totalSpend)} spent` : ''}
             </span>
             <div className="seg quiet">
               <button type="button" className={view === 'board' ? 'on' : ''} onClick={() => pickView('board')}>

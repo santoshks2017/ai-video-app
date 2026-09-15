@@ -5,6 +5,7 @@
  * layer on top.
  */
 
+import { VIDEO_PRICES } from './pricing.js';
 import type { Beat, Gender, CategoryId, NarrationKey, AspectRatio, Resolution, TextLang, LogoPlacement } from './types.js';
 import type { CardPosition } from './overlayLook.js';
 
@@ -682,7 +683,7 @@ export interface VideoModelProfile {
   usdPerSecond: number;
   /**
    * Price at a specific resolution, where the provider charges differently —
-   * Veo 3.1 Fast is $0.10/s at 720p and $0.12/s at 1080p. Falls back to
+   * Veo 3.1 Fast is $0.10/s at 720p and $0.15/s at 1080p. Falls back to
    * `usdPerSecond`.
    */
   usdPerSecondByResolution?: Partial<Record<Resolution, number>>;
@@ -724,7 +725,8 @@ export const OMNI_FLASH_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' 
    * than failing the run.
    */
   maxReferenceImages: 10,
-  usdPerSecond: 0.1,
+  usdPerSecond: 0.101,
+  usdPerSecondByResolution: VIDEO_PRICES['gemini-omni-1.1-flash'],
   dailyRequestLimit: 100,
   enabled: true,
   isDefault: true,
@@ -801,8 +803,8 @@ export const VEO_31_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId' | 'c
   supportsImageToVideo: true,
   supportsReferenceImages: true,
   maxReferenceImages: 3,
-  usdPerSecond: 0.4,
-  usdPerSecondByResolution: { '720p': 0.4, '1080p': 0.4 },
+  usdPerSecond: 0.3,
+  usdPerSecondByResolution: VIDEO_PRICES['veo-3.1-generate-preview'],
   dailyRequestLimit: 50,
   enabled: true,
   isDefault: false,
@@ -820,7 +822,7 @@ export const VEO_31_FAST_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId'
   supportsReferenceImages: true,
   maxReferenceImages: 3,
   usdPerSecond: 0.1,
-  usdPerSecondByResolution: { '720p': 0.1, '1080p': 0.12 },
+  usdPerSecondByResolution: VIDEO_PRICES['veo-3.1-fast-generate-preview'],
   dailyRequestLimit: 50,
   enabled: true,
   isDefault: false,
@@ -847,7 +849,7 @@ export const VEO_31_LITE_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credentialId'
   supportsReferenceImages: false,
   maxReferenceImages: 0,
   usdPerSecond: 0.05,
-  usdPerSecondByResolution: { '720p': 0.05, '1080p': 0.08 },
+  usdPerSecondByResolution: VIDEO_PRICES['veo-3.1-lite-generate-preview'],
   enabled: true,
   isDefault: false,
   notes:
@@ -869,6 +871,8 @@ export const OMNI_FLASH_LEGACY_DEFAULTS: Omit<VideoModelProfile, 'id' | 'credent
   name: 'Gemini Omni Flash (earlier)',
   modelId: 'gemini-omni-flash',
   maxReferenceImages: 3,
+  usdPerSecond: 0.1,
+  usdPerSecondByResolution: VIDEO_PRICES['gemini-omni-flash'],
   dailyRequestLimit: 100,
   isDefault: false,
   notes: 'A separate daily allowance from Omni 1.1 — use it for less urgent films. Tuned on 1.1, so test at 360p first.',

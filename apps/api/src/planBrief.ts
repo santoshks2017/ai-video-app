@@ -12,6 +12,8 @@
  * against the library before it can reach the project (see applyBriefPlan).
  */
 
+import type { TokenUsage } from '@ava/shared';
+import { recordUsage } from './spendLog.js';
 import { CATEGORIES, CATEGORY_BY_ID, NARRATION, type BriefPlan, type CategoryId } from '@ava/shared';
 import { resolveTextModel } from './script.js';
 
@@ -167,10 +169,12 @@ export async function planFromBrief(ctx: PlanContext, apiKey: string): Promise<B
   const json = (await res.json().catch(() => ({}))) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
     error?: { message?: string; status?: string };
+    usageMetadata?: TokenUsage;
   };
   if (!res.ok) {
     throw new PlanError(json.error?.status ?? 'plan-failed', json.error?.message ?? `Gemini returned ${res.status}.`);
   }
+  recordUsage('Brief reading', model, json.usageMetadata);
   const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
   try {
     return clean(JSON.parse(text.replace(/^```json|```$/g, '').trim()));

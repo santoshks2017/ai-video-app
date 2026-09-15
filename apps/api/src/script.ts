@@ -18,6 +18,8 @@
  * rupee against Rs 100+ for a video segment.
  */
 
+import type { TokenUsage } from '@ava/shared';
+import { recordUsage } from './spendLog.js';
 import { plainSpoken, speechRate, DEFAULT_WPM } from '@ava/shared';
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -179,6 +181,7 @@ async function ask(
   const json = (await res.json().catch(() => ({}))) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
     error?: { message?: string; status?: string };
+    usageMetadata?: TokenUsage;
   };
   if (!res.ok) {
     throw new ScriptError(
@@ -186,6 +189,7 @@ async function ask(
       json.error?.message ?? `Gemini returned ${res.status}.`,
     );
   }
+  recordUsage(job === 'write' ? 'Script writing' : 'Pronunciation', model, json.usageMetadata);
   return (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
 }
 

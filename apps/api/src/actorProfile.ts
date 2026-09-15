@@ -7,6 +7,8 @@
  * and back.
  */
 
+import type { TokenUsage } from '@ava/shared';
+import { recordUsage } from './spendLog.js';
 import {
   actorFillPrompt,
   actorSheetPrompt,
@@ -37,10 +39,12 @@ export async function fillActorProfile(
   const json = (await res.json().catch(() => ({}))) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
     error?: { message?: string; status?: string };
+    usageMetadata?: TokenUsage;
   };
   if (!res.ok) {
     throw new SceneImageError(json.error?.status ?? 'actor-fill-failed', json.error?.message ?? `Gemini returned ${res.status}.`);
   }
+  recordUsage('Actor profiles', model, json.usageMetadata);
   const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
   let parsed: unknown;
   try {
@@ -63,5 +67,5 @@ export async function drawActorSheet(
   const model = await resolveSheetImageModel(apiKey);
   const parts: ImagePart[] = [{ text: actorSheetPrompt(actor, { setting: opts.setting, keepFace: Boolean(opts.face) }) }];
   if (opts.face) parts.push({ inline_data: { mime_type: opts.face.mimeType, data: opts.face.data } });
-  return requestImage(model, parts, apiKey, [{ aspectRatio: '2:3', imageSize: '2K' }, { aspectRatio: '2:3' }], 0.6);
+  return requestImage(model, parts, apiKey, [{ aspectRatio: '2:3', imageSize: '2K' }, { aspectRatio: '2:3' }], 0.6, 'Actor profiles');
 }

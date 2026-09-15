@@ -87,6 +87,17 @@ export async function recordActivity(caller: Caller, a: Omit<Activity, 'uid' | '
  * the team is told it has spent. The log itself is never edited — the entry
  * stays, the totals stop counting it.
  */
+/** A person's run totals set outright from their runs, once the runs have been repriced. Nobody is added. */
+export async function setRunTotals(uid: string, spendInr: number, generations: number): Promise<boolean> {
+  if (uid === PREVIEW_UID) return false;
+  ensureFirebase();
+  const ref = getFirestore().collection(COLLECTION).doc(uid);
+  const snap = await ref.get();
+  if (!snap.exists) return false;
+  await ref.set({ spendInr: Math.round(spendInr), generations }, { merge: true });
+  return true;
+}
+
 export async function uncountRun(uid: string | undefined, costInr: number, runs = 1): Promise<void> {
   if (!uid || uid === PREVIEW_UID) return;
   ensureFirebase();

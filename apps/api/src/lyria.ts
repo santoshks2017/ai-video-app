@@ -14,6 +14,9 @@
  * Docs: https://ai.google.dev/gemini-api/docs/music-generation
  */
 
+import { LYRIA_USD_PER_SONG } from '@ava/shared';
+import { recordUsage } from './spendLog.js';
+
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export const LYRIA_MODEL = 'lyria-3.5';
 /** Google list price per generated song, for the job's cost record. */
@@ -97,5 +100,6 @@ export async function generateMusicBed(
   }
   const audio = findAudio(json);
   if (!audio) throw new LyriaError('lyria-no-audio', 'Lyria finished but returned no audio.');
+  recordUsage('Music', LYRIA_MODEL, undefined, LYRIA_USD_PER_SONG);
   return { bytes: Buffer.from(audio.data, 'base64'), mimeType: audio.mimeType, model: LYRIA_MODEL };
 }

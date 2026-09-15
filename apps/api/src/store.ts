@@ -58,6 +58,10 @@ export interface JobClip {
   error?: string;
   /** Carried over from an earlier job rather than generated — costs nothing. */
   reused?: boolean;
+  /** Made twice: the first came back showing the wrong vehicle, and both were paid for. */
+  remade?: boolean;
+  /** Reference images sent with it — Omni bills them as input. */
+  images?: number;
   /** Wall-clock time the provider took for this segment. Feeds the next run's ETA. */
   renderMs?: number;
 }
@@ -92,6 +96,8 @@ export interface JobRecord {
   totalSeconds: number;
   costInr: number;
   costUsd?: number;
+  /** What the run was costed at before every run was repriced from what it rendered. */
+  costInrBefore?: number;
   usdPerSecond?: number;
   clips: JobClip[];
   /** The single finished video (a run's cumulative clip, or the ffmpeg-stitched result). */
@@ -301,7 +307,6 @@ export async function listRunFacts(): Promise<RunFact[]> {
     .get();
   return snap.docs.flatMap((d) => {
     const j = d.data() as Partial<JobRecord>;
-    if (j.hidden) return [];
     return [
       {
         jobId: j.jobId ?? d.id,
@@ -318,8 +323,19 @@ export async function listRunFacts(): Promise<RunFact[]> {
         modelName: j.modelName,
         userEmail: j.userEmail,
         userName: j.userName,
+        hidden: j.hidden === true || undefined,
       },
     ];
+  });
+}
+
+/** Every generation, whole — for work that has to read each run's own record, like repricing. */
+export async function listAllJobs(): Promise<JobRecord[]> {
+  ensure();
+  const snap = await getFirestore().collection('generations').get();
+  return snap.docs.map((d) => {
+    const j = d.data() as JobRecord;
+    return { ...j, jobId: j.jobId ?? d.id };
   });
 }
 

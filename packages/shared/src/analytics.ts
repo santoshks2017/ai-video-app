@@ -11,7 +11,7 @@
 import type { ClientProfile, PackType, Project } from './library.js';
 import { CATEGORY_BY_ID } from './categories.js';
 
-/** One generation run, reduced to what Analytics reads. Hidden runs never get this far. */
+/** One generation run, reduced to what Analytics reads. */
 export interface RunFact {
   jobId: string;
   projectId?: string;
@@ -27,6 +27,18 @@ export interface RunFact {
   modelName?: string;
   userEmail?: string;
   userName?: string;
+  /** Taken out by an admin — testing, or work on the product itself. Left out unless asked for. */
+  hidden?: boolean;
+}
+
+/** One call to Google outside any film, reduced to what Analytics reads. */
+export interface UsageFact {
+  at: number;
+  /** The part of the app that made it — "Script writing", "Storyboard drawings". */
+  section: string;
+  model?: string;
+  /** Rupees, to the paisa: most calls cost less than one. */
+  costInr: number;
 }
 
 export const packOf = (p: Pick<Project, 'packType'>): PackType => p.packType ?? 'paid';
@@ -483,4 +495,60 @@ export function trendBuckets(
     out.push({ start: b, end, label, totals: analyticsTotals(rows.filter((c) => c.createdAt >= b && c.createdAt < end)) });
   }
   return out;
+}
+
+/* ---- misc cost: spent outside any campaign ---- */
+
+/** Runs that belong to no project the app still has: made outside one, or for one since deleted. */
+export function unassignedRuns(projects: Pick<Project, 'id'>[], runs: RunFact[]): RunFact[] {
+  const ids = new Set(projects.map((p) => p.id));
+  return runs.filter((r) => !r.projectId || !ids.has(r.projectId));
+}
+
+export const UNASSIGNED_RUNS_LABEL = 'Videos not in a project';
+
+export interface MiscRow {
+  key: string;
+  label: string;
+  calls: number;
+  costInr: number;
+}
+
+/**
+ * What was spent outside any campaign in a period, section by section: every call to
+ * Google that was not a film, and the videos that belong to no project. None of it is
+ * in a campaign's cost or margin.
+ */
+export function miscReport(
+  usage: UsageFact[],
+  looseRuns: RunFact[],
+  range: { from?: number; to?: number } = {},
+): { rows: MiscRow[]; totalInr: number; calls: number } {
+  const inRange = (t: number): boolean =>
+    (range.from === undefined || t >= range.from) && (range.to === undefined || t < range.to);
+  const rows = new Map<string, MiscRow>();
+  for (const u of usage) {
+    if (!inRange(u.at)) continue;
+    const row = rows.get(u.section) ?? { key: u.section, label: u.section, calls: 0, costInr: 0 };
+    row.calls += 1;
+    row.costInr += u.costInr || 0;
+    rows.set(u.section, row);
+  }
+  const videos = looseRuns.filter((r) => inRange(r.createdAt));
+  if (videos.length) {
+    rows.set('unassigned-runs', {
+      key: 'unassigned-runs',
+      label: UNASSIGNED_RUNS_LABEL,
+      calls: videos.length,
+      costInr: sum(videos.map((r) => r.costInr || 0)),
+    });
+  }
+  const out = [...rows.values()]
+    .map((r) => ({ ...r, costInr: Math.round(r.costInr * 100) / 100 }))
+    .sort((a, b) => b.costInr - a.costInr);
+  return {
+    rows: out,
+    totalInr: Math.round(sum(out.map((r) => r.costInr)) * 100) / 100,
+    calls: sum(out.map((r) => r.calls)),
+  };
 }

@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { listUsageFacts } from './spendLog.js';
 import Fastify from 'fastify';
 import { pieceBounds, overlayTheme, LOGO_CLEAN_VERSION, logoLayout,
   brandMatches,
   isPromptOnly,
   estimateCost,
   estimateSegmentsCost,
+  renderCost,
+  VIDEO_PRICES,
   applyFeedback,
   overlayCopy,
   buildPrompt,
@@ -55,7 +58,7 @@ import { importWebsite } from './siteImport.js';
 import { drawActorSheet, fillActorProfile } from './actorProfile.js';
 import { cleanLogo, findBrandLogo } from './logos.js';
 import { checkVehicleFrame } from './vehicleCheck.js';
-import { listRunFacts,
+import { listRunFacts, listAllJobs,
   saveJob,
   updateJob,
   getJob,
@@ -94,12 +97,12 @@ import {
   removeUser,
   recordActivity,
   listActivity,
-  uncountRun,
+  uncountRun, setRunTotals,
   allows,
   PREVIEW_UID,
   type Caller,
 } from './users.js';
-import { listAll, getOne, upsert, patch, remove, type Collection } from './library.js';
+import { listAll, getOne, upsert, patch, patchTotals, remove, type Collection } from './library.js';
 import { writeScript, ScriptError, type ScriptScene, type ScriptLanguage } from './script.js';
 import { generateMusicBed } from './lyria.js';
 import {
@@ -394,6 +397,113 @@ app.post<{ Body: { actor?: ActorInput; setting?: string; keepFace?: boolean } }>
 
 /** The runs behind every campaign's cost. Projects and clients the app already has. */
 app.get('/api/analytics/runs', async () => ({ items: await listRunFacts() }));
+app.get('/api/analytics/usage', async () => ({ items: await listUsageFacts() }));
+
+/**
+ * Every run's cost worked out again from what it rendered, at today's prices.
+ *
+ * Runs were billed at one flat rate whatever the resolution, for the seconds planned
+ * rather than the seconds rendered, and without the parts made again for the wrong
+ * vehicle. This reprices each from its own record. Nothing changes unless `apply` is
+ * set; applied, each run keeps its old figure beside the new one, and every project's
+ * and person's totals are set again from their runs, hidden runs left out.
+ */
+app.post<{ Body: { apply?: boolean } }>('/api/analytics/reprice', async (req) => {
+  const apply = req.body?.apply === true;
+  const [jobs, models] = await Promise.all([listAllJobs(), listAll<Record<string, any>>('models')]);
+  const byModel = new Map<string, { model: string; runs: number; beforeInr: number; afterInr: number }>();
+  const changed: { job: JobRecord; inr: number; usd: number }[] = [];
+  let beforeInr = 0;
+  let afterInr = 0;
+  const isAttempt = (j: JobRecord): boolean => !j.kind || j.kind === 'generate' || j.kind === 'retake';
+
+  for (const j of jobs) {
+    const before = Math.round(j.costInr ?? 0);
+    let inr = before;
+    let usd = j.costUsd ?? 0;
+    const done = (j.clips ?? []).filter((c) => c.status === 'done');
+    // A run with no model on record — the earliest ones — cannot be priced again, so it keeps its figure.
+    if (isAttempt(j) && done.length && j.modelId) {
+      const model = models.find((m) => m.modelId === j.modelId);
+      const render = renderResolution(j.modelId ?? '', (j.resolution ?? '720p') as Resolution, model?.resolutions).render;
+      const rate =
+        VIDEO_PRICES[j.modelId ?? '']?.[render] ??
+        (model ? priceFor(model as Parameters<typeof priceFor>[0], (j.resolution ?? '720p') as Resolution) : undefined) ??
+        j.usdPerSecond ??
+        config.usdPerSecond;
+      const remade = new Set((j.vehicleChecks ?? []).filter((v) => v.remade).map((v) => v.part));
+      const billed = renderCost(
+        j.modelId,
+        rate,
+        done
+          .filter((c) => !c.reused)
+          .map((c) => ({
+            seconds: c.seconds,
+            remade: c.remade || remade.has(c.partNum),
+            images: c.images ?? j.referenceFiles?.find((r) => r.part === c.partNum)?.files.length,
+            promptChars: j.prompts?.find((p) => p.part === c.partNum)?.text.length,
+          })),
+        { resolution: render },
+      );
+      inr = billed.inr;
+      usd = billed.usd;
+    }
+    if (!j.hidden) {
+      beforeInr += before;
+      afterInr += inr;
+    }
+    const key = j.modelName || j.modelId || 'Unknown model';
+    const row = byModel.get(key) ?? { model: key, runs: 0, beforeInr: 0, afterInr: 0 };
+    row.runs += 1;
+    row.beforeInr += before;
+    row.afterInr += inr;
+    byModel.set(key, row);
+    if (inr !== before) changed.push({ job: j, inr, usd });
+  }
+
+  let projectsSet = 0;
+  let peopleSet = 0;
+  if (apply) {
+    for (const c of changed) {
+      await updateJob(c.job.jobId, {
+        costInr: c.inr,
+        costUsd: c.usd,
+        costInrBefore: c.job.costInrBefore ?? Math.round(c.job.costInr ?? 0),
+      });
+    }
+    const repriced = new Map(changed.map((c) => [c.job.jobId, c.inr]));
+    const costOf = (j: JobRecord): number => repriced.get(j.jobId) ?? Math.round(j.costInr ?? 0);
+    const counted = jobs.filter((j) => !j.hidden);
+    for (const p of await listAll<Record<string, any>>('projects')) {
+      const mine = counted.filter((j) => j.projectId === p.id);
+      const total = mine.reduce((a, j) => a + costOf(j), 0);
+      const runs = mine.filter(isAttempt).length;
+      if ((p.totalCostInr ?? 0) === total && (p.generationCount ?? 0) === runs) continue;
+      await patchTotals('projects', p.id, { totalCostInr: total, generationCount: runs });
+      projectsSet += 1;
+    }
+    const byUser = new Map<string, { spend: number; runs: number }>();
+    for (const j of counted) {
+      if (!j.userId) continue;
+      const u = byUser.get(j.userId) ?? { spend: 0, runs: 0 };
+      u.spend += costOf(j);
+      if (isAttempt(j)) u.runs += 1;
+      byUser.set(j.userId, u);
+    }
+    for (const [uid, t] of byUser) if (await setRunTotals(uid, t.spend, t.runs).catch(() => false)) peopleSet += 1;
+  }
+
+  return {
+    applied: apply,
+    runs: jobs.length,
+    changed: changed.length,
+    beforeInr,
+    afterInr,
+    projectsSet,
+    peopleSet,
+    byModel: [...byModel.values()].sort((a, b) => b.afterInr - a.afterInr),
+  };
+});
 
 /* ---- user administration (admin only, enforced in the preHandler) ---- */
 
@@ -469,20 +579,29 @@ function forViewer(name: Collection, doc: Record<string, unknown>): Record<strin
   }
 }
 
+/** What a creator is shown: everything a viewer is, and more — but not what a film cost, which is for admins. */
+function forCreator(name: Collection, doc: Record<string, unknown>): Record<string, unknown> | null {
+  if (name !== 'projects') return doc;
+  const out = { ...doc };
+  delete out.totalCostInr;
+  return out;
+}
+
 const VIEWER_BLOCKED = { code: 'forbidden', message: 'This section is not available for viewer access.' };
 
 for (const name of COLLECTIONS) {
   app.get(`/api/${name}`, async (req) => {
     const items = await listAll<Record<string, unknown>>(name);
-    if (allows(req.caller ?? null, 'creator')) return { items };
-    return { items: items.map((d) => forViewer(name, d)).filter((d): d is Record<string, unknown> => d !== null) };
+    if (allows(req.caller ?? null, 'admin')) return { items };
+    const shown = allows(req.caller ?? null, 'creator') ? forCreator : forViewer;
+    return { items: items.map((d) => shown(name, d)).filter((d): d is Record<string, unknown> => d !== null) };
   });
 
   app.get<{ Params: { id: string } }>(`/api/${name}/:id`, async (req, reply) => {
     const doc = await getOne<Record<string, unknown>>(name, req.params.id);
     if (!doc) return reply.code(404).send({ code: 'not-found', message: `No such ${name} record` });
-    if (allows(req.caller ?? null, 'creator')) return doc;
-    const shown = forViewer(name, doc);
+    if (allows(req.caller ?? null, 'admin')) return doc;
+    const shown = (allows(req.caller ?? null, 'creator') ? forCreator : forViewer)(name, doc);
     return shown ?? reply.code(403).send(VIEWER_BLOCKED);
   });
 
@@ -502,6 +621,13 @@ for (const name of COLLECTIONS) {
           else body[k] = prior[k];
         }
       }
+    }
+    if (name === 'projects' && typeof body.id === 'string') {
+      // What a project has cost is a running total the server keeps. The editor saves
+      // the whole project, and a copy loaded before the last run finished — or a
+      // creator's, who is never sent the total — would write the old figure back over it.
+      const prior = await getOne<Record<string, unknown>>('projects', body.id);
+      if (prior) body = { ...body, totalCostInr: prior.totalCostInr, generationCount: prior.generationCount };
     }
     return await upsert(name, body);
   });
@@ -595,6 +721,21 @@ upgradeStoredLanguages().catch((e) => app.log.warn({ err: (e as Error).message }
  * saved before limits existed. A fresh install has no Gemini connection yet and is
  * left to the seed route.
  */
+/** The prices built-in models were first saved with, so a price somebody edited is never overwritten. */
+const SEEDED_PRICES: Record<string, { usdPerSecond: number; byRes?: Record<string, number> }> = {
+  'gemini-omni-1.1-flash': { usdPerSecond: 0.1 },
+  'gemini-omni-flash': { usdPerSecond: 0.1 },
+  'veo-3.1-generate-preview': { usdPerSecond: 0.4, byRes: { '720p': 0.4, '1080p': 0.4 } },
+  'veo-3.1-fast-generate-preview': { usdPerSecond: 0.1, byRes: { '720p': 0.1, '1080p': 0.12 } },
+  'veo-3.1-lite-generate-preview': { usdPerSecond: 0.05, byRes: { '720p': 0.05, '1080p': 0.08 } },
+};
+
+const sameRates = (a: Record<string, unknown> | undefined, b: Record<string, number> | undefined): boolean => {
+  const ka = Object.keys(a ?? {});
+  const kb = Object.keys(b ?? {});
+  return ka.length === kb.length && kb.every((k) => Number((a ?? {})[k]) === b![k]);
+};
+
 async function ensureBuiltInModels(): Promise<string[]> {
   const done: string[] = [];
   const [models, creds] = await Promise.all([
@@ -613,6 +754,14 @@ async function ensureBuiltInModels(): Promise<string[]> {
     if (!limit || m.dailyRequestLimit != null) continue;
     await patch('models', m.id, { dailyRequestLimit: limit });
     done.push(`${m.name}: ${limit} requests a day`);
+  }
+  for (const m of models) {
+    const prices = VIDEO_PRICES[String(m.modelId)];
+    const seeded = SEEDED_PRICES[String(m.modelId)];
+    if (!prices || !seeded) continue;
+    if (Number(m.usdPerSecond) !== seeded.usdPerSecond || !sameRates(m.usdPerSecondByResolution, seeded.byRes)) continue;
+    await patch('models', m.id, { usdPerSecond: prices['720p'] ?? m.usdPerSecond, usdPerSecondByResolution: prices });
+    done.push(`${m.name}: priced by resolution`);
   }
   return done;
 }
@@ -1892,8 +2041,8 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   if (cost.needsConfirmation && (confirmedCostInr ?? 0) < cost.inr) {
     return reply.code(428).send({
       code: 'cost-confirmation-required',
-      message: `Estimated ₹${cost.inr} exceeds the ₹500 threshold — resubmit with confirmedCostInr.`,
-      cost,
+      message: 'This run is over the ₹500 approval threshold — approve the spend and send it again.',
+      ...(allows(req.caller ?? null, 'admin') ? { cost } : {}),
     });
   }
 
@@ -2033,6 +2182,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
           videoRefs,
         });
       let { bytes, interactionId } = await ask();
+      let remadeHere = false;
 
       /*
        * Look at what came back before the film is built on it.
@@ -2051,6 +2201,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
             const remade = !verdict.same && retakesLeft > 0;
             vehicleChecks.push({ part: part.partNum, same: verdict.same, why: verdict.why, remade });
             if (remade) {
+              remadeHere = true;
               retakesLeft -= 1;
               app.log.warn(
                 { jobId, part: part.partNum, why: verdict.why },
@@ -2065,7 +2216,18 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       }
 
       const storagePath = await uploadClip(jobId, part.partNum, bytes, 'video/mp4');
-      clips[i] = { ...clips[i]!, interactionId, storagePath, status: 'done', renderMs: Date.now() - renderStart };
+      clips[i] = {
+        ...clips[i]!,
+        interactionId,
+        storagePath,
+        status: 'done',
+        renderMs: Date.now() - renderStart,
+        remade: remadeHere || undefined,
+        images: Math.min(
+          resolved.maxReferenceImages ?? 10,
+          partFrames.length + partCars.length + (actorRef ? 1 : 0) + (partPlace ? 1 : 0),
+        ),
+      };
       made[i] = bytes;
       // Written as each one lands, so History shows the film filling in.
       await updateJob(jobId, { clips }).catch(() => {});
@@ -2135,14 +2297,9 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       posterPath = put?.storagePath;
     }
 
-    // Only the parts that actually rendered are billed, so a stopped run is charged
-    // for what it made.
-    const rendered = clips.filter((c) => c.status === 'done');
-    const billed = stopped
-      ? estimateSegmentsCost(rendered.reduce((a, c) => a + (c.seconds ?? 0), 0), rendered.length, {
-          usdPerSecond: resolved.usdPerSecond,
-        })
-      : cost;
+    // Billed on what rendered, not what was planned: a stopped run for the parts it
+    // made, every part for the seconds its model renders, remakes twice.
+    const billed = billClips(resolved.modelId, usdPerSecond, clips, record.prompts, plannedRes.render);
 
     // The whole record again, not just what changed: if the first save was lost,
     // this write alone still files the video under its project.
@@ -2159,7 +2316,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       musicStoragePath: bed?.storagePath,
       costInr: billed.inr,
       costUsd: billed.usd,
-      totalSeconds: billed.totalSeconds,
+      totalSeconds: renderedSeconds(clips),
       error: stopped ? `Stopped after ${made.length} of ${parts.length} parts. What was made is kept.` : undefined,
       finishedAt: Date.now(),
     });
@@ -2169,7 +2326,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
         detail: `${cost.totalSeconds}s · ${brief.aspect} · ${resolved.label}`,
         projectId: req.body?.projectId,
         projectName: req.body?.projectName,
-        costInr: cost.inr,
+        costInr: billed.inr,
       });
     }
 
@@ -2183,7 +2340,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       if (proj) {
         await patch('projects', req.body.projectId, {
           generationCount: (proj.generationCount ?? 0) + 1,
-          totalCostInr: (proj.totalCostInr ?? 0) + cost.inr,
+          totalCostInr: (proj.totalCostInr ?? 0) + billed.inr,
           lastJobId: jobId,
           lastFinalUrl: `/api/clips/${jobId}/final`,
           status: 'generated',
@@ -2210,12 +2367,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     // segment 2 of 3 was quoted the full duration up front; leaving that
     // estimate on the record overstates the job in history and the project's
     // spend total.
-    const billed = clips.filter((c) => c.status === 'done');
-    const spent = estimateSegmentsCost(
-      billed.reduce((a, c) => a + (c.seconds ?? 0), 0),
-      billed.length,
-      { usdPerSecond: resolved.usdPerSecond },
-    );
+    const spent = billClips(resolved.modelId, usdPerSecond, clips, record.prompts, plannedRes.render);
     await updateJob(jobId, {
       ...record,
       status: 'failed',
@@ -2223,7 +2375,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       clips,
       costInr: spent.inr,
       costUsd: spent.usd,
-      totalSeconds: spent.totalSeconds,
+      totalSeconds: renderedSeconds(clips),
     }).catch(() => {});
     // Salvage: if at least one run finished, stitch what we have so the user
     // still gets a (shorter) video plus the error.
@@ -2280,7 +2432,10 @@ app.get<{ Params: { jobId: string } }>('/api/generate/:jobId', async (req, reply
       clips: clipsForClient(job.jobId, job.clips).map((c) => ({ ...c, error: undefined })),
     };
   }
-  return { ...job, finalUrl, clips: clipsForClient(job.jobId, job.clips) };
+  const withoutCost = allows(req.caller ?? null, 'admin')
+    ? {}
+    : { costInr: undefined, costUsd: undefined, costInrBefore: undefined, usdPerSecond: undefined };
+  return { ...job, ...withoutCost, finalUrl, clips: clipsForClient(job.jobId, job.clips) };
 });
 
 /**
@@ -2370,8 +2525,8 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
     if (cost.needsConfirmation && (req.body?.confirmedCostInr ?? 0) < cost.inr) {
       return reply.code(428).send({
         code: 'cost-confirmation-required',
-        message: `Estimated ₹${cost.inr} exceeds the ₹500 threshold — resubmit with confirmedCostInr.`,
-        cost,
+        message: 'This run is over the ₹500 approval threshold — approve the spend and send it again.',
+        ...(allows(req.caller ?? null, 'admin') ? { cost } : {}),
       });
     }
 
@@ -2535,10 +2690,22 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         posterPath = (await putRef(`poster-${jobId}.jpg`, 'image/jpeg', poster).catch(() => null))?.storagePath;
       }
 
+      // Only the segments made again are billed, for the seconds they rendered.
+      const billed = billClips(
+        resolved?.modelId,
+        usdPerSecond,
+        clips,
+        parts.map((p) => ({ part: p.partNum, text: p.text })),
+        resolved
+          ? renderResolution(resolved.modelId, wantedResolution(brief), resolved.resolutions).render
+          : wantedResolution(brief),
+      );
       await updateJob(jobId, {
         ...record,
         status: 'done',
         clips,
+        costInr: billed.inr,
+        costUsd: billed.usd,
         finalStoragePath,
         posterPath,
         musicStoragePath: bed?.storagePath,
@@ -2550,7 +2717,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
           detail: redo.length ? `segments ${redo.join(', ')} of ${parts.length}` : 'restitch only',
           projectId: req.body?.projectId ?? source.projectId,
           projectName: req.body?.projectName ?? source.projectName,
-          costInr: cost.inr,
+          costInr: billed.inr,
         });
       }
 
@@ -2560,7 +2727,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         if (proj) {
           await patch('projects', projectId, {
             generationCount: (proj.generationCount ?? 0) + 1,
-            totalCostInr: (proj.totalCostInr ?? 0) + cost.inr,
+            totalCostInr: (proj.totalCostInr ?? 0) + billed.inr,
             lastJobId: jobId,
             lastFinalUrl: `/api/clips/${jobId}/final`,
             status: 'generated',
@@ -2607,6 +2774,37 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
  * these are things done TO it — enlarged, re-rendered for finish, trimmed — each
  * saved as its own entry beside the original so neither replaces the other.
  */
+/**
+ * What a run's rendered parts cost: the seconds each model actually bills, a part made
+ * again for the wrong vehicle twice, and on Omni the prompt and references as input.
+ * Re-used parts cost nothing.
+ */
+function billClips(
+  modelId: string | undefined,
+  usdPerSecond: number,
+  clips: JobClip[],
+  prompts: { part: number; text: string }[] | undefined,
+  resolution: Resolution,
+): { inr: number; usd: number } {
+  return renderCost(
+    modelId,
+    usdPerSecond,
+    clips
+      .filter((c) => c.status === 'done' && !c.reused)
+      .map((c) => ({
+        seconds: c.seconds,
+        remade: c.remade,
+        images: c.images,
+        promptChars: prompts?.find((p) => p.part === c.partNum)?.text.length,
+      })),
+    { resolution },
+  );
+}
+
+/** How long the film that came back runs: every part made, re-used ones included. */
+const renderedSeconds = (clips: JobClip[]): number =>
+  Math.round(clips.filter((c) => c.status === 'done').reduce((a, c) => a + (c.seconds ?? 0), 0) * 10) / 10;
+
 async function saveDerived(
   source: JobRecord,
   bytes: Buffer,
@@ -3319,9 +3517,10 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/generations', async (req)
       status: interrupted(j) ? ('failed' as const) : j.status,
       createdAt: j.createdAt,
       totalSeconds: j.totalSeconds,
-      costInr: j.costInr,
-      costUsd: j.costUsd,
-      usdPerSecond: j.usdPerSecond,
+      // What a run cost is for admins.
+      costInr: admin ? j.costInr : undefined,
+      costUsd: admin ? j.costUsd : undefined,
+      usdPerSecond: admin ? j.usdPerSecond : undefined,
       aspect: j.aspect,
       resolution: j.resolution,
       segments: j.clips?.length ?? 0,

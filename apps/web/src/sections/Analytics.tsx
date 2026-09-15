@@ -8,16 +8,19 @@ import {
   filterCampaigns,
   formatInr,
   groupCampaigns,
+  miscReport,
   modelReport,
   parseRupees,
   presetRange,
   teamReport,
   trendBuckets,
+  unassignedRuns,
   type AnalyticsDimension,
   type AnalyticsGroup,
   type AnalyticsTotals,
   type CampaignFact,
   type DatePreset,
+  type MiscRow,
   type ModelRow,
   type PackFilter,
   type PackType,
@@ -25,10 +28,11 @@ import {
   type RunFact,
   type TrendBucket,
   type TrendUnit,
+  type UsageFact,
 } from '@ava/shared';
 import { useApp, api } from '../state/appStore.js';
 import { Panel, Banner, Field } from '../components/ui.js';
-import { get, isApiError } from '../lib/client.js';
+import { get, post, isApiError } from '../lib/client.js';
 
 /**
  * Analytics — admin only.
@@ -39,7 +43,19 @@ import { get, isApiError } from '../lib/client.js';
  * worked out by the shared analytics functions; this file only draws them.
  */
 
-type Report = 'overview' | 'campaigns' | 'geography' | 'usecases' | 'quality' | 'models' | 'team';
+/** What repricing every run from its own record came to — before anything is written, and after. */
+interface RepriceResult {
+  applied: boolean;
+  runs: number;
+  changed: number;
+  beforeInr: number;
+  afterInr: number;
+  projectsSet: number;
+  peopleSet: number;
+  byModel: { model: string; runs: number; beforeInr: number; afterInr: number }[];
+}
+
+type Report = 'overview' | 'campaigns' | 'geography' | 'usecases' | 'quality' | 'models' | 'team' | 'misc';
 
 const REPORTS: [Report, string][] = [
   ['overview', 'Overview'],
@@ -49,6 +65,7 @@ const REPORTS: [Report, string][] = [
   ['quality', 'Quality'],
   ['models', 'Models'],
   ['team', 'Team'],
+  ['misc', 'Misc cost'],
 ];
 
 const PACKS: [PackFilter, string][] = [
@@ -60,6 +77,8 @@ const PACKS: [PackFilter, string][] = [
 /* ---- formatting ---- */
 
 const inr = (n: number | null | undefined): string => (n === null || n === undefined ? '—' : formatInr(Math.round(n)));
+/** Rupees to the paisa below ₹100: most calls to Google cost less than one. */
+const inrFine = (n: number): string => (Math.abs(n) < 100 ? `₹${n.toFixed(2)}` : inr(n));
 const pct = (n: number | null | undefined, digits = 1): string =>
   n === null || n === undefined ? '—' : `${n.toFixed(digits)}%`;
 const num = (n: number | null | undefined): string =>
@@ -374,6 +393,11 @@ export function AnalyticsSection() {
   const go = useApp((s) => s.go);
 
   const [runs, setRuns] = useState<RunFact[] | null>(null);
+  const [usage, setUsage] = useState<UsageFact[] | null>(null);
+  /** Hidden runs are testing and work on the product: left out unless asked for. */
+  const [withHidden, setWithHidden] = useState(false);
+  const [reprice, setReprice] = useState<RepriceResult | null>(null);
+  const [repriceBusy, setRepriceBusy] = useState(false);
   const [loadErr, setLoadErr] = useState('');
   const [note, setNote] = useState('');
   const [report, setReport] = useState<Report>('overview');
@@ -395,17 +419,22 @@ export function AnalyticsSection() {
 
   const load = async (): Promise<void> => {
     setLoadErr('');
-    const r = await get<{ items: RunFact[] }>('/api/analytics/runs');
+    const [r, u] = await Promise.all([
+      get<{ items: RunFact[] }>('/api/analytics/runs'),
+      get<{ items: UsageFact[] }>('/api/analytics/usage'),
+    ]);
     if (isApiError(r)) setLoadErr(r.message);
     else setRuns(r.items ?? []);
+    if (!isApiError(u)) setUsage(u.items ?? []);
   };
   useEffect(() => {
     if (isAdmin) void load();
   }, [isAdmin]);
 
+  const shownRuns = useMemo(() => (runs ? runs.filter((r) => withHidden || !r.hidden) : null), [runs, withHidden]);
   const facts = useMemo(
     () =>
-      runs
+      shownRuns
         ? campaignFacts(
             projects.map((p) => ({
               ...p,
@@ -413,10 +442,10 @@ export function AnalyticsSection() {
               ...(revenueOverride[p.id] !== undefined ? { campaignRevenueInr: revenueOverride[p.id] } : {}),
             })),
             clients,
-            runs,
+            shownRuns,
           )
         : [],
-    [projects, clients, runs, packOverride, revenueOverride],
+    [projects, clients, shownRuns, packOverride, revenueOverride],
   );
 
   const range = useMemo(() => {
@@ -458,14 +487,35 @@ export function AnalyticsSection() {
         : 0;
   const unit: TrendUnit = unitChoice ?? (spanDays <= 45 ? 'day' : spanDays <= 200 ? 'week' : 'month');
 
-  const filtersOn = Boolean(stateF || cityF || dealerF || useCaseF || preset !== 'all' || pack !== 'paid');
+  const filtersOn = Boolean(stateF || cityF || dealerF || useCaseF || preset !== 'all' || pack !== 'paid' || withHidden);
   const clearFilters = (): void => {
     setPack('paid');
+    setWithHidden(false);
     setPreset('all');
     setStateF('');
     setCityF('');
     setDealerF('');
     setUseCaseF('');
+  };
+
+  /** Preview repricing every run, or — once the preview has been read — write it. */
+  const runReprice = async (apply: boolean): Promise<void> => {
+    if (
+      apply &&
+      !window.confirm(
+        'Write the repriced figures onto every run that changes? Each run keeps its old figure beside the new one, and every project’s and person’s totals are set again from their runs.',
+      )
+    )
+      return;
+    setRepriceBusy(true);
+    const r = await post<RepriceResult>('/api/analytics/reprice', { apply });
+    setRepriceBusy(false);
+    if (isApiError(r)) {
+      setNote(`Could not reprice the runs: ${r.message}`);
+      return;
+    }
+    setReprice(r);
+    if (apply) await Promise.all([load(), refresh()]);
   };
 
   const changePack = async (id: string, to: PackType): Promise<void> => {
@@ -901,7 +951,37 @@ export function AnalyticsSection() {
     </Panel>
   );
 
-  const body: Record<Report, ReactNode> = { overview, campaigns, geography, usecases, quality, models, team };
+  const misc = miscReport(usage ?? [], shownRuns ? unassignedRuns(projects, shownRuns) : [], range);
+  const miscCols: Col<MiscRow>[] = [
+    { label: 'Where', value: (r) => r.label, foot: `${misc.rows.length} source${misc.rows.length === 1 ? '' : 's'}` },
+    { label: 'Calls', num: true, value: (r) => r.calls, show: (r) => num(r.calls), foot: num(misc.calls) },
+    { label: 'Cost', num: true, value: (r) => r.costInr, show: (r) => inrFine(r.costInr), foot: inrFine(misc.totalInr) },
+  ];
+  const miscBody = (
+    <Panel
+      title="Misc cost"
+      step={inrFine(misc.totalInr)}
+      note={
+        <>
+          Spent on Google outside any campaign, in the period chosen: reading briefs, writing scripts, drawing
+          storyboard scenes and actor sheets, importing clients and vehicles, filing photographs, checking the
+          vehicle in each part, and music — each call costed from the tokens it used — and videos that belong to no
+          project. None of it is in a campaign’s cost or margin, and the pack, place and use-case filters do not
+          apply. Calls are counted from 15 September 2026, when they began to be recorded.
+        </>
+      }
+    >
+      <DataTable
+        rows={misc.rows}
+        cols={miscCols}
+        rowKey={(r) => r.key}
+        csvName="misc-cost"
+        empty="Nothing spent outside a campaign in this period."
+      />
+    </Panel>
+  );
+
+  const body: Record<Report, ReactNode> = { overview, campaigns, geography, usecases, quality, models, team, misc: miscBody };
 
   return (
     <>
@@ -910,15 +990,28 @@ export function AnalyticsSection() {
         step={runs ? `${totals.campaigns} campaign${totals.campaigns === 1 ? '' : 's'}` : undefined}
         note={
           <>
-            Revenue is what is entered on each project. Cost is what every generation run for it was billed —
-            failed runs and retakes included; runs an admin has hidden are left out, and script writing and scene
-            drawings, which cost fractions of a rupee, are not counted. Dates are when a campaign was created.
+            Revenue is what is entered on each project. Cost is what every generation run for it was billed, at
+            the resolution it rendered — failed runs, retakes and parts made again for the wrong vehicle included.
+            Runs an admin has hidden are testing and work on the product, and are left out unless Hidden runs is
+            set to Counted. Everything else spent on Google is under Misc cost, in no campaign. Dates are when a
+            campaign was created.
           </>
         }
         actions={
-          <button className="btn ghost small" type="button" onClick={() => void Promise.all([load(), refresh()])}>
-            Refresh
-          </button>
+          <>
+            <button
+              className="btn ghost small"
+              type="button"
+              disabled={repriceBusy}
+              title="Work every run's cost out again from what it rendered, at today's prices — shown first, written only if you apply it"
+              onClick={() => void runReprice(false)}
+            >
+              {repriceBusy && !reprice ? 'Reading every run…' : 'Reprice past runs'}
+            </button>
+            <button className="btn ghost small" type="button" onClick={() => void Promise.all([load(), refresh()])}>
+              Refresh
+            </button>
+          </>
         }
       >
         <div className="an-filters">
@@ -929,6 +1022,16 @@ export function AnalyticsSection() {
                   {label}
                 </button>
               ))}
+            </div>
+          </Field>
+          <Field label="Hidden runs">
+            <div className="seg">
+              <button type="button" className={withHidden ? '' : 'on'} onClick={() => setWithHidden(false)}>
+                Left out
+              </button>
+              <button type="button" className={withHidden ? 'on' : ''} onClick={() => setWithHidden(true)}>
+                Counted
+              </button>
             </div>
           </Field>
           <Field label="Period">
@@ -1027,6 +1130,50 @@ export function AnalyticsSection() {
         </div>
       </Panel>
       {loadErr && <Banner kind="bad">Could not read the runs: {loadErr}</Banner>}
+      {reprice && (
+        <Panel
+          title={reprice.applied ? 'Past runs repriced' : 'Repricing past runs — preview'}
+          step={`${reprice.changed} of ${reprice.runs} runs ${reprice.applied ? 'changed' : 'change'}`}
+          note="Every run worked out again from its own record: the resolution it rendered at, the seconds its model bills, parts made again for the wrong vehicle, and what Omni was sent. Nothing is written until Apply; applied, each run keeps its old figure beside the new one."
+          actions={
+            <>
+              {!reprice.applied && reprice.changed > 0 && (
+                <button className="btn primary small" type="button" disabled={repriceBusy} onClick={() => void runReprice(true)}>
+                  {repriceBusy ? 'Writing…' : 'Apply'}
+                </button>
+              )}
+              <button className="btn ghost small" type="button" onClick={() => setReprice(null)}>
+                Close
+              </button>
+            </>
+          }
+        >
+          <div className="an-summary">
+            Runs that are counted: {inr(reprice.beforeInr)} before, {inr(reprice.afterInr)} after
+            {reprice.applied ? ` · ${reprice.projectsSet} project and ${reprice.peopleSet} person totals set again` : ''}.
+          </div>
+          <table className="an-table compact">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th className="num">Runs</th>
+                <th className="num">Before</th>
+                <th className="num">After</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reprice.byModel.map((m) => (
+                <tr key={m.model}>
+                  <td>{m.model}</td>
+                  <td className="num">{num(m.runs)}</td>
+                  <td className="num">{inr(m.beforeInr)}</td>
+                  <td className="num">{inr(m.afterInr)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      )}
       {runs && body[report]}
     </>
   );

@@ -12,6 +12,8 @@
  * So every photo is looked at, and what it shows is what it is filed under.
  */
 
+import type { TokenUsage } from '@ava/shared';
+import { recordUsage } from './spendLog.js';
 import type { CarAngle } from '@ava/shared';
 import { resolveTextModel } from './script.js';
 
@@ -80,7 +82,11 @@ export async function seePhotos(
       }),
     });
     if (!res.ok) return [];
-    const body = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const body = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      usageMetadata?: TokenUsage;
+    };
+    recordUsage('Vehicle photo filing', model, body.usageMetadata);
     const text = body.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
     const rows = JSON.parse(text) as { i?: number; view?: string; is_vehicle?: boolean; note?: string }[];
     const out: SeenPhoto[] = batch.map(() => ({ view: 'other', isVehicle: false }));
@@ -154,7 +160,11 @@ export async function seeDealerPhotos(
       }),
     });
     if (!res.ok) return [];
-    const body = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const body = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      usageMetadata?: TokenUsage;
+    };
+    recordUsage('Dealer photo filing', model, body.usageMetadata);
     const text = body.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
     const rows = JSON.parse(text) as { i?: number; view?: string }[];
     const known = ['exterior', 'interior', 'lounge', 'delivery', 'team'] as const;

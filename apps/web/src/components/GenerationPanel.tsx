@@ -171,6 +171,8 @@ export function GenerationPanel({
   const [jobClips, setJobClips] = useState<Record<string, ClipView[]>>({});
   // Tell the workspace this project is busy, so its tab says so from anywhere.
   const setProjectBusy = useApp((s) => s.setProjectBusy);
+  /** What a run costs is for admins; creators approve a big run without the figure. */
+  const isAdmin = useApp((s) => s.can('admin'));
   const canGenerateRole = useApp((s) => s.can('creator'));
   const projectId = project?.id;
   useEffect(() => {
@@ -416,7 +418,13 @@ export function GenerationPanel({
           <label className={`cost-approve${confirmed ? ' on' : ''}`}>
             <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
             <span>
-              <b>₹{costInr.toLocaleString('en-IN')}</b> is over the ₹500 threshold — approve the spend to
+              {isAdmin ? (
+                <>
+                  <b>₹{costInr.toLocaleString('en-IN')}</b> is over the ₹500 threshold — approve the spend to
+                </>
+              ) : (
+                <>This is a big run, over the spend threshold — approve it to</>
+              )}
               {status === 'done' || status === 'error' ? ' generate again' : ' generate'}.
             </span>
           </label>
@@ -461,7 +469,9 @@ export function GenerationPanel({
                 : !canGenerate
                   ? 'Resolve the blocking pre-flight checks first'
                   : needsCostConfirm && !confirmed
-                    ? `Approve the ₹${costInr.toLocaleString('en-IN')} spend above first`
+                    ? isAdmin
+                      ? `Approve the ₹${costInr.toLocaleString('en-IN')} spend above first`
+                      : 'Approve the spend above first'
                     : ''
             }
           >
@@ -686,7 +696,7 @@ export function GenerationPanel({
                   <div className="refine-cost">
                     {redo.length === 0
                       ? 'Nothing ticked — restitches the saved segments with the current footer, logos and end card. Free.'
-                      : `${redo.length} of ${parts.length} segment${parts.length > 1 ? 's' : ''} · ${redoSeconds}s to regenerate · ${formatInr(refineInr)} instead of ${formatInr(costInr)}.`}
+                      : `${redo.length} of ${parts.length} segment${parts.length > 1 ? 's' : ''} · ${redoSeconds}s to regenerate${isAdmin ? ` · ${formatInr(refineInr)} instead of ${formatInr(costInr)}` : ''}.`}
                   </div>
                   {refineNeedsConfirm && (
                     <label className="check-row">
@@ -695,7 +705,11 @@ export function GenerationPanel({
                         checked={refineConfirmed}
                         onChange={(e) => setRefineConfirmed(e.target.checked)}
                       />
-                      <span>Over ₹500 (est. ₹{refineInr.toLocaleString('en-IN')}) — confirm the spend.</span>
+                      <span>
+                        {isAdmin
+                          ? `Over ₹500 (est. ₹${refineInr.toLocaleString('en-IN')}) — confirm the spend.`
+                          : 'Over the spend threshold — confirm the spend.'}
+                      </span>
                     </label>
                   )}
                   <div className="toolbar" style={{ marginTop: 8 }}>
@@ -736,6 +750,7 @@ export function GenerationPanel({
               <span>
                 History — {history.length} generation{history.length > 1 ? 's' : ''}
               </span>
+              {isAdmin && (
               <span className="history-total">
                 {formatInr(history.filter((h) => !h.hidden).reduce((sum, h) => sum + (h.costInr ?? 0), 0))} total
                 {history.some((h) => h.hidden) && (
@@ -745,6 +760,7 @@ export function GenerationPanel({
                   </em>
                 )}
               </span>
+              )}
             </div>
             {versionNote && <div className="check bad" style={{ marginBottom: 8 }}><span className="icon">✕</span><span>{versionNote}</span></div>}
             {history.map((h) => {
@@ -791,10 +807,12 @@ export function GenerationPanel({
                     </span>
                     {h.error && <span className="hist-err">{h.error}</span>}
                   </span>
-                  <span className="hist-cost">
-                    {h.costInr != null ? formatInr(h.costInr) : '—'}
-                    {h.usdPerSecond ? <em>${h.usdPerSecond}/s</em> : null}
-                  </span>
+                  {isAdmin && (
+                    <span className="hist-cost">
+                      {h.costInr != null ? formatInr(h.costInr) : '—'}
+                      {h.usdPerSecond ? <em>${h.usdPerSecond}/s</em> : null}
+                    </span>
+                  )}
                 </button>
 
                 {/* The receipt for this run: what it was made from, and what the

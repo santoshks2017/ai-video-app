@@ -12,6 +12,8 @@
  * pages, they are fetched, and every picture is looked at before it is kept.
  */
 
+import type { TokenUsage } from '@ava/shared';
+import { recordUsage } from './spendLog.js';
 import { OemSyncError, syncOemModel, type OemSyncInput } from './oemSync.js';
 import { resolveTextModel } from './script.js';
 
@@ -46,7 +48,9 @@ export async function findModelPages(subject: string, apiKey: string): Promise<s
         content?: { parts?: { text?: string }[] };
         groundingMetadata?: { groundingChunks?: { web?: { uri?: string } }[] };
       }[];
+      usageMetadata?: TokenUsage;
     };
+    recordUsage('Vehicle sync', model, body.usageMetadata);
     const c = body.candidates?.[0];
     const text = c?.content?.parts?.map((p) => p.text ?? '').join('\n') ?? '';
     const fromText = [...text.matchAll(/https?:\/\/[^\s"'<>)]+/g)].map((m) => m[0]);

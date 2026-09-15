@@ -120,6 +120,13 @@ import {
   PART_HEAD_SILENCE,
   type Brief,
   type CarModelProfile,
+  billedSeconds,
+  renderCost,
+  usageCostUsd,
+  tokenRates,
+  unassignedRuns,
+  miscReport,
+  type UsageFact,
 } from '@ava/shared';
 
 function base(overrides: Partial<Brief> = {}): Brief {
@@ -466,9 +473,11 @@ test('1080p renders natively where a model can and upscales where it cannot', ()
   // 360p upscaled to 480p would be worse than 720p and costs the same.
   assert.deepEqual(renderResolution(OMNI_FLASH_DEFAULTS.modelId, '480p'), { render: '720p', upscale: false });
   assert.deepEqual(renderResolution(OMNI_FLASH_DEFAULTS.modelId, '360p'), { render: '360p', upscale: false });
+  assert.equal(priceFor(OMNI_FLASH_DEFAULTS, '360p'), 0.034, 'a 360p draft costs a third of 720p');
+  assert.equal(priceFor(OMNI_FLASH_DEFAULTS, '1080p'), 0.152);
 
   // Priced at what is rendered: Veo Fast charges more at 1080p, an upscaled Seedance does not.
-  assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '1080p'), 0.12);
+  assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '1080p'), 0.15);
   assert.equal(priceFor(VEO_31_FAST_DEFAULTS, '720p'), 0.1);
   assert.equal(priceFor(SEEDANCE_25_DEFAULTS, '1080p'), SEEDANCE_25_DEFAULTS.usdPerSecond);
 });
@@ -1641,4 +1650,73 @@ test('a long film is split on its own cuts, under the limit, with no scrap left 
     const lengths = b.slice(1).map((x, i) => x - b[i]!);
     assert.ok(lengths.every((l) => l <= 29 + 1e-9 && l >= 4 - 1e-9), `pieces ${lengths.join(', ')}`);
   }
+});
+
+test('video is billed at the seconds a model renders, twice for a remake, with Omni input on top', () => {
+  assert.equal(billedSeconds('veo-3.1-fast-generate-preview', 5, { resolution: '720p' }), 6, 'Veo renders 4, 6 or 8');
+  assert.equal(billedSeconds('veo-3.1-fast-generate-preview', 5, { resolution: '720p', references: 2 }), 8, 'references force 8');
+  assert.equal(billedSeconds('veo-3.1-generate-preview', 3, { resolution: '1080p' }), 8, '1080p forces 8');
+  assert.equal(billedSeconds('dreamina-seedance-2-5-260628', 2.2), 4);
+  assert.equal(billedSeconds('gemini-omni-1.1-flash', 5.2), 5);
+  const c = renderCost(
+    'gemini-omni-1.1-flash',
+    0.034,
+    [
+      { seconds: 10, images: 2, promptChars: 4000 },
+      { seconds: 5, remade: true },
+    ],
+    { resolution: '360p' },
+  );
+  assert.equal(c.seconds, 20);
+  assert.equal(c.outputUsd, 0.68);
+  assert.equal(c.inputUsd, 0.0049, '1,000 prompt tokens and two images at $1.50 a million');
+  assert.equal(c.inr, 60);
+  assert.equal(renderCost('veo-3.1-lite-generate-preview', 0.05, [{ seconds: 8, promptChars: 4000 }]).inputUsd, 0, 'Veo bills no input');
+});
+
+test('a Google call is costed from the tokens it reports, pictures at the picture rate', () => {
+  const at = Date.UTC(2026, 8, 15);
+  const r6 = (x: number): number => Math.round(x * 1e6) / 1e6;
+  assert.equal(r6(usageCostUsd('gemini-3.8-flash', { promptTokenCount: 10_000, candidatesTokenCount: 2_000 }, at)), 0.015);
+  assert.equal(
+    r6(usageCostUsd('gemini-3.8-flash', { promptTokenCount: 10_000, candidatesTokenCount: 2_000 }, Date.UTC(2027, 0, 2))),
+    0.03,
+    'the half price ends with 2026',
+  );
+  const drawn = usageCostUsd(
+    'gemini-3.1-flash-image',
+    { promptTokenCount: 1000, candidatesTokenCount: 1300, candidatesTokensDetails: [{ modality: 'IMAGE', tokenCount: 1290 }] },
+    at,
+  );
+  assert.equal(Math.round(drawn * 1e5) / 1e5, 0.07793);
+  assert.equal(tokenRates('gemini-3.1-flash-lite-image').image, 30, 'the lite image model is not priced as the full one');
+  assert.equal(tokenRates('gemini-2.5-pro').input, 1.25);
+  assert.equal(tokenRates('gemini-9-mystery').listed, false);
+});
+
+test('money spent outside any campaign is counted by section, with videos that belong to no project', () => {
+  const at = Date.UTC(2026, 8, 10);
+  const runs: RunFact[] = [
+    { jobId: 'a', projectId: 'p1', createdAt: at, status: 'done', costInr: 300 },
+    { jobId: 'b', createdAt: at, status: 'done', costInr: 120 },
+    { jobId: 'c', projectId: 'gone', createdAt: at + 10 * 86_400_000, status: 'failed', costInr: 80 },
+  ];
+  const loose = unassignedRuns([{ id: 'p1' }], runs);
+  assert.deepEqual(loose.map((r) => r.jobId), ['b', 'c']);
+  const usage: UsageFact[] = [
+    { at, section: 'Script writing', costInr: 1.2 },
+    { at, section: 'Script writing', costInr: 0.8 },
+    { at, section: 'Storyboard drawings', costInr: 6.9 },
+  ];
+  const all = miscReport(usage, loose);
+  assert.equal(all.totalInr, 208.9);
+  assert.deepEqual(
+    all.rows.map((r) => [r.label, r.calls]),
+    [
+      ['Videos not in a project', 2],
+      ['Storyboard drawings', 1],
+      ['Script writing', 2],
+    ],
+  );
+  assert.equal(miscReport(usage, loose, { from: at, to: at + 86_400_000 }).totalInr, 128.9, 'the video ten days later is out of range');
 });

@@ -122,6 +122,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const { projects, clients, actors, cars, instructions, languages, models, refresh, go, closeTab } =
     useApp();
   const readOnly = useReadOnly();
+  const isAdmin = useApp((s) => s.can('admin'));
   const stored = projects.find((p) => p.id === projectId);
   const [project, setProject] = useState<Project | null>(stored ?? null);
   const [savedAt, setSavedAt] = useState<number>(0);
@@ -1247,7 +1248,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                 label="Model"
                 hint={
                   activeModel
-                    ? `${activeModel.minClipSec}–${activeModel.maxClipSec}s per clip${readOnly ? '' : ` · $${activeModel.usdPerSecond}/s`}${
+                    ? `${activeModel.minClipSec}–${activeModel.maxClipSec}s per clip${isAdmin ? ` · $${activeModel.usdPerSecond}/s` : ''}${
                         usageLabel(activeModel.id) ? ` · ${usageLabel(activeModel.id)}` : ''
                       }. Counted by this app, so requests made elsewhere on the same key are not in it — but a model Google has said is used up shows as used up.`
                     : 'None registered — add one in APIs & models.'

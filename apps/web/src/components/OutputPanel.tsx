@@ -6,6 +6,7 @@ import {
   type CostEstimate,
 } from '@ava/shared';
 import type { PreflightResult } from '@ava/shared';
+import { useApp } from '../state/appStore.js';
 
 export function OutputPanel({
   parts,
@@ -19,6 +20,8 @@ export function OutputPanel({
   promptOnly: boolean;
 }) {
   const [toast, setToast] = useState('');
+  /** What a film costs is for admins. */
+  const isAdmin = useApp((s) => s.can('admin'));
   const longest = parts.reduce((n, p) => Math.max(n, p.text.length), 0);
   // Accordion: at most one prompt part open at a time, all collapsed by default.
   const [openPart, setOpenPart] = useState<number | null>(null);
@@ -69,7 +72,7 @@ export function OutputPanel({
         </div>
       )}
 
-      {!promptOnly && cost && parts.length > 0 && (
+      {isAdmin && !promptOnly && cost && parts.length > 0 && (
         <div className={`cost${cost.needsConfirmation ? ' confirm' : ''}`}>
           <div>
             Estimated cost: <strong>{formatInr(cost.inr)}</strong> (${cost.usd.toFixed(2)} ·{' '}

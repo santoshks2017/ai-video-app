@@ -9,6 +9,8 @@
  * used as they are. The logo is cleaned and stored the way an uploaded one is.
  */
 
+import type { TokenUsage } from '@ava/shared';
+import { recordUsage } from './spendLog.js';
 import { extractSiteSignals, tidyPhone, type SiteSignals, type StoredImage } from '@ava/shared';
 import { cleanLogo } from './logos.js';
 import { putRef, safeRefName } from './store.js';
@@ -114,7 +116,11 @@ async function pickWithModel(s: SiteSignals, apiKey: string): Promise<Picked | n
     }),
   }).catch(() => null);
   if (!res?.ok) return null;
-  const json = (await res.json().catch(() => ({}))) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  const json = (await res.json().catch(() => ({}))) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    usageMetadata?: TokenUsage;
+  };
+  recordUsage('Client import', model, json.usageMetadata);
   const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
   try {
     const o = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')) as Record<string, unknown>;

@@ -93,10 +93,8 @@ const FEATURES: { title: string; body: string }[] = [
   { title: 'A full video editor, built in', body: 'Trim, reorder, add text, transitions, filters and sound for any last touch, right in the browser.' },
 ];
 
-type MockKind = 'kpis' | 'rows' | 'releases' | 'list' | 'split';
-
 /** What a section is for, told to someone who may not open it. */
-const LOCKED: Partial<Record<Section, { lede: string; points: string[]; mock: MockKind }>> = {
+const LOCKED: Partial<Record<Section, { lede: string; points: string[] }>> = {
   instructions: {
     lede: 'The house rules every film is made with.',
     points: [
@@ -104,7 +102,6 @@ const LOCKED: Partial<Record<Section, { lede: string; points: string[]; mock: Mo
       'Written once by the team and followed by every film, without anyone repeating them.',
       'Kept in order, so the rules that matter most come first.',
     ],
-    mock: 'list',
   },
   languages: {
     lede: 'How every film speaks, and spells, each language.',
@@ -114,7 +111,6 @@ const LOCKED: Partial<Record<Section, { lede: string; points: string[]; mock: Mo
       'Locked spellings for dealer names, model names and places — said the same way every time.',
       'Rules for on-screen text, footers and end cards in each script.',
     ],
-    mock: 'split',
   },
   users: {
     lede: 'Who can explore, who can create, and who runs the app.',
@@ -123,7 +119,6 @@ const LOCKED: Partial<Record<Section, { lede: string; points: string[]; mock: Mo
       'Every paid action is tied to the person who took it.',
       'What each person has spent, and a log of recent activity.',
     ],
-    mock: 'rows',
   },
   analytics: {
     lede: 'The business behind every film.',
@@ -132,12 +127,10 @@ const LOCKED: Partial<Record<Section, { lede: string; points: string[]; mock: Mo
       'Paid packs by default, with trial packs one click away.',
       'Any day, week, month or date range, with reports ready to share.',
     ],
-    mock: 'kpis',
   },
   whatsnew: {
     lede: 'Every improvement, as it ships.',
     points: ['Release notes for every version, newest first.', 'New tools, new models and fixes — each explained in a line.'],
-    mock: 'releases',
   },
   models: {
     lede: 'The engines behind the films.',
@@ -146,7 +139,6 @@ const LOCKED: Partial<Record<Section, { lede: string; points: string[]; mock: Mo
       'Keys are kept on the server and never reach the browser.',
       'Daily limits and pricing, model by model.',
     ],
-    mock: 'split',
   },
 };
 
@@ -294,25 +286,8 @@ const TOURS: Partial<Record<TourId, TourStep[]>> = {
   ],
 };
 
-function stepsFor(id: TourId): TourStep[] {
-  const own = TOURS[id];
-  if (own) return own;
-  const locked = LOCKED[id as Section];
-  if (!locked) return [];
-  return [
-    {
-      target: 'lock-card',
-      title: locked.lede,
-      body: (
-        <ul className="tour-points">
-          {locked.points.map((p) => (
-            <li key={p}>{p}</li>
-          ))}
-        </ul>
-      ),
-    },
-  ];
-}
+/** Only the pages somebody can use have a tour. A locked section says what it does on the page itself. */
+const stepsFor = (id: TourId): TourStep[] => TOURS[id] ?? [];
 
 /* ---- the welcome ---- */
 
@@ -597,7 +572,7 @@ export function Onboarding() {
   }, [userId, viewer, openWelcome]);
 
   useEffect(() => {
-    if (!userId || !viewer || welcome || tour || !tourId) return;
+    if (!userId || !viewer || welcome || tour || !tourId || !stepsFor(tourId).length) return;
     const seen = readSeen(userId);
     if (!seen.welcome || seen.tours?.[tourId]) return;
     const t = setTimeout(() => start(tourId), 900);
@@ -632,22 +607,22 @@ export function TourButton() {
 /* ---- a section somebody may not open ---- */
 
 /**
- * The section, blurred, behind a note saying it is not available — and what it does.
+ * The section, lightly blurred, behind a note saying it is not available — and what it does.
  *
- * What is blurred is a sketch of the page, never the page: a blur is one line of CSS
- * away from being taken off, so nothing real is drawn underneath it.
+ * Enough shows through to see how the page is laid out. What is under the blur is a
+ * sketch of that layout and never the page's data: a light blur is easy to read through,
+ * and one line of CSS takes it off, so only headings are written out and every value is a bar.
  */
 export function LockedSection({ section, label }: { section: Section; label: string }) {
   const viewer = useApp((s) => !s.can('creator'));
-  const start = useOnboarding((s) => s.start);
   const copy = LOCKED[section];
   return (
     <div className="locked-page">
       <div className="locked-mock" aria-hidden>
-        <Mock kind={copy?.mock ?? 'list'} />
+        <Sketch section={section} label={label} />
       </div>
       <div className="locked-veil">
-        <div className="lock-card" data-tour="lock-card" role="note">
+        <div className="lock-card" role="note">
           <div className="lock-badge" aria-hidden>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8">
               <rect x="5" y="11" width="14" height="10" rx="2" />
@@ -667,86 +642,207 @@ export function LockedSection({ section, label }: { section: Section; label: str
               </ul>
             </div>
           )}
-          <button className="btn small" type="button" onClick={() => start(section)}>
-            Tour this section
-          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function Mock({ kind }: { kind: MockKind }) {
-  const lines = (n: number, seed = 0): ReactNode[] =>
-    Array.from({ length: n }, (_, i) => (
-      <span key={i} className="mock-line" style={{ width: `${52 + ((i * 37 + seed * 17) % 42)}%` }} />
-    ));
-  if (kind === 'kpis') {
+/** Widths for bars that stand in for words, varied but the same on every render. */
+const widths = (n: number, seed: number): number[] => Array.from({ length: n }, (_, i) => 48 + ((i * 37 + seed * 17) % 46));
+
+function Bar({ w, ink }: { w: number; ink?: boolean }) {
+  return <span className={`mock-line${ink ? ' ink' : ''}`} style={{ width: `${w}%` }} />;
+}
+
+function SketchField({ label, lines }: { label: string; lines: number }) {
+  return (
+    <div className="mock-field">
+      <span className="mock-label">{label}</span>
+      <div className="mock-input">
+        {widths(lines, label.length).map((w, i) => (
+          <Bar key={i} w={w} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A list on the left and the record picked from it on the right, the shape of most library pages. */
+function ListAndDetail({
+  label,
+  action,
+  items,
+  active = 0,
+  children,
+}: {
+  label: string;
+  action: string;
+  items: string[];
+  active?: number;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mock-two">
+      <div className="mock-card">
+        <div className="mock-headrow">
+          <b className="mock-title">{label}</b>
+          <span className="mock-pill">{action}</span>
+        </div>
+        {items.map((it, i) => (
+          <div key={it} className={`mock-item${i === active ? ' on' : ''}`}>
+            <span className="mock-item-name">{it}</span>
+            <Bar w={16 + ((i * 7) % 14)} />
+          </div>
+        ))}
+      </div>
+      <div className="mock-card">
+        <b className="mock-title">{items[active]}</b>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Sketch({ section, label }: { section: Section; label: string }) {
+  if (section === 'analytics') {
     return (
-      <div className="mock-grid">
+      <div className="mock-page">
+        <div className="mock-card mock-headrow">
+          <b className="mock-title">{label}</b>
+          <span className="mock-pills">
+            {['Today', 'This week', 'This month', 'Last 30 days', 'This year', 'All time'].map((p, i) => (
+              <span key={p} className={`mock-pill${i === 2 ? ' on' : ''}`}>
+                {p}
+              </span>
+            ))}
+          </span>
+        </div>
         <div className="mock-kpis">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="mock-card">
-              <span className="mock-line" style={{ width: '42%' }} />
+          {['Campaigns', 'Revenue', 'Cost', 'Gross margin'].map((k) => (
+            <div key={k} className="mock-card">
+              <span className="mock-label">{k}</span>
               <b className="mock-num" />
             </div>
           ))}
         </div>
         <div className="mock-card">
+          <span className="mock-label">Revenue and cost over time</span>
           <div className="mock-bars">
-            {[42, 64, 51, 80, 58, 90, 72, 66, 84, 61, 95, 77].map((h, i) => (
-              <span key={i} style={{ height: `${h}%` }} />
+            {[62, 48, 75, 58, 83, 66, 90, 71, 78, 60, 95, 74].map((h, i) => (
+              <span key={i} className="mock-pair">
+                <i style={{ height: `${h}%` }} />
+                <i style={{ height: `${Math.round(h * 0.55)}%` }} />
+              </span>
             ))}
           </div>
         </div>
-        <div className="mock-card">{lines(7, 2)}</div>
-      </div>
-    );
-  }
-  if (kind === 'rows') {
-    return (
-      <div className="mock-card">
-        {Array.from({ length: 10 }, (_, i) => (
-          <div key={i} className="mock-row">
-            <span className="mock-dot" />
-            <span className="mock-stack">{lines(2, i)}</span>
-            <span className="mock-chip" />
+        <div className="mock-card">
+          <div className="mock-tr mock-th">
+            {['Dealer', 'City', 'Campaigns', 'Revenue', 'Cost', 'Margin'].map((h) => (
+              <span key={h}>{h}</span>
+            ))}
           </div>
-        ))}
+          {Array.from({ length: 7 }, (_, r) => (
+            <div key={r} className="mock-tr">
+              {widths(6, r).map((w, c) => (
+                <Bar key={c} w={c === 0 ? w : Math.round(w * 0.6)} ink={c === 0} />
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
-  if (kind === 'releases') {
+  if (section === 'instructions') {
+    return (
+      <ListAndDetail
+        label={label}
+        action="New instruction"
+        items={['Brand safety', 'Framing and camera', 'The vehicle', 'On-screen text', 'The presenter', 'Sound and music', 'What never to show']}
+      >
+        <SketchField label="Title" lines={1} />
+        <SketchField label="Instruction" lines={8} />
+        <SketchField label="Applies to" lines={1} />
+      </ListAndDetail>
+    );
+  }
+  if (section === 'languages') {
+    return (
+      <ListAndDetail
+        label={label}
+        action="New language"
+        items={['English', 'Hindi', 'Marathi', 'Gujarati', 'Tamil', 'Telugu', 'Kannada', 'Bengali']}
+        active={1}
+      >
+        <SketchField label="How it is spoken" lines={6} />
+        <SketchField label="How it is written on screen" lines={3} />
+        <div className="mock-field">
+          <span className="mock-label">Locked spellings</span>
+          {Array.from({ length: 4 }, (_, r) => (
+            <div key={r} className="mock-tr pairs">
+              <Bar w={widths(1, r)[0]!} ink />
+              <Bar w={widths(1, r + 3)[0]!} />
+            </div>
+          ))}
+        </div>
+      </ListAndDetail>
+    );
+  }
+  if (section === 'users') {
+    const roles = ['Admin', 'Creator', 'Creator', 'Viewer', 'Creator', 'Viewer', 'Viewer', 'Creator'];
+    return (
+      <div className="mock-two wide">
+        <div className="mock-card">
+          <b className="mock-title">{label}</b>
+          <div className="mock-tr people mock-th">
+            <span />
+            {['Name', 'Role', 'Films', 'Spend'].map((h) => (
+              <span key={h}>{h}</span>
+            ))}
+          </div>
+          {roles.map((role, r) => (
+            <div key={r} className="mock-tr people">
+              <span className="mock-dot" />
+              <Bar w={widths(1, r)[0]!} ink />
+              <span className={`mock-role${role === 'Admin' ? ' admin' : ''}`}>{role}</span>
+              <Bar w={34} />
+              <Bar w={48} />
+            </div>
+          ))}
+        </div>
+        <div className="mock-card">
+          <span className="mock-label">Recent activity</span>
+          {Array.from({ length: 9 }, (_, r) => (
+            <div key={r} className="mock-field">
+              <Bar w={widths(1, r)[0]!} ink />
+              <Bar w={30} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (section === 'whatsnew') {
     return (
       <div className="mock-card">
-        {Array.from({ length: 12 }, (_, i) => (
-          <div key={i} className="mock-release">
-            <span className="mock-line ink" style={{ width: `${34 + ((i * 13) % 30)}%` }} />
-            <span className="mock-line" style={{ width: '14%' }} />
+        <b className="mock-title">{label}</b>
+        {['3.7', '3.6', '3.5', '3.4', '3.3', '3.2', '3.1', '3.0', '2.9', '2.8', '2.7'].map((v, r) => (
+          <div key={v} className="mock-release">
+            <span className="mock-version">{v}</span>
+            <Bar w={widths(1, r)[0]! * 0.6} ink />
+            <span className="mock-date">
+              <Bar w={100} />
+            </span>
           </div>
         ))}
       </div>
     );
   }
   return (
-    <div className="mock-two">
-      <div className="mock-card">
-        {Array.from({ length: 9 }, (_, i) => (
-          <div key={i} className="mock-item">
-            {lines(2, i)}
-          </div>
-        ))}
-      </div>
-      <div className="mock-card">
-        {kind === 'split' && (
-          <div className="mock-chips">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <span key={i} className="mock-chip" />
-            ))}
-          </div>
-        )}
-        {lines(16, 3)}
-      </div>
-    </div>
+    <ListAndDetail label={label} action="Add" items={['Video models', 'API connections', 'Daily limits']}>
+      <SketchField label="Name" lines={1} />
+      <SketchField label="Settings" lines={6} />
+    </ListAndDetail>
   );
 }

@@ -228,6 +228,7 @@ const DEAD_PHRASES = [
 
 /** The parts of the brief every pass needs in front of it. */
 function subjectBlock(req: ScriptRequest): string[] {
+  const oemKind = req.clientKind === 'oem';
   const sub = req.subject;
   const car = sub.car ?? {};
 
@@ -279,9 +280,9 @@ function subjectBlock(req: ScriptRequest): string[] {
     ...(car.highlights?.length
       ? ['## VERIFIED FACTS you may state as-is', ...car.highlights.map((h) => `  - ${h}`), '']
       : []),
-    ...(briefFacts.length ? ['## WHAT THE DEALER GAVE YOU', ...briefFacts, ''] : []),
-    '## THE DEALERSHIP',
-    `  ${req.dealerName}${req.city ? `, ${req.city}` : ''}`,
+    ...(briefFacts.length ? [oemKind ? '## WHAT THE BRAND GAVE YOU' : '## WHAT THE DEALER GAVE YOU', ...briefFacts, ''] : []),
+    oemKind ? '## THE MANUFACTURER' : '## THE DEALERSHIP',
+    `  ${req.dealerName}${!oemKind && req.city ? `, ${req.city}` : ''}`,
     ...(req.cta ? [`  The film ends on this action: ${req.cta}`] : []),
     ...(req.subject.presenter ? [`  Presenter: ${req.subject.presenter}`] : []),
     ...(req.direction?.trim() ? ['', '## EXTRA DIRECTION', `  ${req.direction.trim()}`] : []),
@@ -317,7 +318,9 @@ function angleInstruction(req: ScriptRequest): string {
       ? ['The use cases above are ONE film. The idea is the single thought that holds all of them together — never one idea per use case.', '']
       : []),
     '1. **The viewer.** One sentence: who is watching this, and what are they actually weighing up? Not a demographic. A person mid-decision — comparing two cars, waiting for a discount, replacing a hatchback that has stopped fitting the family.',
-    '2. **The idea.** One sentence: the single thought this film leaves behind. It has to be something only THIS car at THIS dealership could say. If it would fit a rival brand, it is not an idea, it is a slogan.',
+    req.clientKind === 'oem'
+      ? '2. **The idea.** One sentence: the single thought this film leaves behind. It has to be something only THIS car from THIS brand could say. If it would fit a rival marque, it is not an idea, it is a slogan.'
+      : '2. **The idea.** One sentence: the single thought this film leaves behind. It has to be something only THIS car at THIS dealership could say. If it would fit a rival brand, it is not an idea, it is a slogan.',
     '3. **The throughline.** One sentence on how the lines build — what the opening makes them want to know, and how each scene pays that off until the last line asks for the action.',
     '4. **The proof.** The two to four specific facts from above the script will spend its seconds on. Real numbers and named features. If a fact is not in the brief, it does not exist.',
     '',
@@ -441,7 +444,9 @@ function editInstruction(req: ScriptRequest, angle: ScriptAngle | null, draft: {
     '1. **Does it finish its thought?** A line ending mid-clause — "और आपको मिले peace" — is the worst fault here. Rewrite it as a shorter complete sentence.',
     '2. **Is there an adjective doing a fact’s job?** शानदार, बेहतरीन, premium, amazing. Replace it with the real number or feature, or cut the clause.',
     '3. **Is it a stock phrase?** "city हो या highway", "families की पसंद", "तो देर किस बात की". Rewrite from scratch.',
-    '4. **Would this line work for a different dealership, a different car or a different city?** Then it is not doing any work. Make it specific.',
+    req.clientKind === 'oem'
+      ? '4. **Would this line work for a different marque or a different car?** Then it is not doing any work. Make it specific.'
+      : '4. **Would this line work for a different dealership, a different car or a different city?** Then it is not doing any work. Make it specific.',
     '5. **Does it follow from the line before it?** If the script could be shuffled without anyone noticing, connect them.',
     ...(req.subject.combined
       ? ['5b. **Is it one film?** A second greeting, a second hook or a second call to action is a fault — cut it and connect what is left.']

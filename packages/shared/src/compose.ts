@@ -252,7 +252,9 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
       tagline: client.tagline?.trim() || undefined,
       website: client.website?.trim() || undefined,
       segment: client.segment,
-      styleNote: client.styleNote?.trim() || undefined,
+      // A house style is the marque's own film language. A record that was briefly set to
+      // Manufacturer keeps the note, and it must not follow it back into dealership films.
+      styleNote: client.kind === 'oem' ? client.styleNote?.trim() || undefined : undefined,
       brandModel: car ? `${car.brand} ${car.model}` : client.brand,
       phone: client.phone ?? '',
       tier: client.tier,

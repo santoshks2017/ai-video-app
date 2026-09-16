@@ -2,6 +2,15 @@
 
 import type { Brief } from './types.js';
 
+/**
+ * What a blank brief starts with. Every project is created carrying these already, so a
+ * manufacturer's film would inherit a showroom look nobody chose — buildContext treats a
+ * value still equal to these as the blank it is.
+ */
+export const DEALER_VISUAL_STYLE =
+  'Bright premium modern showroom, glossy floors, realistic reflections, energetic dealership-ad feel';
+export const DEALER_CTA = 'Book your test drive today';
+
 export function emptyBrief(): Brief {
   return {
     categories: [],
@@ -15,9 +24,8 @@ export function emptyBrief(): Brief {
     music: '',
     textLang: 'english',
     captionStyle: 'Long Narrative',
-    visualStyle:
-      'Bright premium modern showroom, glossy floors, realistic reflections, energetic dealership-ad feel',
-    cta: 'Book your test drive today',
+    visualStyle: DEALER_VISUAL_STYLE,
+    cta: DEALER_CTA,
     footer: '',
     endCardOn: true,
     endCard: '',

@@ -177,6 +177,8 @@ export interface StoryTheme {
   dressing: string;
   tone: string;
   music: string;
+  /** A manufacturer's film dresses the location, never a showroom floor. */
+  oem: boolean;
 }
 
 /** The theme a film is set in, when a theme use case is picked alongside a topic. */
@@ -190,16 +192,21 @@ export function storyTheme(brief: Brief): StoryTheme | null {
     dressing: String(v.festiveDressing ?? '').trim(),
     tone: String(v.occasionType ?? '').trim(),
     music: theme.music,
+    oem: brief.dealer.kind === 'oem',
   };
 }
 
 /** The theme, said once for the model and for the writer. */
 export function themeDirection(theme: StoryTheme): string {
-  return `This is a ${theme.occasion} film. The showroom is dressed for ${theme.occasion}${
+  const dressed = theme.oem ? 'The location is dressed for' : 'The showroom is dressed for';
+  const about = theme.oem
+    ? 'the car and what the brand stands for are'
+    : 'the car and what the dealer is offering are';
+  return `This is a ${theme.occasion} film. ${dressed} ${theme.occasion}${
     theme.dressing ? ` — ${theme.dressing}` : ' with tasteful, authentic decorations for the occasion'
   }, and that decor is visible in every shot. The theme is the look and the warmth${
     theme.tone ? ` (${theme.tone})` : ''
-  }; the car and what the dealer is offering are what the film is about.`;
+  }; ${about} what the film is about.`;
 }
 
 /**
@@ -208,10 +215,13 @@ export function themeDirection(theme: StoryTheme): string {
  */
 export function storyGuidance(brief: Brief): { useCase: string; purpose?: string; avoid: string[] } {
   const cats = brief.categories.map((id) => CATEGORY_BY_ID[id]).filter((c): c is CategoryDef => Boolean(c));
-  if (cats.length <= 1) return { useCase: cats[0]?.label ?? '', purpose: cats[0]?.purpose, avoid: cats[0]?.avoid ?? [] };
+  // A use case written for dealerships asks for a dealer's voice. A marque has its own.
+  const voiced = (avoid: string[]): string[] =>
+    brief.dealer.kind === 'oem' ? avoid.map((a) => a.replace(/\bdealer voice\b/g, 'brand voice')) : avoid;
+  if (cats.length <= 1) return { useCase: cats[0]?.label ?? '', purpose: cats[0]?.purpose, avoid: voiced(cats[0]?.avoid ?? []) };
   const stories = cats.filter((c) => c.layer !== 'theme');
   if (!stories.length) {
-    return { useCase: cats.map((c) => c.label).join(' + '), purpose: cats.map((c) => c.purpose).join(' '), avoid: cats.flatMap((c) => c.avoid) };
+    return { useCase: cats.map((c) => c.label).join(' + '), purpose: cats.map((c) => c.purpose).join(' '), avoid: voiced(cats.flatMap((c) => c.avoid)) };
   }
   const theme = storyTheme(brief);
   const selling = stories.some((c) => c.id === 'offer');
@@ -221,7 +231,10 @@ export function storyGuidance(brief: Brief): { useCase: string; purpose?: string
     // An emotional format's "no prices" rule cannot stand beside an offer the dealer asked to say.
     ...stories.flatMap((c) => c.avoid).filter((a) => !(selling && /price or discount mentions/i.test(a))),
     ...(theme
-      ? ['Leading with price or discount language in the opening greeting', `A generic "happy ${theme.occasion}" with no dealer voice`]
+      ? [
+          'Leading with price or discount language in the opening greeting',
+          `A generic "happy ${theme.occasion}" with no ${theme.oem ? 'brand' : 'dealer'} voice`,
+        ]
       : []),
   ];
   return {
@@ -231,7 +244,7 @@ export function storyGuidance(brief: Brief): { useCase: string; purpose?: string
       (theme
         ? ` ${theme.occasion} is the setting and the warmth — the look of every shot, the greeting that opens the film and the wish near its end — while ${topics} ${stories.length > 1 ? 'are' : 'is'} what the film says.`
         : ''),
-    avoid: [...new Set(avoid)],
+    avoid: voiced([...new Set(avoid)]),
   };
 }
 

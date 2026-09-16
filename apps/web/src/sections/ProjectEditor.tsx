@@ -693,7 +693,13 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const parts = built?.parts ?? [];
   const sells = client?.vehicleKind ?? 'car';
   // A dealership and a manufacturer make different films, so each picks from its own list.
-  const pickableCategories = categoriesFor(client?.kind);
+  const forThisClient = categoriesFor(client?.kind);
+  // A use case picked before the client's type changed keeps its tile: it still shapes
+  // the film, and the tile is the only way to take it off.
+  const strays = project.useCases
+    .map((id) => CATEGORIES.find((c) => c.id === id))
+    .filter((c): c is (typeof CATEGORIES)[number] => !!c && !forThisClient.includes(c));
+  const pickableCategories = [...forThisClient, ...strays];
   // A dealer can sell several brands; every one of them can be filmed.
   const clientBrands = (client?.brands?.length ? client.brands : [client?.brand]).filter((b): b is string => Boolean(b?.trim()));
   const pickableVehicles = cars.filter(

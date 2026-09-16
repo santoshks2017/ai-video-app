@@ -319,7 +319,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         );
       else if (mode.speaks) L.push(CLOSING_BEAT);
       L.push(`Video type: ${catLabels.join(' + ')}.`);
-      if (brief.dealer.styleNote?.trim())
+      if (brief.dealer.kind === 'oem' && brief.dealer.styleNote?.trim())
         L.push(`House style, taken from the brand's own films: ${brief.dealer.styleNote.trim()}`);
       if (brief.dealer.kind === 'oem')
         L.push(
@@ -482,7 +482,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     // composited in post — see overlayCards() — because a video model garbles
     // small text, and a garbled price card makes the whole take unusable.
     L.push('');
-    L.push(`Copy tone: ${brief.captionStyle} (${brief.dealer.tier} dealer).`);
+    L.push(
+      brief.dealer.kind === 'oem'
+        ? `Copy tone: ${brief.captionStyle}${brief.dealer.segment ? ` (${brief.dealer.segment} marque)` : ''}.`
+        : `Copy tone: ${brief.captionStyle} (${brief.dealer.tier} dealer).`,
+    );
 
     L.push('');
     L.push('## VISUAL STYLE');

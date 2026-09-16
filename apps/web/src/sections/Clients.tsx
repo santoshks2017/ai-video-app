@@ -297,7 +297,9 @@ export function ClientsSection() {
   const importDetails = async () => {
     if (!draft) return;
     const site = (draft.website ?? '').trim();
-    const q = gmbInput.trim();
+    // The Google listing is a showroom's. A record switched to Manufacturer keeps the
+    // link it was imported with, and the hidden field must not go on fetching it.
+    const q = isOem ? '' : gmbInput.trim();
     if (!site && !q) return;
     setGmbBusy(true);
     setGmbNote('');
@@ -557,7 +559,7 @@ export function ClientsSection() {
               <button
                 className="btn small"
                 type="button"
-                disabled={gmbBusy || !(draft.website?.trim() || gmbInput.trim())}
+                disabled={gmbBusy || !(draft.website?.trim() || (!isOem && gmbInput.trim()))}
                 onClick={importDetails}
               >
                 {gmbBusy ? 'Importing…' : 'Import'}

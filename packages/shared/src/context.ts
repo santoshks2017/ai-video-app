@@ -5,6 +5,7 @@
 
 import type { AspectRatio, Brief, NarrationMode } from './types.js';
 import { narrationMode } from './narration.js';
+import { DEALER_CTA, DEALER_VISUAL_STYLE } from './defaults.js';
 
 /**
  * "Test drive" for cars, "test ride" for bikes and scooters. The CTA, the end card,
@@ -63,6 +64,15 @@ export function buildContext(brief: Brief): RenderContext {
     : d.dealerName || '[Dealership]';
 
   const oem = d.kind === 'oem';
+  /**
+   * A value the team actually chose. A project is created holding the dealership
+   * defaults, so for a manufacturer a value still equal to one of them is nobody's
+   * decision — it is the blank the manufacturer's own default belongs in.
+   */
+  const chosen = (value: string, fallback: string): string => {
+    const v = value.trim();
+    return v && !(oem && v === fallback) ? v : '';
+  };
   const footer =
     brief.footer.trim() ||
     (oem ? [onScreenDealer, d.tagline, d.website] : [onScreenDealer, d.address, d.phone])
@@ -78,14 +88,14 @@ export function buildContext(brief: Brief): RenderContext {
     aspect: brief.aspect,
     music: brief.music.trim(),
     cta: adaptTrial(
-      brief.cta.trim() || (oem ? 'Find your nearest authorised showroom' : 'Book your test drive today'),
+      chosen(brief.cta, DEALER_CTA) || (oem ? 'Find your nearest authorised showroom' : DEALER_CTA),
       vehicle,
     ),
     visStyle:
-      brief.visualStyle.trim() ||
+      chosen(brief.visualStyle, DEALER_VISUAL_STYLE) ||
       (oem
         ? 'Cinematic brand film — real locations, natural light, the car as the hero, nothing of a showroom in frame'
-        : 'Bright premium modern showroom, glossy floors, realistic reflections, energetic dealership-ad feel'),
+        : DEALER_VISUAL_STYLE),
     endcardOn: brief.endCardOn,
     endcard: brief.endCard.trim(),
     footer,

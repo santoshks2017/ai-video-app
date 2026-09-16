@@ -102,7 +102,13 @@ export function fieldLabel(cat: CategoryDef | undefined, key: string): string {
     const n = numbered(field.id);
     if (n) return `${noun} ${n}`;
     const sn = field.list.sub ? numbered(field.list.sub.id) : null;
-    if (sn) return `Why ${field.list.noun} ${sn} matters`;
+    if (sn) {
+      // A sub row that asks why reads well in that sentence. One that asks something
+      // else — which models an offer covers — must keep its own words, or the writer is
+      // handed the fact under a name that inverts it.
+      const own = field.list.sub!.label.replace(/\s*\(optional\)\s*$/i, '').trim();
+      return /^why\b/i.test(own) ? `Why ${field.list.noun} ${sn} matters` : `${own} (${field.list.noun} ${sn})`;
+    }
   }
   return key;
 }
@@ -555,18 +561,20 @@ export const CATEGORIES: CategoryDef[] = [
         ph: 'e.g. marigold garlands, diyas at the entrance, rangoli on the showroom floor',
       },
     ],
-    beats: (v, ctx): Beat[] => [
+    beats: (v, ctx): Beat[] => {
+      // The occasion is the setting either way, but a manufacturer has no showroom to
+      // dress and no counter to send anyone to: it is the place the car is shot in.
+      const oem = ctx.clientKind === 'oem';
+      const dressed = f(v, 'festiveDressing') ? ' — ' + f(v, 'festiveDressing') : '';
+      const wide = oem
+        ? 'Wide establishing shot of the car in a location dressed for the occasion' + dressed
+        : 'Wide exterior of the showroom dressed for the occasion' + dressed;
+      return [
       {
         title: 'Occasion greeting',
         role: 'open',
-        shot:
-          'Wide exterior of the showroom dressed for the occasion' +
-          (f(v, 'festiveDressing') ? ' — ' + f(v, 'festiveDressing') : '') +
-          ', presenter centred.',
-        shotAlt:
-          'Wide exterior of the showroom dressed for the occasion' +
-          (f(v, 'festiveDressing') ? ' — ' + f(v, 'festiveDressing') : '') +
-          ', no people in frame.',
+        shot: wide + ', presenter centred.',
+        shotAlt: wide + ', no people in frame.',
         dialogue:
           'Open with a sincere, specific greeting for ' +
           (f(v, 'occasionName') || 'the occasion') +
@@ -584,22 +592,29 @@ export const CATEGORIES: CategoryDef[] = [
           'Talk about what the occasion means to people — not what the car means. Human before commercial.',
       },
       {
-        title: 'Dealer tie-in',
+        title: oem ? 'Brand tie-in' : 'Dealer tie-in',
         role: 'setup',
-        shot: 'Slow push-in past the festive decor to the car on the showroom floor.',
-        dialogue: 'One soft line linking the dealer to the occasion. Skip it if it feels forced.',
+        shot: oem
+          ? 'Slow push-in past the festive decor to the car, the marque settling on screen.'
+          : 'Slow push-in past the festive decor to the car on the showroom floor.',
+        dialogue: oem
+          ? 'One soft line linking the brand to the occasion. Skip it if it feels forced.'
+          : 'One soft line linking the dealer to the occasion. Skip it if it feels forced.',
       },
       {
         title: 'Warm closing wish',
         role: 'close',
         shot: 'Presenter beside the car, warm smile, festive bokeh behind.',
         shotAlt: 'Hero shot of the car with festive bokeh behind, slow push-in.',
-        dialogue: 'Close with a warm occasion wish, then a light invitation to visit the showroom.',
+        dialogue: oem
+          ? 'Close with a warm occasion wish, then a light invitation to see the range at an authorised showroom.'
+          : 'Close with a warm occasion wish, then a light invitation to visit the showroom.',
         card: f(v, 'occasionName')
           ? f(v, 'occasionName') + ' greetings from ' + ctx.dealerShort
           : 'Greetings from ' + ctx.dealerShort,
       },
-    ],
+      ];
+    },
   },
 
   {

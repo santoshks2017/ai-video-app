@@ -1793,3 +1793,55 @@ test('a manufacturer picks from its own use cases, and its films sign off with t
   assert.match(text, /Manufacturer: Hyundai/);
   assert.doesNotMatch(text, /Dealership: /);
 });
+
+test('a mandatory field that counts rows says which list it counts', () => {
+  // Two OEM use cases shipped with `mandatory: [{ id: 'offer' }]` against a list field,
+  // so runChecks looked up a key the form never writes and the use case could never be
+  // generated. Every category is checked here, not just the two.
+  for (const c of CATEGORIES) {
+    for (const m of c.mandatory) {
+      const listed = m.list ? c.fields.find((f) => f.id === m.list) : null;
+      if (m.list) {
+        assert.equal(listed?.type, 'list', `${c.id}: mandatory ${m.id} counts rows of ${m.list}, which is not a list field`);
+        continue;
+      }
+      const named = c.fields.find((f) => f.id === m.id);
+      assert.ok(named, `${c.id}: mandatory ${m.id} is not one of its fields`);
+      assert.notEqual(named?.type, 'list', `${c.id}: mandatory ${m.id} is a list field, so it needs list: '${m.id}'`);
+    }
+  }
+});
+
+test('every use case a manufacturer can pick can actually be generated', () => {
+  for (const c of categoriesFor('oem')) {
+    const values: Record<string, string> = {};
+    for (const f of c.fields) {
+      if (f.type === 'list' && f.list) {
+        for (let i = 1; i <= Math.max(1, f.list.min); i++) values[`${f.id}${i}`] = `${f.list.noun} ${i}`;
+        values[`${f.id}Rows`] = String(Math.max(1, f.list.min));
+        if (f.list.sub) values[`${f.list.sub.id}1`] = 'on the range';
+      } else if (f.type === 'select') values[f.id] = f.options?.[0] ?? '';
+      else values[f.id] = `${f.label}, filled in`;
+    }
+    const b = base({ categories: [c.id], fieldValues: { [c.id]: values } });
+    b.dealer = { ...b.dealer, kind: 'oem', dealerName: 'Hyundai', segment: 'mass' };
+    const r = runChecks(b);
+    const blocking = r.checks.filter((x) => x.level === 'bad').map((x) => x.code);
+    assert.deepEqual(blocking, [], `${c.id} cannot be generated with every field filled: ${blocking.join(', ')}`);
+  }
+});
+
+test("a house style is the marque's own, and never follows a record back to a dealership", () => {
+  const oem = base({ categories: ['oemproduct'], fieldValues: { oemproduct: { promise: 'space for the family', proof1: 'a sunroof', proof2: 'six airbags', proof3: '600 km', proofRows: '3', setting: 'a coastal highway' } } });
+  oem.dealer = { ...oem.dealer, kind: 'oem', dealerName: 'Hyundai', segment: 'mass', styleNote: 'golden hour, never a price on screen' };
+  const oemText = buildPrompt(oem)!.parts[0]!.text;
+  assert.match(oemText, /House style, taken from the brand's own films/);
+  assert.match(oemText, /Cinematic brand film/, 'the manufacturer look, not the showroom default');
+  assert.doesNotMatch(oemText, /dealership-ad feel/);
+  assert.doesNotMatch(oemText, /Metro Premium dealer/, 'a marque has no dealer tier');
+
+  // The same note on a record switched back to Dealership is inert.
+  const dealer = base({});
+  dealer.dealer = { ...dealer.dealer, styleNote: 'golden hour, never a price on screen' };
+  assert.doesNotMatch(buildPrompt(dealer)!.parts[0]!.text, /House style/);
+});

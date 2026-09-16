@@ -166,7 +166,7 @@ export const OEM_CATEGORIES: CategoryDef[] = [
           dialogue: `Open on the promise, not the car: ${f(v, 'promise') || 'what this car is for'}.`,
         },
       ];
-      proofs.slice(0, 3).forEach((p, i) => {
+      proofs.forEach((p, i) => {
         beats.push({
           id: `proof${i + 1}`,
           title: `Proof ${i + 1}`,
@@ -200,7 +200,7 @@ export const OEM_CATEGORIES: CategoryDef[] = [
     hue: 190,
     music: 'clean minimal bed, one instrument, space between notes',
     purpose: 'The design language, read off the car itself — front, profile, rear, cabin.',
-    mandatory: [{ id: 'designLine', label: 'The design signatures to read' }],
+    mandatory: [{ id: 'designLine1', label: 'The design signatures to read', list: 'designLine' }],
     avoid: ['Naming colours and wheels as if that were design', 'A showroom walkaround — this is the car, not a place'],
     fields: [
       {
@@ -228,7 +228,7 @@ export const OEM_CATEGORIES: CategoryDef[] = [
         'Rear three-quarter — tail signature lighting up.',
         'Cabin — dashboard sweep, materials and screen in one move.',
       ];
-      (lines.length ? lines : ['the front', 'the profile', 'the rear']).slice(0, 4).forEach((line, i) => {
+      (lines.length ? lines : ['the front', 'the profile', 'the rear']).forEach((line, i) => {
         beats.push({
           id: `design${i + 1}`,
           title: `Signature ${i + 1}`,
@@ -496,7 +496,7 @@ export const OEM_CATEGORIES: CategoryDef[] = [
     hue: 95,
     music: 'upbeat bed with momentum, never frantic',
     purpose: 'A manufacturer-wide benefit, said clearly, with the deadline that makes it move.',
-    mandatory: [{ id: 'offer', label: 'What the benefit is' }],
+    mandatory: [{ id: 'offer1', label: 'What the benefit is', list: 'offer' }],
     avoid: ['Naming a single dealership — this is every showroom', 'Burying the deadline'],
     fields: [
       {

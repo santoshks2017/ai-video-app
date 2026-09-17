@@ -28,8 +28,16 @@ import {
   type CaptionSpot,
   type CaptionSpotCandidate,
   type FilmLayers,
+  type GainPoint,
   type LayerBox,
   type PeopleInShot,
+  type SpeechSpan,
+  MIN_MUSIC_PAUSE,
+  MUSIC_DUCK_ATTACK as DUCK_ATTACK,
+  MUSIC_DUCK_RELEASE as DUCK_RELEASE,
+  MUSIC_FADE_IN,
+  MUSIC_FADE_OUT,
+  gainFromDb,
 } from '@ava/shared';
 
 export interface EndCardSpec {
@@ -103,6 +111,11 @@ export interface BrandOverlay {
   findPeople?: (frames: Buffer[]) => Promise<PeopleInShot | null>;
   /** Told where every overlay was drawn, so the editor can open the film as layers. Changes nothing drawn. */
   onLayers?: (layers: ComposedLayers) => void;
+  /**
+   * Told where someone speaks, in seconds of the film: where its music dips, which the
+   * editor opens as the music's key points. Changes nothing drawn or heard.
+   */
+  onSpeech?: (speech: SpeechSpan[]) => void;
   accent?: string;
   ink?: string;
   /** The colours of the captions, the footer strip and the end card. Unset: Midnight, from `accent` and `ink`. */
@@ -227,13 +240,6 @@ export async function mediaSeconds(file: string): Promise<number> {
   return Number(out.trim()) || 0;
 }
 
-/** The music starts dipping this long before a line begins… */
-const DUCK_ATTACK = 0.3;
-/** …and takes this long to come back up after the line ends. */
-const DUCK_RELEASE = 0.8;
-/** A pause shorter than this keeps the music down: it would only swell and dip again. */
-const MIN_MUSIC_PAUSE = 1.2;
-
 /**
  * When someone is speaking, as spans on the film's timeline.
  *
@@ -315,6 +321,54 @@ export function duckVolume(spans: Array<[number, number]>, duckDb: number): stri
       `clip(min((t-(${(from - DUCK_ATTACK).toFixed(3)}))/${DUCK_ATTACK},(${(to + DUCK_RELEASE).toFixed(3)}-t)/${DUCK_RELEASE}),0,1)`,
   );
   return `1-${depth.toFixed(4)}*clip(${ramps.join('+')},0,1)`;
+}
+
+/**
+ * A volume line as an ffmpeg expression: straight in amplitude between key points, held
+ * before the first and after the last — the level gainAt gives the preview. `offset` is
+ * where the stream's t=0 falls in the clip's source.
+ *
+ * Written as a balanced tree of ifs that halves the line at each step. ffmpeg's parser
+ * gives up on a chain of about a hundred terms, which a flat sum over a full line is;
+ * the tree is a few levels deep for any line, and finds the stretch in a few steps a frame.
+ */
+export function gainVolume(points: readonly GainPoint[], offset = 0): string {
+  const s = offset > 0 ? `(t+${offset.toFixed(3)})` : 't';
+  const n = points.length;
+  if (!n) return '1';
+  const g = points.map((p) => gainFromDb(p.db).toFixed(6));
+  const at = points.map((p) => p.t.toFixed(3));
+  if (n === 1) return g[0]!;
+  const stretch = (i: number): string => {
+    const [a, b] = [points[i]!, points[i + 1]!];
+    if (!(b.t > a.t)) return g[i + 1]!;
+    const slope = (gainFromDb(b.db) - gainFromDb(a.db)) / (b.t - a.t);
+    return `(${g[i]}+(${slope.toFixed(6)})*(${s}-${at[i]}))`;
+  };
+  // Stretches lo..hi-1, for a time between points lo and hi.
+  const tree = (lo: number, hi: number): string => {
+    if (hi - lo === 1) return stretch(lo);
+    const mid = (lo + hi) >> 1;
+    return `if(lt(${s},${at[mid]}),${tree(lo, mid)},${tree(mid, hi)})`;
+  };
+  return `if(lt(${s},${at[0]}),${g[0]},if(gte(${s},${at[n - 1]}),${g[n - 1]},${tree(0, n - 1)}))`;
+}
+
+/** A track's integrated loudness in LUFS, or null when it cannot be measured. */
+export async function measureLoudness(bytes: Buffer): Promise<number | null> {
+  const dir = await mkdtemp(join(tmpdir(), 'ava-loud-'));
+  try {
+    const f = join(dir, 'track');
+    await writeFile(f, bytes);
+    const log = await runForLog('ffmpeg', ['-v', 'info', '-nostats', '-i', f, '-vn', '-af', 'ebur128=framelog=quiet', '-f', 'null', '-']);
+    const all = [...log.matchAll(/I:\s+(-?[\d.]+) LUFS/g)];
+    const v = all.length ? Number(all[all.length - 1]![1]) : Number.NaN;
+    return Number.isFinite(v) && v > -70 ? Math.round(v * 10) / 10 : null;
+  } catch {
+    return null;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 
@@ -1258,8 +1312,10 @@ async function composeCore(
         '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', cleanOut,
       ]);
       clean = await readFile(cleanOut);
-      if (!want.final && !overlay.onLayers) return { clean };
     }
+    // The editor's music dips where the film's did: heard on the same parts, the same way.
+    if (!want.final && overlay.onSpeech) overlay.onSpeech(onFilmTimeline(await speechSpans(files, rawDurations), speed));
+    if (!want.final && !overlay.onLayers) return { clean };
 
     // --- the parts, joined whole ---
     // Every part plays in full, cut to cut. The crossfade that used to join them
@@ -1311,8 +1367,9 @@ async function composeCore(
       const open = Math.max(-40, Math.min(-14, overlay.musicLoudness ?? -20));
       const duck = Math.min(0, overlay.musicDuckDb ?? 0);
       let spans = duck < 0 ? (await speechSpans(files, rawDurations)).map(([a, b]): [number, number] => [a / speed, b / speed]) : [];
+      if (duck < 0 && want.final) overlay.onSpeech?.(onFilmTimeline(spans, 1));
       if (spans.length && endCardFile) spans = withEndCardDuck(spans, filmSeconds, overlay.endCard?.seconds ?? 0);
-      parts.push(...musicBedGraph(m, bedSeconds, filmSeconds, open, spans, duck));
+      parts.push(...musicBedGraph(m, bedSeconds, filmSeconds, open, spans.length ? duckVolume(spans, duck) : undefined));
       parts.push(`[voice][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed]`);
       audioOut = 'mixed';
     }
@@ -1549,15 +1606,24 @@ async function composeCore(
 /**
  * The music bed's filters. Never looped — music restarting mid-film is the most audible
  * glitch there is — so a short track is joined to copies of itself with a slow crossfade;
- * then levelled, faded in and out, and dipped under every span.
+ * then levelled, faded in and out, and given its `volume` over time: the film's dips, or
+ * an edit's volume line. `from` is how far into the track an edit's music clip begins.
  *
  * Small frames go before the dip: volume is worked out once per frame, and loudnorm hands
  * back its last seconds as one large frame, which held the music down over the end card.
  */
-export function musicBedGraph(input: number, bedSeconds: number, filmSeconds: number, open: number, spans: Array<[number, number]>, duck: number): string[] {
+export function musicBedGraph(
+  input: number,
+  bedSeconds: number,
+  filmSeconds: number,
+  open: number,
+  volume?: string,
+  from = 0,
+): string[] {
   const out: string[] = [];
   const XF = 2;
-  const copies = bedSeconds > XF * 2 && bedSeconds < filmSeconds ? Math.min(6, Math.ceil((filmSeconds - XF) / (bedSeconds - XF))) : 1;
+  const reach = from + filmSeconds;
+  const copies = bedSeconds > XF * 2 && bedSeconds < reach ? Math.min(6, Math.ceil((reach - XF) / (bedSeconds - XF))) : 1;
   const norm = 'aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo';
   if (copies > 1) {
     out.push(`[${input}:a]${norm},asplit=${copies}${Array.from({ length: copies }, (_, i) => `[bs${i}]`).join('')}`);
@@ -1571,9 +1637,9 @@ export function musicBedGraph(input: number, bedSeconds: number, filmSeconds: nu
     out.push(`[${input}:a]${norm}[bedraw]`);
   }
   out.push(
-    `[bedraw]atrim=end=${filmSeconds.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${open}:TP=-2:LRA=11,${norm},` +
-      `afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, filmSeconds - 1.5).toFixed(3)}:d=1.5` +
-      (spans.length ? `,asetnsamples=n=1024:p=0,volume='${duckVolume(spans, duck)}':eval=frame` : '') +
+    `[bedraw]atrim=${from > 0 ? `start=${from.toFixed(3)}:` : ''}end=${reach.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${open}:TP=-2:LRA=11,${norm},` +
+      `afade=t=in:st=0:d=${MUSIC_FADE_IN},afade=t=out:st=${Math.max(0, filmSeconds - MUSIC_FADE_OUT).toFixed(3)}:d=${MUSIC_FADE_OUT}` +
+      (volume ? `,asetnsamples=n=1024:p=0,volume='${volume}':eval=frame` : '') +
       '[bed]',
   );
   return out;
@@ -1593,6 +1659,23 @@ export function withEndCardDuck(spans: Array<[number, number]>, filmSeconds: num
   if (from - last[1] < MIN_MUSIC_PAUSE) last[1] = filmSeconds;
   else out.push([from, filmSeconds]);
   return out;
+}
+
+/** Spans as the film keeps them: on its paced timeline, to the millisecond. */
+function onFilmTimeline(spans: Array<[number, number]>, speed: number): SpeechSpan[] {
+  const ms = (n: number): number => Math.round((n / speed) * 1000) / 1000;
+  return spans.map(([a, b]) => ({ from: ms(a), to: ms(b) }));
+}
+
+/**
+ * Where someone speaks in a film, worked out from its parts the way composeFinal works it
+ * out — for a film opened in the editor before its speech was kept. Encodes nothing.
+ */
+export async function filmSpeech(segments: Buffer[], speed = 1): Promise<SpeechSpan[]> {
+  if (segments.length === 0) return [];
+  let speech: SpeechSpan[] = [];
+  await composeCore(segments, { speed, onSpeech: (s) => { speech = s; } }, { final: false, clean: false });
+  return speech;
 }
 
 export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {}): Promise<Buffer> {

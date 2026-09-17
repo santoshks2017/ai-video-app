@@ -32,7 +32,7 @@ import {
   type EditSource,
   type EditTextStyle,
 } from '@ava/shared';
-import { run, probe, hasAudio, FF_THREADS, esc, mediaSeconds, musicBedGraph, speechSpans, withEndCardDuck } from './post.js';
+import { run, probe, hasAudio, FF_THREADS, esc, mediaSeconds, musicBedGraph, speechSpans, withEndCardDuck, duckVolume, gainVolume } from './post.js';
 import { drawLayer, scaleLogo } from './layerDraw.js';
 
 export type LoadSource = (src: EditSource) => Promise<Buffer | null>;
@@ -413,17 +413,25 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
       const len = Math.min(editClipLength(c), total - c.start);
       const delay = Math.round(c.start * 1000);
       if (c.bed) {
-        // The film's music, mixed the way composeFinal mixed it, over this edit's own lengths.
+        // The film's music, levelled and faded the way composeFinal did it, over this edit's
+        // own lengths, and played along its volume line — the key points the editor showed.
         args.push('-i', src);
         const open = Math.max(-40, Math.min(-14, c.bed.loudness));
-        const duck = Math.min(0, c.bed.duckDb);
-        let spans =
-          duck < 0
-            ? (await speechSpans([joined], [total])).map(([a, b]): [number, number] => [a - c.start, b - c.start]).filter(([, b]) => b > 0)
-            : [];
-        if (spans.length && endCardStart !== undefined) spans = withEndCardDuck(spans, len, total - endCardStart);
+        let volume: string | undefined;
+        if (c.gain) {
+          volume = c.gain.length ? gainVolume(c.gain, c.in) : undefined;
+        } else {
+          // An edit saved before volume lines: dipped under the voice by ear, as it was then.
+          const duck = Math.min(0, c.bed.duckDb);
+          let spans =
+            duck < 0
+              ? (await speechSpans([joined], [total])).map(([a, b]): [number, number] => [a - c.start, b - c.start]).filter(([, b]) => b > 0)
+              : [];
+          if (spans.length && endCardStart !== undefined) spans = withEndCardDuck(spans, len, total - endCardStart);
+          volume = spans.length ? duckVolume(spans, duck) : undefined;
+        }
         g.push(
-          ...musicBedGraph(input, await mediaSeconds(src), len, open, spans, duck).map((s) =>
+          ...musicBedGraph(input, await mediaSeconds(src), len, open, volume, c.in).map((s) =>
             s.replace(/\[(bs\d+|bx\d+|bedraw|bed)\]/g, `[$1_${j}]`),
           ),
         );
@@ -431,8 +439,9 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
       } else {
         args.push('-ss', n3(c.in), '-t', n3(c.out - c.in), '-i', src);
         const afades = audioFades(len, c.fadeIn, c.fadeOut);
+        const line = c.gain?.length ? `asetnsamples=n=1024:p=0,volume='${gainVolume(c.gain, c.in)}':eval=frame,` : '';
         g.push(
-          `[${input}:a]asetpts=PTS-STARTPTS,${atempoChain(c.speed || 1)},volume=${c.volume.toFixed(2)},${AUDIO},atrim=duration=${n3(len)}${afades ? `,${afades}` : ''},adelay=${delay}|${delay}[s${j}]`,
+          `[${input}:a]asetpts=PTS-STARTPTS,${line}${atempoChain(c.speed || 1)},volume=${c.volume.toFixed(2)},${AUDIO},atrim=duration=${n3(len)}${afades ? `,${afades}` : ''},adelay=${delay}|${delay}[s${j}]`,
         );
       }
       mix.push(`[s${j}]`);

@@ -56,7 +56,7 @@ import {
 import { generateVeoClip, VeoError } from './veo.js';
 import { countRequest, markExhausted, usageToday } from './usage.js';
 import { renderEditProject } from './editRender.js';
-import { editOpenPlan } from './editOpen.js';
+import { editOpenPlan, segmentsKept, type EditOpenPlan } from './editOpen.js';
 import { drawLayer, fitReplacementLogo, type DrawnLayer } from './layerDraw.js';
 import { importWebsite } from './siteImport.js';
 import { drawActorSheet, fillActorProfile } from './actorProfile.js';
@@ -92,6 +92,8 @@ import { sceneCuts, cutVideo, conformLength, withSoundOf,
   trimClip,
   upscaleVideo,
   videoFacts,
+  filmSpeech,
+  measureLoudness,
   type BrandOverlay,
   type ComposedLayers,
 } from './post.js';
@@ -141,6 +143,9 @@ import {
   type DealerView,
   type FilmLayers,
   type FilmLogoLayer,
+  type FilmMusicLayer,
+  type SpeechSpan,
+  editWithFilmMusicLine,
   validateEditLayer,
   validateEditLook,
   type EditLayer,
@@ -2332,7 +2337,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     // Everything that must be legible is drawn here rather than generated.
     const bed = await musicBed;
     const overlay = buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes);
-    const captured: { layers?: ComposedLayers } = {};
+    const captured: { layers?: ComposedLayers; speech?: SpeechSpan[] } = {};
     const finalBytes = await composeFinal(segmentBytes, {
       ...overlay,
       findPeople: await peopleFinder(),
@@ -2341,6 +2346,9 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       },
       onLayers: (l) => {
         captured.layers = l;
+      },
+      onSpeech: (sp) => {
+        captured.speech = sp;
       },
     });
     const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
@@ -2358,7 +2366,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     const billed = billClips(resolved.modelId, usdPerSecond, clips, record.prompts, plannedRes.render);
 
     const keptLayers = captured.layers
-      ? await storeLayers(jobId, captured.layers, bed?.storagePath ? { storagePath: bed.storagePath, loudness: overlay.musicLoudness ?? -20, duckDb: overlay.musicDuckDb ?? 0 } : undefined).catch((e) => {
+      ? await storeLayers(jobId, captured.layers, await filmMusic(bed, overlay, captured.speech)).catch((e) => {
           app.log.warn({ err: (e as Error).message, jobId }, 'keeping the layers failed');
           return undefined;
         })
@@ -2745,12 +2753,15 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       // correction lands here even on the free restitch path.
       const bed = await musicBed;
       const overlay = buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes);
-      const captured: { layers?: ComposedLayers } = {};
+      const captured: { layers?: ComposedLayers; speech?: SpeechSpan[] } = {};
       const finalBytes = await composeFinal(segmentBytes, {
         ...overlay,
         findPeople: await peopleFinder(),
         onLayers: (l) => {
           captured.layers = l;
+        },
+        onSpeech: (sp) => {
+          captured.speech = sp;
         },
       });
       const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
@@ -2762,7 +2773,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       }
 
       const keptLayers = captured.layers
-        ? await storeLayers(jobId, captured.layers, bed?.storagePath ? { storagePath: bed.storagePath, loudness: overlay.musicLoudness ?? -20, duckDb: overlay.musicDuckDb ?? 0 } : undefined).catch((e) => {
+        ? await storeLayers(jobId, captured.layers, await filmMusic(bed, overlay, captured.speech)).catch((e) => {
             app.log.warn({ err: (e as Error).message, jobId }, 'keeping the layers failed');
             return undefined;
           })
@@ -2880,12 +2891,28 @@ function billClips(
   );
 }
 
+/**
+ * A film's music as its layers keep it: the stored track, the level and dip it was mixed
+ * with, where the voice is, and how loud the track itself is — what the editor's key
+ * points and preview level start from.
+ */
+async function filmMusic(
+  bed: { bytes: Buffer; storagePath?: string } | null | undefined,
+  overlay: Pick<BrandOverlay, 'musicLoudness' | 'musicDuckDb'>,
+  speech: SpeechSpan[] | undefined,
+): Promise<FilmMusicLayer | undefined> {
+  if (!bed?.storagePath) return undefined;
+  return {
+    storagePath: bed.storagePath,
+    loudness: overlay.musicLoudness ?? -20,
+    duckDb: overlay.musicDuckDb ?? 0,
+    ...(speech ? { speech } : {}),
+    measured: await measureLoudness(bed.bytes),
+  };
+}
+
 /** A composed film's layers, with the logo artwork it drew saved, so an edit draws the same pixels. */
-async function storeLayers(
-  jobId: string,
-  composed: ComposedLayers,
-  music?: { storagePath: string; loudness: number; duckDb: number },
-): Promise<FilmLayers> {
+async function storeLayers(jobId: string, composed: ComposedLayers, music?: FilmMusicLayer): Promise<FilmLayers> {
   const logos: FilmLogoLayer[] = [];
   for (const g of composed.logos) {
     const colour = await putRef(`logo-${g.which}-${jobId}.png`, 'image/png', g.colour);
@@ -2905,34 +2932,74 @@ function layersReply(jobId: string, layers: FilmLayers, note?: string) {
   };
 }
 
-async function prepareLayers(job: JobRecord, plan: 'clean' | 'rebuild', body: { brief?: Brief; sceneOverrides?: Record<string, SceneOverride> }) {
-  const parts = [...job.clips].sort((a, b) => a.partNum - b.partNum);
-  const segments = await Promise.all(
-    parts.map(async (c) => {
-      const o = await readObject(c.storagePath);
-      if (!o) throw new Error(`part ${c.partNum} is missing from storage`);
-      return o.bytes;
-    }),
-  );
+/**
+ * Layers whose music is missing what its key points start from, given it: where the voice
+ * is (`speech`, heard on the film's parts) and the track's own loudness. Measured once —
+ * a track that cannot be measured is kept as null rather than tried on every open.
+ */
+async function withMusicFacts(layers: FilmLayers, speech: SpeechSpan[] | undefined): Promise<FilmLayers> {
+  const m = layers.music;
+  if (!m) return layers;
+  const measured =
+    m.measured !== undefined ? m.measured : await readObject(m.storagePath).then((o) => (o ? measureLoudness(o.bytes) : null)).catch(() => null);
+  return { ...layers, music: { ...m, measured, ...(!m.speech && speech ? { speech } : {}) } };
+}
+
+async function prepareLayers(
+  job: JobRecord,
+  plan: Extract<EditOpenPlan, 'music' | 'clean' | 'rebuild'>,
+  body: { brief?: Brief; sceneOverrides?: Record<string, SceneOverride> },
+) {
+  const segmentBytes = () =>
+    Promise.all(
+      [...job.clips]
+        .sort((a, b) => a.partNum - b.partNum)
+        .map(async (c) => {
+          const o = await readObject(c.storagePath);
+          if (!o) throw new Error(`part ${c.partNum} is missing from storage`);
+          return o.bytes;
+        }),
+    );
+  if (plan === 'music') {
+    // Footage and layers are kept; only the music's facts are missing. Never worth failing an open over.
+    const kept = job.layers!;
+    try {
+      const hear = kept.music && kept.music.duckDb < 0 && !kept.music.speech && segmentsKept(job);
+      const speech = hear ? await filmSpeech(await segmentBytes(), kept.speed) : undefined;
+      const layers = await withMusicFacts(kept, speech);
+      await updateJob(job.jobId, { layers });
+      return layersReply(job.jobId, layers);
+    } catch (err) {
+      app.log.warn({ err: (err as Error).message, jobId: job.jobId }, "working out the music's key points failed");
+      return layersReply(job.jobId, kept);
+    }
+  }
+  const segments = await segmentBytes();
+  const heard: { speech?: SpeechSpan[] } = {};
+  const onSpeech = (sp: SpeechSpan[]): void => {
+    heard.speech = sp;
+  };
   if (plan === 'clean') {
-    const { bytes } = await composeClean(segments, { speed: job.layers!.speed, targetShortSide: job.layers!.targetShortSide }, { plan: false });
+    const { bytes } = await composeClean(segments, { speed: job.layers!.speed, targetShortSide: job.layers!.targetShortSide, onSpeech }, { plan: false });
     const cleanStoragePath = await uploadCleanCut(job.jobId, bytes);
-    await updateJob(job.jobId, { cleanStoragePath });
-    return layersReply(job.jobId, job.layers!);
+    const layers = await withMusicFacts(job.layers!, heard.speech);
+    await updateJob(job.jobId, { cleanStoragePath, layers });
+    return layersReply(job.jobId, layers);
   }
   const brief = (job.brief as Brief | undefined) ?? body.brief;
   if (!brief) throw new Error('this film kept no record of its settings, and none were sent');
   const sceneOverrides = (job.brief ? job.sceneEdits : body.sceneOverrides) as Record<string, SceneOverride> | undefined;
   const { dealerLogo, brandLogo } = await loadBriefAssets(brief);
-  const overlay = { ...buildOverlay(brief, sceneOverrides, dealerLogo, brandLogo), findPeople: await peopleFinder() };
+  const overlay = { ...buildOverlay(brief, sceneOverrides, dealerLogo, brandLogo), findPeople: await peopleFinder(), onSpeech };
   const { bytes, layers: composed } = await composeClean(segments, overlay);
   if (!composed) throw new Error('no layers were worked out');
   const cleanStoragePath = await uploadCleanCut(job.jobId, bytes);
-  const layers = await storeLayers(
+  const stored = await storeLayers(
     job.jobId,
     composed,
     job.musicStoragePath ? { storagePath: job.musicStoragePath, loudness: overlay.musicLoudness ?? -20, duckDb: overlay.musicDuckDb ?? 0 } : undefined,
   );
+  const layers = await withMusicFacts(stored, heard.speech);
   await updateJob(job.jobId, { cleanStoragePath, layers });
   return layersReply(job.jobId, layers, job.brief ? undefined : 'This film was made before layers were kept, so they were rebuilt from the project as it is now.');
 }
@@ -2953,29 +3020,54 @@ app.post<{ Params: { jobId: string }; Body: { brief?: Brief; sceneOverrides?: Re
     const job = await getJob(req.params.jobId);
     if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such film.' });
     const plan = editOpenPlan(job);
-    if (plan === 'edit') return { mode: 'edit' as const, editProject: job.editProject! };
-    if (plan === 'ready') return layersReply(job.jobId, job.layers!);
+    const creator = allows(req.caller ?? null, 'creator');
+    if (plan === 'edit') return { mode: 'edit' as const, editProject: await withMusicLine(job.editProject!, creator) };
+    if (plan === 'ready' || (plan === 'music' && !creator)) return layersReply(job.jobId, job.layers!);
     if (plan === 'flat') {
       return reply.code(409).send({
         code: 'flat',
         message: 'This version was saved from a finished film, so its captions and logos are part of the picture. Open the film it was made from to edit them as layers.',
       });
     }
-    if (!allows(req.caller ?? null, 'creator')) {
+    if (!creator) {
       return reply.code(409).send({ code: 'flat', message: 'This film has not been prepared for layers yet. It is prepared the first time a creator opens it in the editor.' });
     }
-    const running = layerBuilds.get(job.jobId) ?? prepareLayers(job, plan, req.body ?? {});
-    layerBuilds.set(job.jobId, running);
     try {
-      return await running;
+      return await buildLayers(job, plan, req.body ?? {});
     } catch (err) {
       app.log.error({ err: (err as Error).message, jobId: job.jobId }, 'preparing layers failed');
       return reply.code(409).send({ code: 'flat', message: `The layers could not be prepared: ${(err as Error).message.slice(0, 200)}.` });
-    } finally {
-      layerBuilds.delete(job.jobId);
     }
   },
 );
+
+function buildLayers(job: JobRecord, plan: Parameters<typeof prepareLayers>[1], body: Parameters<typeof prepareLayers>[2]) {
+  const running = layerBuilds.get(job.jobId) ?? prepareLayers(job, plan, body);
+  if (!layerBuilds.has(job.jobId)) {
+    layerBuilds.set(job.jobId, running);
+    void running.catch(() => {}).finally(() => layerBuilds.delete(job.jobId));
+  }
+  return running;
+}
+
+/**
+ * A saved edit whose music has no volume line — exported before lines existed — given the
+ * dips of the film it was cut from, so it reopens with key points like any other. The film's
+ * voice is worked out first if it never was, when a creator is opening it.
+ */
+async function withMusicLine(project: EditProject, creator: boolean): Promise<EditProject> {
+  if (!project.clips.some((c) => c.bed && !c.gain)) return project;
+  try {
+    const source = project.clips.find((c) => c.source?.type === 'video' && c.source.variant === 'clean')?.source;
+    const film = source?.type === 'video' && source.jobId ? await getJob(source.jobId) : null;
+    if (!film?.layers) return project;
+    const layers = creator && editOpenPlan(film) === 'music' ? (await buildLayers(film, 'music', {})).layers : film.layers;
+    return editWithFilmMusicLine(project, layers);
+  } catch (err) {
+    app.log.warn({ err: (err as Error).message }, "giving a saved edit's music its key points failed");
+    return project;
+  }
+}
 
 /** How long the film that came back runs: every part made, re-used ones included. */
 const renderedSeconds = (clips: JobClip[]): number =>

@@ -48,10 +48,14 @@ import {
   type EditPlacement,
   type EditProject,
   type EditSource,
+  editSoundLevel,
+  editWithFilmMusicLine,
+  type GainPoint,
 } from '@ava/shared';
 import { api, isApiError, type EditOpen, type GenerationHistoryItem } from '../lib/api.js';
 import { abs, uploadRef } from '../lib/client.js';
 import { filesFrom, PASTE_KEYS } from './ui.js';
+import { GainLine, GainLinePanel } from './editor/GainLine.js';
 import { LayerPanel } from './editor/LayerPanel.js';
 import { LayerStage } from './editor/LayerStage.js';
 import { useLayerImages } from './editor/useLayerImages.js';
@@ -88,7 +92,7 @@ const ROW_H: Record<string, number> = {
   [EDIT_FOOTER_TRACK]: 30,
   [EDIT_TEXT_TRACK]: 36,
   [EDIT_MAIN_TRACK]: 66,
-  [EDIT_AUDIO_TRACK]: 42,
+  [EDIT_AUDIO_TRACK]: 58,
 };
 const rowH = (id: string): number => ROW_H[id] ?? 36;
 const TRACK_LABEL: Record<string, string> = {
@@ -161,6 +165,8 @@ function syncMedia(
   t: number,
   play: boolean,
   muted: boolean,
+  /** How loud it plays, as a multiplier: the clip's volume unless a sound's line says otherwise. */
+  level = clip?.volume ?? 1,
 ): void {
   if (!el) return;
   const src = clip?.source && clip.source.type !== 'image' ? clip.source.url : '';
@@ -174,8 +180,8 @@ function syncMedia(
   }
   const want = clip.in + (t - clip.start) * clip.speed;
   el.playbackRate = clamp(clip.speed, 0.25, 4);
-  el.muted = muted || clip.volume <= 0;
-  el.volume = clamp(clip.volume, 0, 1);
+  el.muted = muted || level <= 0;
+  el.volume = clamp(level, 0, 1);
   if (play) {
     if (Math.abs(el.currentTime - want) > 0.35) el.currentTime = want;
     if (el.paused) void el.play().catch(() => {});
@@ -248,6 +254,11 @@ export function VideoEditor({
   const [uploads, setUploads] = useState<Material[]>([]);
   const [durations, setDurations] = useState<Record<string, number>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** A key point picked on a sound's volume line. */
+  const [gainPoint, setGainPoint] = useState<{ clipId: string; index: number } | null>(null);
+  useEffect(() => {
+    if (gainPoint && gainPoint.clipId !== selectedId) setGainPoint(null);
+  }, [selectedId, gainPoint]);
   const [playhead, setPlayheadState] = useState(0);
   const playheadRef = useRef(0);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
@@ -350,8 +361,18 @@ export function VideoEditor({
       } catch {
         /* a draft that cannot be read is started over */
       }
-      // A draft that already holds the film's layers carries on where it was left.
-      if (draft?.project.look) return begin(draft.project, draft.uploads);
+      // A draft that already holds the film's layers carries on where it was left — its music
+      // given the film's dips as key points if it was drafted before volume lines existed.
+      if (draft?.project.look) {
+        if (draft.project.clips.some((c) => c.bed && !c.gain)) {
+          setPreparing(true);
+          const film = await api.editOpen(run.jobId, { brief, sceneOverrides });
+          if (!alive) return;
+          setPreparing(false);
+          if (!isApiError(film) && film.mode === 'layers') draft = { ...draft, project: editWithFilmMusicLine(draft.project, film.layers) };
+        }
+        return begin(draft.project, draft.uploads);
+      }
 
       setPreparing(true);
       const opened = await api.editOpen(run.jobId, { brief, sceneOverrides });
@@ -660,7 +681,8 @@ export function VideoEditor({
     const audioTrack = trackOf(EDIT_AUDIO_TRACK);
     for (const c of sounds) {
       const active = viewTime >= c.start && viewTime < editClipEnd(c) && !audioTrack?.hidden;
-      syncMedia(soundRefs.current.get(c.id) ?? null, active ? c : undefined, viewTime, shouldPlay, Boolean(audioTrack?.muted));
+      // The music plays along its volume line, at the level export mixes it: dipped under the voice, up in the pauses.
+      syncMedia(soundRefs.current.get(c.id) ?? null, active ? c : undefined, viewTime, shouldPlay, Boolean(audioTrack?.muted), active ? editSoundLevel(c, viewTime) : 0);
     }
   });
 
@@ -697,6 +719,22 @@ export function VideoEditor({
   const placeLayer = (id: string, place: EditPlacement): void => live(updateEditClip(projectRef.current, id, { place }));
   const commitLayer = (before: EditProject): void => commit(projectRef.current, before);
   const nudgeLayer = (id: string, place: EditPlacement): void => edit(`nudge:${id}`, updateEditClip(projectRef.current, id, { place }));
+  // A drag on a volume line is one undo step. The music keeps playing, so a dip can be set by ear.
+  const gainBefore = useRef<EditProject | null>(null);
+  const gainBegin = (): void => {
+    gainBefore.current = projectRef.current;
+  };
+  const gainChange = (id: string, gain: GainPoint[]): void => live(updateEditClip(projectRef.current, id, { gain }));
+  const gainEnd = (): void => {
+    const before = gainBefore.current;
+    gainBefore.current = null;
+    if (before && before !== projectRef.current) commit(projectRef.current, before);
+  };
+  const pickGainPoint = (clipId: string, index: number | null): void => {
+    setSelectedId(clipId);
+    setPanel('clip');
+    setGainPoint(index === null ? null : { clipId, index });
+  };
 
   /* ---- timeline ---- */
 
@@ -751,6 +789,7 @@ export function VideoEditor({
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     setSelectedId(clip.id);
+    setGainPoint(null);
     setPanel('clip');
     setPlaying(false);
     drag.current = { kind, id: clip.id, origin: projectRef.current, grab: timeAt(e.clientX) - clip.start, moved: false };
@@ -850,6 +889,12 @@ export function VideoEditor({
       } else if (!mod && key === 's') {
         e.preventDefault();
         splitNow();
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && gainPoint && gainPoint.clipId === selectedId && !demo) {
+        // A picked key point goes, not the clip under it.
+        e.preventDefault();
+        const c = projectRef.current.clips.find((x) => x.id === gainPoint.clipId);
+        if (c?.gain?.[gainPoint.index]) commit(updateEditClip(projectRef.current, c.id, { gain: c.gain.filter((_, i) => i !== gainPoint.index) }));
+        setGainPoint(null);
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         deleteNow();
@@ -1008,6 +1053,16 @@ export function VideoEditor({
             </span>
             <input type="range" min={0} max={2} step={0.05} value={c.volume} onChange={(e) => upd('volume', { volume: Number(e.target.value) })} />
           </label>
+        )}
+        {kind === 'audio' && (
+          <GainLinePanel
+            clip={c}
+            playhead={playhead}
+            selected={gainPoint?.clipId === c.id ? gainPoint.index : null}
+            readOnly={demo}
+            onSelect={(index) => pickGainPoint(c.id, index)}
+            onApply={(key, gain) => edit(`${key}:${c.id}`, updateEditClip(projectRef.current, c.id, { gain }))}
+          />
         )}
         <div className="ve-row">
           <label className="ve-field">
@@ -1534,6 +1589,19 @@ export function VideoEditor({
                           title={clipLabel(c)}
                         >
                           {c.transition && <span className="ve-trans-mark" style={{ width: Math.max(6, c.transition.duration * pps) }} />}
+                          {kind === 'audio' && (c.gain || !c.bed) && (
+                            <GainLine
+                              clip={c}
+                              pps={pps}
+                              height={rowH(id) - 12}
+                              selected={gainPoint?.clipId === c.id ? gainPoint.index : null}
+                              readOnly={demo}
+                              onSelect={(index) => pickGainPoint(c.id, index)}
+                              onBegin={gainBegin}
+                              onChange={(gain) => gainChange(c.id, gain)}
+                              onEnd={gainEnd}
+                            />
+                          )}
                           <span className="ve-grip in" onPointerDown={(e) => beginDrag(e, 'in', c)} onPointerMove={dragMove} onPointerUp={endDrag} />
                           <span className="ve-clip-label">
                             {clipLabel(c)}

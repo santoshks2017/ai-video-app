@@ -129,6 +129,7 @@ import {
   type UsageFact,
   scriptOf,
   categoriesFor,
+  sceneRules,
   CATEGORIES,
 } from '@ava/shared';
 
@@ -1844,4 +1845,25 @@ test("a house style is the marque's own, and never follows a record back to a de
   const dealer = base({});
   dealer.dealer = { ...dealer.dealer, styleNote: 'golden hour, never a price on screen' };
   assert.doesNotMatch(buildPrompt(dealer)!.parts[0]!.text, /House style/);
+});
+
+test('a number plate is a plain white plate with nothing on it, in everything a film is made from', () => {
+  // Press photographs carry the model's name on the plate, and the model copied it —
+  // or, told only that plates are blank, left the plate off.
+  for (const vehicleKind of ['car', 'bike'] as const) {
+    const b = base({ categories: ['walkaround'], narration: 'presenter', durationSec: 24, maxChunkSec: 10 });
+    b.carModel = 'Renault Kiger';
+    b.vehicleKind = vehicleKind;
+    const built = buildPrompt(b)!;
+    for (const part of built.parts) {
+      for (const text of [part.text, part.continuationText].filter((x): x is string => Boolean(x))) {
+        assert.match(text, /NUMBER PLATES ARE PLAIN WHITE AND BLANK/, `${vehicleKind} part ${part.partNum} lost the plate rule`);
+        assert.doesNotMatch(text, /a price board, a number plate, a screen/, 'a plate may never be sent out of focus or out of frame');
+        assert.match(text, /plain white plate with nothing on it/);
+      }
+    }
+    assert.match(built.parts[1]!.continuationText ?? built.parts[1]!.text, /every number plate is a plain white plate with nothing on it/i);
+    // A scene still is the video's first reference, so it is drawn to the same rule.
+    assert.match(sceneRules(b).join('\n'), /NUMBER PLATES ARE PLAIN WHITE AND BLANK/);
+  }
 });

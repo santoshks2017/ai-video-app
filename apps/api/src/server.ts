@@ -3032,6 +3032,9 @@ app.post<{ Params: { jobId: string }; Body: { modelId?: string } }>(
       '',
       'What to improve, and only this: lighting quality and depth, material and surface detail — paint, chrome, glass, fabric, skin — focus, micro-contrast, colour depth and the overall filmic, premium look of a high-end car commercial.',
       'Do not restage, reframe, re-time, add or remove anything. Do not add text, logos, graphics or effects. Do not speed up or slow down.',
+      // The one thing a pass may change: a plate the film drew with writing on it is
+      // put right rather than preserved, since keeping it is keeping a misspelling.
+      'Every number plate is a plain white plate with nothing on it. Never add writing to a plate, and where a plate in this video shows any letters or numbers, render that plate plain white and blank.',
     ].join('\n');
 
     try {

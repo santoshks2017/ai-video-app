@@ -189,7 +189,17 @@ export function LayerPanel({ clip, project, look, images, readOnly, onPatch, onP
           <button type="button" className="ve-btn ghost" disabled={readOnly || busy} onClick={() => file.current?.click()}>
             {busy ? 'Fitting the logo…' : 'Replace logo'}
           </button>
-          <input ref={file} type="file" accept="image/*" hidden onChange={(e) => void replaceLogo(e.target.files?.[0])} />
+          <input
+            ref={file}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              void replaceLogo(e.target.files?.[0]);
+              // The same file picked again, after a fit that failed, is a new pick.
+              e.target.value = '';
+            }}
+          />
           {size}
           <label className="ve-check">
             <input

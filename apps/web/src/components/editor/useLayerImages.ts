@@ -7,6 +7,8 @@ export interface LayerImage {
   /** Pixels on the film's frame, at the layer's size. */
   width: number;
   height: number;
+  /** The size the picture was drawn at, so it can be shown at another while it is redrawn. */
+  scale: number;
 }
 type Drawn = Exclude<EditLayer, { kind: 'logo' }>;
 
@@ -22,7 +24,9 @@ function draw(layer: Drawn, look: EditLook, scale: number): Promise<LayerImage |
   if (!p) {
     p = api
       .drawLayer(layer, look, layer.kind === 'caption' ? scale : 1)
-      .then((r) => (isApiError(r) || !r.png ? null : { url: `data:image/png;base64,${r.png}`, width: r.width, height: r.height }));
+      .then((r) =>
+        isApiError(r) || !r.png ? null : { url: `data:image/png;base64,${r.png}`, width: r.width, height: r.height, scale: layer.kind === 'caption' ? scale : 1 },
+      );
     drawn.set(key, p);
     // A picture that could not be drawn is asked for again next time.
     void p.then((img) => {
@@ -48,16 +52,28 @@ export function useLayerImages(clips: EditClip[], look: EditLook | undefined): M
     const put = (id: string, img: LayerImage): void =>
       setImages((m) => {
         const cur = m.get(id);
-        if (cur && cur.url === img.url && cur.width === img.width && cur.height === img.height) return m;
+        if (cur && cur.url === img.url && cur.width === img.width && cur.height === img.height && cur.scale === img.scale) return m;
         const next = new Map(m);
         next.set(id, img);
+        return next;
+      });
+    const drop = (id: string): void =>
+      setImages((m) => {
+        if (!m.has(id)) return m;
+        const next = new Map(m);
+        next.delete(id);
         return next;
       });
     for (const c of layered) {
       const layer = c.layer!;
       const scale = c.place?.scale ?? 1;
       if (layer.kind === 'logo') {
-        put(c.id, { url: refUrl(layer.colourPath), width: layer.w * scale, height: layer.h * scale });
+        put(c.id, { url: refUrl(layer.colourPath), width: layer.w * scale, height: layer.h * scale, scale });
+        continue;
+      }
+      // A footer with its words cleared is not drawn by the export, so it is not shown either.
+      if (layer.kind === 'footer' && !layer.text.trim()) {
+        drop(c.id);
         continue;
       }
       const fetchIt = (): void =>

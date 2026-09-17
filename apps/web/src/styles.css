@@ -2657,6 +2657,8 @@ textarea.guide {
   white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); pointer-events: none;
 }
 .ve-clip.audio .ve-clip-label { top: auto; bottom: 3px; }
+/* Nothing is edited while a film is still opening. */
+.ve-side.waiting, .ve-timeline.waiting { pointer-events: none; opacity: 0.55; }
 /* A sound's volume line: key points on a fader's scale, +6 dB at the top of the bar, -40 dB at the bottom. */
 .ve-gain { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 1; }
 .ve-gain-hit { fill: none; stroke: transparent; stroke-width: 12px; pointer-events: stroke; cursor: copy; }

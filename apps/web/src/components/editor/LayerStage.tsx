@@ -5,6 +5,7 @@ import {
   editClipEnd,
   editLayerGuides,
   editSnapBox,
+  isLightColour,
   type EditClip,
   type EditLook,
   type EditPlacement,
@@ -27,6 +28,8 @@ interface Props {
   fadeOpacity: (c: EditClip, t: number) => number;
   readOnly: boolean;
   onSelect: (id: string) => void;
+  /** A layer was taken hold of: the film stops, as it does for a drag on the timeline. */
+  onGrab: () => void;
   /** A drag in progress: shown, not yet a step of history. */
   onMove: (id: string, place: EditPlacement) => void;
   /** A drag finished: one step of history, from the edit as it was when the drag began. */
@@ -38,6 +41,7 @@ interface Props {
 
 interface Drag {
   id: string;
+  pointerId: number;
   mode: 'move' | 'scale';
   before: EditProject;
   x0: number;
@@ -65,26 +69,41 @@ export function LayerStage(props: Props) {
     .filter((c) => c.layer && c.layer.kind !== 'endcard' && c.place && !hidden.has(c.trackId) && viewTime >= c.start && viewTime < editClipEnd(c))
     .sort((a, b) => (PAINT[a.layer!.kind] ?? 0) - (PAINT[b.layer!.kind] ?? 0));
 
+  /**
+   * A layer's size as fractions of the frame. A caption's picture is redrawn at a new size a
+   * moment after resizing stops; until then its last picture is shown stretched to the size
+   * it is being dragged to, so resizing follows the pointer.
+   */
   const sizeOf = (c: EditClip): { w: number; h: number } => {
     const img = images.get(c.id);
+    const k = img && c.place ? c.place.scale / img.scale : 1;
     return c.layer?.kind === 'footer'
       ? { w: 1, h: (img?.height ?? 0) / look.height }
-      : { w: (img?.width ?? 0) / look.width, h: (img?.height ?? 0) / look.height };
+      : { w: ((img?.width ?? 0) * k) / look.width, h: ((img?.height ?? 0) * k) / look.height };
   };
+  /** Somewhere a layer can still be seen and grabbed: at least a sliver of it stays on the frame. */
+  const onFrame = (x: number, y: number, s: { w: number; h: number }): { x: number; y: number } => ({
+    x: Math.max(0.02 - s.w, Math.min(0.98, x)),
+    y: Math.max(0.02 - s.h, Math.min(0.98, y)),
+  });
+  const darkCard = !isLightColour(look.colours.card);
 
   const begin = (e: ReactPointerEvent<HTMLElement>, c: EditClip, mode: Drag['mode']): void => {
     e.stopPropagation();
     box.current?.focus();
     props.onSelect(c.id);
     if (props.readOnly) return;
+    props.onGrab();
     e.currentTarget.setPointerCapture(e.pointerId);
     const s = sizeOf(c);
-    drag.current = { id: c.id, mode, before: project, x0: e.clientX, y0: e.clientY, place: c.place!, w: s.w, h: s.h, moved: false };
+    drag.current = { id: c.id, pointerId: e.pointerId, mode, before: project, x0: e.clientX, y0: e.clientY, place: c.place!, w: s.w, h: s.h, moved: false };
   };
 
   const move = (e: ReactPointerEvent<HTMLElement>): void => {
     const d = drag.current;
-    if (!d || !stageW || !stageH) return;
+    if (!d || e.pointerId !== d.pointerId || !stageW || !stageH) return;
+    // The button came up somewhere this box never heard about: the drag is over.
+    if (e.buttons === 0) return end();
     if (!d.moved && Math.abs(e.clientX - d.x0) + Math.abs(e.clientY - d.y0) < 3) return;
     d.moved = true;
     const dx = (e.clientX - d.x0) / stageW;
@@ -117,7 +136,8 @@ export function LayerStage(props: Props) {
         }
       }
     }
-    props.onMove(d.id, { ...d.place, x, y });
+    const kept = onFrame(x, y, d);
+    props.onMove(d.id, { ...d.place, x: footer ? 0 : kept.x, y: kept.y });
   };
 
   const end = (): void => {
@@ -133,7 +153,8 @@ export function LayerStage(props: Props) {
     const d = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, [number, number]>)[e.key];
     if (!c || !d || props.readOnly) return;
     e.preventDefault();
-    props.onNudge(c.id, { ...c.place!, x: c.layer!.kind === 'footer' ? 0 : c.place!.x + d[0], y: c.place!.y + d[1] });
+    const kept = onFrame(c.place!.x + d[0], c.place!.y + d[1], sizeOf(c));
+    props.onNudge(c.id, { ...c.place!, x: c.layer!.kind === 'footer' ? 0 : kept.x, y: kept.y });
   };
 
   return (
@@ -142,8 +163,9 @@ export function LayerStage(props: Props) {
         const img = images.get(c.id);
         if (!img) return null;
         const layer = c.layer!;
+        // White on a dark end card only, as the export draws it.
         const white =
-          layer.kind === 'logo' && layer.whiteOnEndCard && layer.whitePath && endCardStart !== undefined && viewTime >= endCardStart
+          layer.kind === 'logo' && layer.whiteOnEndCard && layer.whitePath && darkCard && endCardStart !== undefined && viewTime >= endCardStart
             ? refUrl(layer.whitePath)
             : null;
         return (
@@ -153,13 +175,14 @@ export function LayerStage(props: Props) {
             style={{
               left: `${c.place!.x * 100}%`,
               top: `${c.place!.y * 100}%`,
-              width: layer.kind === 'footer' ? '100%' : `${(img.width / look.width) * 100}%`,
+              width: layer.kind === 'footer' ? '100%' : `${sizeOf(c).w * 100}%`,
               opacity: props.fadeOpacity(c, viewTime),
             }}
             onPointerDown={(e) => begin(e, c, 'move')}
             onPointerMove={move}
             onPointerUp={end}
             onPointerCancel={end}
+            onLostPointerCapture={end}
             onDoubleClick={() => layer.kind === 'caption' && props.onEditText(c.id)}
           >
             <img src={white ?? img.url} alt="" draggable={false} />
@@ -171,6 +194,7 @@ export function LayerStage(props: Props) {
                 onPointerMove={move}
                 onPointerUp={end}
                 onPointerCancel={end}
+                onLostPointerCapture={end}
               />
             )}
           </div>

@@ -278,10 +278,19 @@ export function VideoEditor({
   const [preparing, setPreparing] = useState(false);
   /** A draft made on the finished picture, waiting on the choice to keep it or start with layers. */
   const [draftChoice, setDraftChoice] = useState<null | { draft: { project: EditProject; uploads: Material[] }; layered: EditProject }>(null);
+  /** Something was done since the film opened, so there is a draft worth keeping. */
+  const changed = useRef(false);
+  /** The earlier draft on the finished picture was kept when layers were offered: not asked again. */
+  const keepFlat = useRef(false);
   const begin = useCallback((p: EditProject, kept: Material[] = []) => {
     projectRef.current = p;
     setProject(p);
     setUploads(kept);
+    // Whatever was on screen before the film opened is not a step to undo back to.
+    past.current = [];
+    future.current = [];
+    changed.current = false;
+    setHistoryTick((n) => n + 1);
     setReady(true);
   }, []);
 
@@ -299,6 +308,7 @@ export function VideoEditor({
   }, []);
   const commit = useCallback((next: EditProject, before: EditProject = projectRef.current) => {
     if (next === before) return;
+    changed.current = true;
     past.current.push(before);
     if (past.current.length > 150) past.current.shift();
     future.current = [];
@@ -337,7 +347,9 @@ export function VideoEditor({
     const total = o.layers.bodySeconds + (o.layers.endCard?.seconds ?? 0);
     const cleanSeconds = (await mediaDuration(o.cleanUrl, 'video')) || o.layers.bodySeconds;
     const musicSeconds = o.musicUrl ? (await mediaDuration(o.musicUrl, 'audio')) || total : 0;
-    setDurations((cur) => ({ ...cur, [`run:${run.jobId}`]: cleanSeconds }));
+    // The finished film in Material is the whole film, end card and all — not its clean footage.
+    const filmSeconds = run.finalUrl ? await mediaDuration(run.finalUrl, 'video') : 0;
+    if (filmSeconds) setDurations((cur) => ({ ...cur, [`run:${run.jobId}`]: filmSeconds }));
     return editProjectFromLayers({
       aspect: asAspect(run.aspect),
       layers: o.layers,
@@ -353,11 +365,11 @@ export function VideoEditor({
   useEffect(() => {
     let alive = true;
     void (async () => {
-      let draft: { project: EditProject; uploads: Material[] } | null = null;
+      let draft: { project: EditProject; uploads: Material[]; keepFlat?: boolean } | null = null;
       try {
         const raw = localStorage.getItem(draftKey);
-        const d = raw ? (JSON.parse(raw) as { project?: EditProject; uploads?: Material[] }) : null;
-        if (d?.project && (d.project.version === 1 || d.project.version === 2)) draft = { project: d.project, uploads: d.uploads ?? [] };
+        const d = raw ? (JSON.parse(raw) as { project?: EditProject; uploads?: Material[]; keepFlat?: boolean }) : null;
+        if (d?.project && (d.project.version === 1 || d.project.version === 2)) draft = { project: d.project, uploads: d.uploads ?? [], keepFlat: d.keepFlat === true };
       } catch {
         /* a draft that cannot be read is started over */
       }
@@ -373,6 +385,11 @@ export function VideoEditor({
         }
         return begin(draft.project, draft.uploads);
       }
+      // A draft on the finished picture that was kept when layers were offered carries on without asking again.
+      if (draft?.keepFlat) {
+        keepFlat.current = true;
+        return begin(draft.project, draft.uploads);
+      }
 
       setPreparing(true);
       const opened = await api.editOpen(run.jobId, { brief, sceneOverrides });
@@ -382,7 +399,9 @@ export function VideoEditor({
         const layered = opened.mode === 'edit' ? opened.editProject : await layeredProject(opened);
         if (!alive) return;
         if (opened.mode === 'layers' && opened.note) setNotice(opened.note);
-        if (draft) return setDraftChoice({ draft, layered });
+        // The choice is only worth asking when there are layers to start with instead.
+        if (draft && layered.look) return setDraftChoice({ draft, layered });
+        if (draft) return begin(draft.project, draft.uploads);
         return begin(layered);
       }
       // Captions and logos stay part of the picture: the film opens as it always did.
@@ -409,10 +428,11 @@ export function VideoEditor({
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
+    // Opening a film is not a draft: only something done to it is kept.
+    if (!ready || (!changed.current && !keepFlat.current)) return;
     const t = setTimeout(() => {
       try {
-        localStorage.setItem(draftKey, JSON.stringify({ project, uploads }));
+        localStorage.setItem(draftKey, JSON.stringify({ project, uploads, ...(keepFlat.current ? { keepFlat: true } : {}) }));
       } catch {
         /* storage full or unavailable — the edit still exports */
       }
@@ -524,6 +544,7 @@ export function VideoEditor({
           ? { type, label: f.name, url: r.url, storagePath: r.storagePath }
           : { type, label: f.name, url: r.url, storagePath: r.storagePath, duration: d };
       const key = `up:${r.refId}`;
+      changed.current = true;
       setUploads((u) => [...u, { key, source, thumb: type === 'image' ? r.url : undefined }]);
       if (d) setDurations((x) => ({ ...x, [key]: d }));
     }
@@ -865,6 +886,8 @@ export function VideoEditor({
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       // Arrow keys belong to a selected layer while the preview has focus.
       if (e.key.startsWith('Arrow') && t?.closest?.('.ve-layers')) return;
+      // Nothing is edited while the film is still opening: it would be replaced when it opens.
+      if (!ready && e.key !== 'Escape') return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (e.key === 'Escape') {
@@ -1176,7 +1199,7 @@ export function VideoEditor({
       </header>
 
       <div className="ve-top">
-        <aside className="ve-side">
+        <aside className={`ve-side${ready ? '' : ' waiting'}`} aria-busy={!ready}>
           <nav className="ve-rail" aria-label="Editor tools">
             {(
               [
@@ -1402,7 +1425,12 @@ export function VideoEditor({
                   />
                 )}
                 {mainClip?.layer?.kind === 'endcard' && layerImages.get(mainClip.id) && (
-                  <img className="ve-layer" src={layerImages.get(mainClip.id)!.url} alt="" style={{ opacity: fadeOpacity(mainClip, viewTime) * transitionProgress }} />
+                  <img
+                    className="ve-layer"
+                    src={layerImages.get(mainClip.id)!.url}
+                    alt=""
+                    style={{ filter: lookOf(mainClip), opacity: fadeOpacity(mainClip, viewTime) * transitionProgress }}
+                  />
                 )}
                 {project.look && (
                   <LayerStage
@@ -1419,6 +1447,7 @@ export function VideoEditor({
                       setSelectedId(id);
                       setPanel('clip');
                     }}
+                    onGrab={() => setPlaying(false)}
                     onMove={placeLayer}
                     onCommit={commitLayer}
                     onNudge={nudgeLayer}
@@ -1462,7 +1491,14 @@ export function VideoEditor({
               <Icon d={playing ? ICONS.pause : ICONS.play} />
             </button>
             <div className="ve-transport-right">
-              <select className="ve-aspect" value={project.aspect} aria-label="Aspect ratio" onChange={(e) => commit({ ...projectRef.current, aspect: e.target.value as EditAspect })}>
+              <select
+                className="ve-aspect"
+                value={project.aspect}
+                aria-label="Aspect ratio"
+                disabled={Boolean(project.look)}
+                title={project.look ? "A film's layers keep the film's own frame" : undefined}
+                onChange={(e) => commit({ ...projectRef.current, aspect: e.target.value as EditAspect })}
+              >
                 <option value="16:9">16:9</option>
                 <option value="9:16">9:16</option>
                 <option value="1:1">1:1</option>
@@ -1475,7 +1511,7 @@ export function VideoEditor({
         </section>
       </div>
 
-      <section className="ve-timeline">
+      <section className={`ve-timeline${ready ? '' : ' waiting'}`} aria-busy={!ready}>
         <div className="ve-toolbar">
           <div className="ve-tools">
             <button type="button" className="ve-icon" title="Undo (⌘Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>
@@ -1647,7 +1683,13 @@ export function VideoEditor({
                 onClick={() => {
                   const d = draftChoice.draft;
                   setDraftChoice(null);
+                  keepFlat.current = true;
                   begin(d.project, d.uploads);
+                  try {
+                    localStorage.setItem(draftKey, JSON.stringify({ project: d.project, uploads: d.uploads, keepFlat: true }));
+                  } catch {
+                    /* storage unavailable: asked again next time */
+                  }
                 }}
               >
                 Continue that draft
@@ -1656,9 +1698,16 @@ export function VideoEditor({
                 type="button"
                 className="ve-btn primary"
                 onClick={() => {
-                  const l = draftChoice.layered;
+                  const { layered: l, draft: d } = draftChoice;
                   setDraftChoice(null);
-                  begin(l);
+                  keepFlat.current = false;
+                  // The uploads the old draft listed stay in Material, and the layered edit is the draft from now on.
+                  begin(l, d.uploads);
+                  try {
+                    localStorage.setItem(draftKey, JSON.stringify({ project: l, uploads: d.uploads }));
+                  } catch {
+                    /* storage unavailable: the edit still exports */
+                  }
                 }}
               >
                 Start with layers

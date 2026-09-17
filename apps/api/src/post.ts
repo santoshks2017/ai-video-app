@@ -1471,7 +1471,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     parts.push(`[${vCur}]null[vout]`);
 
     const out = join(dir, 'final.mp4');
-    await run('ffmpeg', [
+    const finalArgs = [
       '-v', 'error', '-y',
       ...clipInputs,
       ...inputs,
@@ -1482,7 +1482,10 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', FF_THREADS,
       '-c:a', 'aac', '-movflags', '+faststart',
       out,
-    ]);
+    ];
+    // Tests record the exact call, so a refactor can prove the film is built as before.
+    if (process.env.AVA_POST_TRACE) await writeFile(process.env.AVA_POST_TRACE, JSON.stringify(finalArgs));
+    await run('ffmpeg', finalArgs);
     return await readFile(out);
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});

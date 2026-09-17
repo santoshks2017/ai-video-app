@@ -55,6 +55,7 @@ import {
 import { generateVeoClip, VeoError } from './veo.js';
 import { countRequest, markExhausted, usageToday } from './usage.js';
 import { renderEditProject } from './editRender.js';
+import { editOpenPlan } from './editOpen.js';
 import { importWebsite } from './siteImport.js';
 import { drawActorSheet, fillActorProfile } from './actorProfile.js';
 import { cleanLogo, findBrandLogo } from './logos.js';
@@ -64,6 +65,7 @@ import { listRunFacts, listAllJobs,
   updateJob,
   getJob,
   uploadClip,
+  uploadCleanCut,
   streamClip,
   putRef,
   readObject,
@@ -78,6 +80,7 @@ import { listRunFacts, listAllJobs,
 import { scrapeModel, getCarModel } from './scraper.js';
 import { sceneCuts, cutVideo, conformLength, withSoundOf,
   composeFinal,
+  composeClean,
   contactSheet,
   joinVideos,
   keepRanges,
@@ -88,6 +91,7 @@ import { sceneCuts, cutVideo, conformLength, withSoundOf,
   upscaleVideo,
   videoFacts,
   type BrandOverlay,
+  type ComposedLayers,
 } from './post.js';
 import { bearer } from './auth.js';
 import {
@@ -133,6 +137,8 @@ import {
   type ClientProfile,
   DEALER_VIEWS,
   type DealerView,
+  type FilmLayers,
+  type FilmLogoLayer,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title, syncColours } from './carSync.js';
 import { seePhotos, seeDealerPhotos, findPeople } from './vision.js';
@@ -247,6 +253,9 @@ function requiredRole(method: string, url: string): Role | null {
   if (url.startsWith('/api/brands') && method !== 'GET') return 'creator';
   if (url.startsWith('/api/models/seed')) return 'admin';
   if (url.startsWith('/api/models') && method !== 'GET') return 'admin';
+  // Opening a film as layers, and drawing a layer's picture: viewers try the editor too.
+  // Checked inside: a viewer only opens layers that are already prepared.
+  if (/^\/api\/generations\/[^/]+\/layers$/.test(url) || url === '/api/edits/layer') return null;
 
   // Everything that costs money, or changes what a paid run will produce.
   if (
@@ -2316,11 +2325,16 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     // them, append a real end card, and overlay the footer bar + logos.
     // Everything that must be legible is drawn here rather than generated.
     const bed = await musicBed;
+    const overlay = buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes);
+    const captured: { layers?: ComposedLayers } = {};
     const finalBytes = await composeFinal(segmentBytes, {
-      ...buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes),
+      ...overlay,
       findPeople: await peopleFinder(),
       onJoins: (n) => {
         joins = n;
+      },
+      onLayers: (l) => {
+        captured.layers = l;
       },
     });
     const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
@@ -2337,6 +2351,13 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     // made, every part for the seconds its model renders, remakes twice.
     const billed = billClips(resolved.modelId, usdPerSecond, clips, record.prompts, plannedRes.render);
 
+    const keptLayers = captured.layers
+      ? await storeLayers(jobId, captured.layers, bed?.storagePath ? { storagePath: bed.storagePath, loudness: overlay.musicLoudness ?? -20, duckDb: overlay.musicDuckDb ?? 0 } : undefined).catch((e) => {
+          app.log.warn({ err: (e as Error).message, jobId }, 'keeping the layers failed');
+          return undefined;
+        })
+      : undefined;
+
     // The whole record again, not just what changed: if the first save was lost,
     // this write alone still files the video under its project.
     await updateJob(jobId, {
@@ -2347,6 +2368,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
       referenceFiles: sentRefs,
       vehicleChecks,
       joins,
+      layers: keptLayers,
       finalStoragePath,
       posterPath,
       musicStoragePath: bed?.storagePath,
@@ -2607,6 +2629,8 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       costUsd: cost.usd,
       usdPerSecond,
       clips,
+      brief: { ...brief, attachments: (brief.attachments ?? []).map(({ src, ...rest }) => rest) },
+      sceneEdits: req.body?.sceneOverrides,
     };
     await saveJob(record).catch((e) => app.log.error(e, 'saveJob failed'));
 
@@ -2714,10 +2738,15 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       // Overlay copy is rebuilt from the current brief, so a footer or end-card
       // correction lands here even on the free restitch path.
       const bed = await musicBed;
-      const finalBytes = await composeFinal(
-        segmentBytes,
-        { ...buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes), findPeople: await peopleFinder() },
-      );
+      const overlay = buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes);
+      const captured: { layers?: ComposedLayers } = {};
+      const finalBytes = await composeFinal(segmentBytes, {
+        ...overlay,
+        findPeople: await peopleFinder(),
+        onLayers: (l) => {
+          captured.layers = l;
+        },
+      });
       const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 
       let posterPath: string | undefined;
@@ -2725,6 +2754,13 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       if (poster) {
         posterPath = (await putRef(`poster-${jobId}.jpg`, 'image/jpeg', poster).catch(() => null))?.storagePath;
       }
+
+      const keptLayers = captured.layers
+        ? await storeLayers(jobId, captured.layers, bed?.storagePath ? { storagePath: bed.storagePath, loudness: overlay.musicLoudness ?? -20, duckDb: overlay.musicDuckDb ?? 0 } : undefined).catch((e) => {
+            app.log.warn({ err: (e as Error).message, jobId }, 'keeping the layers failed');
+            return undefined;
+          })
+        : undefined;
 
       // Only the segments made again are billed, for the seconds they rendered.
       const billed = billClips(
@@ -2745,6 +2781,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         finalStoragePath,
         posterPath,
         musicStoragePath: bed?.storagePath,
+        layers: keptLayers,
         finishedAt: Date.now(),
       });
       if (req.caller) {
@@ -2837,6 +2874,103 @@ function billClips(
   );
 }
 
+/** A composed film's layers, with the logo artwork it drew saved, so an edit draws the same pixels. */
+async function storeLayers(
+  jobId: string,
+  composed: ComposedLayers,
+  music?: { storagePath: string; loudness: number; duckDb: number },
+): Promise<FilmLayers> {
+  const logos: FilmLogoLayer[] = [];
+  for (const g of composed.logos) {
+    const colour = await putRef(`logo-${g.which}-${jobId}.png`, 'image/png', g.colour);
+    const white = g.white ? await putRef(`logo-${g.which}-white-${jobId}.png`, 'image/png', g.white) : null;
+    logos.push({ which: g.which, x: g.x, y: g.y, w: g.w, h: g.h, colourPath: colour.storagePath, ...(white ? { whitePath: white.storagePath } : {}), whiteOnEndCard: g.whiteOnEndCard });
+  }
+  return { ...composed, logos, ...(music ? { music } : {}) };
+}
+
+function layersReply(jobId: string, layers: FilmLayers, note?: string) {
+  return {
+    mode: 'layers' as const,
+    layers,
+    cleanUrl: `/api/clips/${jobId}/clean`,
+    musicUrl: layers.music ? `/api/${layers.music.storagePath}` : null,
+    ...(note ? { note } : {}),
+  };
+}
+
+async function prepareLayers(job: JobRecord, plan: 'clean' | 'rebuild', body: { brief?: Brief; sceneOverrides?: Record<string, SceneOverride> }) {
+  const parts = [...job.clips].sort((a, b) => a.partNum - b.partNum);
+  const segments = await Promise.all(
+    parts.map(async (c) => {
+      const o = await readObject(c.storagePath);
+      if (!o) throw new Error(`part ${c.partNum} is missing from storage`);
+      return o.bytes;
+    }),
+  );
+  if (plan === 'clean') {
+    const { bytes } = await composeClean(segments, { speed: job.layers!.speed, targetShortSide: job.layers!.targetShortSide }, { plan: false });
+    const cleanStoragePath = await uploadCleanCut(job.jobId, bytes);
+    await updateJob(job.jobId, { cleanStoragePath });
+    return layersReply(job.jobId, job.layers!);
+  }
+  const brief = (job.brief as Brief | undefined) ?? body.brief;
+  if (!brief) throw new Error('this film kept no record of its settings, and none were sent');
+  const sceneOverrides = (job.brief ? job.sceneEdits : body.sceneOverrides) as Record<string, SceneOverride> | undefined;
+  const { dealerLogo, brandLogo } = await loadBriefAssets(brief);
+  const overlay = { ...buildOverlay(brief, sceneOverrides, dealerLogo, brandLogo), findPeople: await peopleFinder() };
+  const { bytes, layers: composed } = await composeClean(segments, overlay);
+  if (!composed) throw new Error('no layers were worked out');
+  const cleanStoragePath = await uploadCleanCut(job.jobId, bytes);
+  const layers = await storeLayers(
+    job.jobId,
+    composed,
+    job.musicStoragePath ? { storagePath: job.musicStoragePath, loudness: overlay.musicLoudness ?? -20, duckDb: overlay.musicDuckDb ?? 0 } : undefined,
+  );
+  await updateJob(job.jobId, { cleanStoragePath, layers });
+  return layersReply(job.jobId, layers, job.brief ? undefined : 'This film was made before layers were kept, so they were rebuilt from the project as it is now.');
+}
+
+/** One layers build per film at a time: a second open of the same film waits for the first. */
+const layerBuilds = new Map<string, ReturnType<typeof prepareLayers>>();
+
+/**
+ * Open a film in the video editor as layers.
+ *
+ * The first time, its clean footage is made from its segments — about as long as a
+ * restitch, and free. A version exported from the editor reopens as that edit; a version
+ * that kept no segments opens as the finished picture.
+ */
+app.post<{ Params: { jobId: string }; Body: { brief?: Brief; sceneOverrides?: Record<string, SceneOverride> } }>(
+  '/api/generations/:jobId/layers',
+  async (req, reply) => {
+    const job = await getJob(req.params.jobId);
+    if (!job) return reply.code(404).send({ code: 'not-found', message: 'No such film.' });
+    const plan = editOpenPlan(job);
+    if (plan === 'edit') return { mode: 'edit' as const, editProject: job.editProject! };
+    if (plan === 'ready') return layersReply(job.jobId, job.layers!);
+    if (plan === 'flat') {
+      return reply.code(409).send({
+        code: 'flat',
+        message: 'This version was saved from a finished film, so its captions and logos are part of the picture. Open the film it was made from to edit them as layers.',
+      });
+    }
+    if (!allows(req.caller ?? null, 'creator')) {
+      return reply.code(409).send({ code: 'flat', message: 'This film has not been prepared for layers yet. It is prepared the first time a creator opens it in the editor.' });
+    }
+    const running = layerBuilds.get(job.jobId) ?? prepareLayers(job, plan, req.body ?? {});
+    layerBuilds.set(job.jobId, running);
+    try {
+      return await running;
+    } catch (err) {
+      app.log.error({ err: (err as Error).message, jobId: job.jobId }, 'preparing layers failed');
+      return reply.code(409).send({ code: 'flat', message: `The layers could not be prepared: ${(err as Error).message.slice(0, 200)}.` });
+    } finally {
+      layerBuilds.delete(job.jobId);
+    }
+  },
+);
+
 /** How long the film that came back runs: every part made, re-used ones included. */
 const renderedSeconds = (clips: JobClip[]): number =>
   Math.round(clips.filter((c) => c.status === 'done').reduce((a, c) => a + (c.seconds ?? 0), 0) * 10) / 10;
@@ -2854,6 +2988,7 @@ async function saveDerived(
     resolution?: string;
     modelName?: string;
     modelId?: string;
+    editProject?: EditProject;
   },
 ): Promise<JobRecord> {
   const jobId = randomUUID();
@@ -2895,6 +3030,10 @@ async function saveDerived(
     finalStoragePath,
     posterPath,
     error: undefined,
+    // A version's pixels are its own: the film's layers describe the film, not this.
+    layers: undefined,
+    cleanStoragePath: undefined,
+    editProject: opts.editProject,
   };
   await saveJob(record);
   if (record.projectId && (opts.costInr ?? 0) > 0) {
@@ -3597,7 +3736,9 @@ app.get<{ Params: { jobId: string; part: string } }>('/api/clips/:jobId/:part', 
   const storagePath =
     req.params.part === 'final'
       ? job.finalStoragePath
-      : req.params.part === 'poster'
+      : req.params.part === 'clean'
+        ? job.cleanStoragePath
+        : req.params.part === 'poster'
         ? job.posterPath
         : job.clips.find((c) => String(c.partNum) === req.params.part)?.storagePath;
   if (!storagePath) return reply.code(404).send({ code: 'not-found', message: 'No such clip' });

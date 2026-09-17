@@ -4,7 +4,7 @@
  * Storage stays private; clips are served back through GET /api/clips/:jobId/:part.
  */
 
-import type { RunFact } from '@ava/shared';
+import type { RunFact, EditProject, FilmLayers } from '@ava/shared';
 import { initializeApp, applicationDefault, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
@@ -170,6 +170,14 @@ export interface JobRecord {
   hidden?: boolean;
   hiddenAt?: number;
   hiddenBy?: string;
+
+  /* ---- the video editor ---- */
+  /** Where every overlay was drawn when the film was composed — what the editor opens as layers. */
+  layers?: FilmLayers;
+  /** The footage alone: joined, scaled and paced, with no overlays, end card or music. Made the first time the film is edited. */
+  cleanStoragePath?: string;
+  /** A version exported from the editor keeps the edit, so reopening it restores its layers. */
+  editProject?: EditProject;
 }
 
 /** The newest generations across every project — the history an ETA is learned from. */
@@ -196,6 +204,14 @@ export async function getJob(jobId: string): Promise<JobRecord | null> {
   ensure();
   const snap = await getFirestore().collection('generations').doc(jobId).get();
   return snap.exists ? (snap.data() as JobRecord) : null;
+}
+
+/** The film's clean footage, for the video editor. */
+export async function uploadCleanCut(jobId: string, bytes: Buffer): Promise<string> {
+  ensure();
+  const path = `generations/${jobId}/clean.mp4`;
+  await getStorage().bucket(BUCKET).file(path).save(bytes, { contentType: 'video/mp4', resumable: false });
+  return path;
 }
 
 export async function uploadClip(

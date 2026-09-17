@@ -4,7 +4,7 @@
  * clip URLs served back through /api/clips/:jobId/:part.
  */
 
-import type { Brief, PromptPart, DealerPhoto, BriefPlan, EditProject } from '@ava/shared';
+import type { Brief, PromptPart, DealerPhoto, BriefPlan, EditLayer, EditLook, EditProject, FilmLayers } from '@ava/shared';
 import { apiBase as BASE, req, isApiError as sharedIsApiError, type ApiError as SharedApiError } from './client.js';
 
 export interface ClipView {
@@ -103,6 +103,14 @@ export interface GenerateResult {
 
 export type ApiError = SharedApiError;
 export const isApiError = sharedIsApiError;
+
+/** How a film opens in the video editor: as its clean footage and layers, or as an edit made earlier. */
+export type EditOpen =
+  | { mode: 'layers'; layers: FilmLayers; cleanUrl: string; musicUrl: string | null; note?: string }
+  | { mode: 'edit'; editProject: EditProject };
+
+/** A stored image's address, for an <img>. */
+export const refUrl = (storagePath: string): string => `${BASE}/api/${storagePath}`;
 
 /** Error bodies from /api/generate carry the partial clips. */
 export const errorClips = (e: ApiError): ClipView[] =>
@@ -224,6 +232,29 @@ export const api = {
     return await req<{ jobId: string; finalUrl: string }>('/api/edits/render', {
       method: 'POST',
       body: JSON.stringify({ project, label }),
+    });
+  },
+
+  /** Open a film in the editor as its clean footage and its layers — prepared the first time. */
+  async editOpen(jobId: string, body: { brief?: Brief; sceneOverrides?: Record<string, unknown> }) {
+    const r = await req<EditOpen>(`/api/generations/${jobId}/layers`, { method: 'POST', body: JSON.stringify(body) });
+    if (isApiError(r) || r.mode === 'edit') return r;
+    return { ...r, cleanUrl: absolute(r.cleanUrl) ?? r.cleanUrl, musicUrl: absolute(r.musicUrl) };
+  },
+
+  /** One layer's picture, drawn by the server exactly as an export draws it. */
+  async drawLayer(layer: EditLayer, look: EditLook, scale = 1) {
+    return await req<{ png: string; width: number; height: number }>('/api/edits/layer', {
+      method: 'POST',
+      body: JSON.stringify({ layer, look, scale }),
+    });
+  },
+
+  /** A replacement logo, fitted to the film's logo box. */
+  async fitLogo(storagePath: string, whitePath: string | undefined, look: EditLook) {
+    return await req<{ colourPath: string; whitePath?: string; w: number; h: number }>('/api/edits/logo', {
+      method: 'POST',
+      body: JSON.stringify({ storagePath, whitePath, look }),
     });
   },
 

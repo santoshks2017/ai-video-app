@@ -22,6 +22,7 @@ import {
   addEditClip,
   duplicateEditClip,
   editClipAt,
+  editProjectFromLayers,
   editClipEnd,
   editClipLength,
   editFilterMatrices,
@@ -42,7 +43,7 @@ import {
   type EditProject,
   type EditSource,
 } from '@ava/shared';
-import { api, isApiError, type GenerationHistoryItem } from '../lib/api.js';
+import { api, isApiError, type EditOpen, type GenerationHistoryItem } from '../lib/api.js';
 import { abs, uploadRef } from '../lib/client.js';
 import { filesFrom, PASTE_KEYS } from './ui.js';
 
@@ -180,6 +181,7 @@ export function VideoEditor({
   run,
   others,
   brief,
+  sceneOverrides,
   onClose,
   onExported,
   demo = false,
@@ -189,6 +191,8 @@ export function VideoEditor({
   others: GenerationHistoryItem[];
   /** The brief, for the vehicle and dealership photographs in its library. */
   brief?: Brief;
+  /** The storyboard's edits, for rebuilding the layers of a film made before layers were kept. */
+  sceneOverrides?: Record<string, unknown>;
   onClose: () => void;
   onExported: (jobId: string) => void;
   /** A viewer trying the editor: every tool works, and nothing is uploaded or exported. */
@@ -220,6 +224,15 @@ export function VideoEditor({
   const [notice, setNotice] = useState('');
   const [uploading, setUploading] = useState('');
   const [exporting, setExporting] = useState<null | { label: string; busy: boolean; error: string }>(null);
+  const [preparing, setPreparing] = useState(false);
+  /** A draft made on the finished picture, waiting on the choice to keep it or start with layers. */
+  const [draftChoice, setDraftChoice] = useState<null | { draft: { project: EditProject; uploads: Material[] }; layered: EditProject }>(null);
+  const begin = useCallback((p: EditProject, kept: Material[] = []) => {
+    projectRef.current = p;
+    setProject(p);
+    setUploads(kept);
+    setReady(true);
+  }, []);
 
   const setPlayhead = useCallback((t: number) => {
     const v = Math.max(0, t);
@@ -268,26 +281,52 @@ export function VideoEditor({
     setHistoryTick((n) => n + 1);
   }, [live]);
 
+  /** A film's layers as an edit: its clean footage, its end card, and every overlay where the film drew it. */
+  const layeredProject = async (o: Extract<EditOpen, { mode: 'layers' }>): Promise<EditProject> => {
+    const total = o.layers.bodySeconds + (o.layers.endCard?.seconds ?? 0);
+    const cleanSeconds = (await mediaDuration(o.cleanUrl, 'video')) || o.layers.bodySeconds;
+    const musicSeconds = o.musicUrl ? (await mediaDuration(o.musicUrl, 'audio')) || total : 0;
+    setDurations((cur) => ({ ...cur, [`run:${run.jobId}`]: cleanSeconds }));
+    return editProjectFromLayers({
+      aspect: asAspect(run.aspect),
+      layers: o.layers,
+      clean: { type: 'video', label: `${run.label ?? 'Film'} · footage`, url: o.cleanUrl, duration: cleanSeconds, jobId: run.jobId, variant: 'clean', poster: run.posterUrl ?? undefined },
+      ...(o.musicUrl && o.layers.music
+        ? { music: { type: 'audio' as const, label: 'Music', url: o.musicUrl, duration: Math.max(musicSeconds, total), storagePath: o.layers.music.storagePath } }
+        : {}),
+    });
+  };
+
   /* ---- open: the draft, or the film laid on the main track ---- */
 
   useEffect(() => {
     let alive = true;
     void (async () => {
+      let draft: { project: EditProject; uploads: Material[] } | null = null;
       try {
         const raw = localStorage.getItem(draftKey);
-        if (raw) {
-          const d = JSON.parse(raw) as { project?: EditProject; uploads?: Material[] };
-          if (d.project?.version === 1) {
-            projectRef.current = d.project;
-            setProject(d.project);
-            setUploads(d.uploads ?? []);
-            setReady(true);
-            return;
-          }
-        }
+        const d = raw ? (JSON.parse(raw) as { project?: EditProject; uploads?: Material[] }) : null;
+        if (d?.project && (d.project.version === 1 || d.project.version === 2)) draft = { project: d.project, uploads: d.uploads ?? [] };
       } catch {
         /* a draft that cannot be read is started over */
       }
+      // A draft that already holds the film's layers carries on where it was left.
+      if (draft?.project.look) return begin(draft.project, draft.uploads);
+
+      setPreparing(true);
+      const opened = await api.editOpen(run.jobId, { brief, sceneOverrides });
+      if (!alive) return;
+      setPreparing(false);
+      if (!isApiError(opened)) {
+        const layered = opened.mode === 'edit' ? opened.editProject : await layeredProject(opened);
+        if (!alive) return;
+        if (opened.mode === 'layers' && opened.note) setNotice(opened.note);
+        if (draft) return setDraftChoice({ draft, layered });
+        return begin(layered);
+      }
+      // Captions and logos stay part of the picture: the film opens as it always did.
+      setNotice(opened.message);
+      if (draft) return begin(draft.project, draft.uploads);
       const d = run.finalUrl ? (await mediaDuration(run.finalUrl, 'video')) || run.totalSeconds || 0 : 0;
       if (!alive) return;
       const start = newEditProject(asAspect(run.aspect));
@@ -300,9 +339,7 @@ export function VideoEditor({
             ).project
           : start;
       setDurations((cur) => ({ ...cur, [`run:${run.jobId}`]: d }));
-      projectRef.current = first;
-      setProject(first);
-      setReady(true);
+      begin(first);
     })();
     return () => {
       alive = false;
@@ -1221,7 +1258,7 @@ export function VideoEditor({
           </div>
           <div className="ve-player-box" ref={boxRef}>
             {!ready ? (
-              <div className="ve-empty">Loading the film…</div>
+              <div className="ve-empty">{preparing ? "Preparing this film's layers — the first time only, about as long as a restitch." : 'Loading the film…'}</div>
             ) : (
               <div className="ve-stage" style={{ width: stageW, height: stageH }}>
                 {inTransition && prevClip && (
@@ -1438,6 +1475,41 @@ export function VideoEditor({
         />
       ))}
 
+      {draftChoice && (
+        <div className="ve-modal-wrap" role="dialog" aria-label="An earlier draft">
+          <div className="ve-modal">
+            <h3>You have an earlier draft of this edit</h3>
+            <div className="ve-hint">
+              It was made on the finished film, so its captions and logos are part of the picture and cannot be moved.
+              Starting again opens them as layers you can click, drag and change.
+            </div>
+            <div className="ve-row end">
+              <button
+                type="button"
+                className="ve-btn ghost"
+                onClick={() => {
+                  const d = draftChoice.draft;
+                  setDraftChoice(null);
+                  begin(d.project, d.uploads);
+                }}
+              >
+                Continue that draft
+              </button>
+              <button
+                type="button"
+                className="ve-btn primary"
+                onClick={() => {
+                  const l = draftChoice.layered;
+                  setDraftChoice(null);
+                  begin(l);
+                }}
+              >
+                Start with layers
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {exporting && demo && (
         <div className="ve-modal-wrap" role="dialog" aria-label="Export this edit">
           <div className="ve-modal">

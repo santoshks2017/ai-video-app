@@ -372,6 +372,7 @@ export function GenerationPanel({
         run={editing}
         demo={!canGenerateRole}
         brief={brief}
+        sceneOverrides={sceneOverrides}
         others={history.filter((h) => h.jobId !== editing.jobId && h.finalUrl)}
         onClose={() => setEditingRun(null)}
         onExported={(jobId) => {

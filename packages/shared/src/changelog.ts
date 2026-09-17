@@ -18,10 +18,23 @@ export interface Release {
   changes: string[];
 }
 
-export const APP_VERSION = '3.7';
+export const APP_VERSION = '3.8';
 
 /** Newest first. */
 export const CHANGELOG: Release[] = [
+  {
+    version: '3.8',
+    date: '2026-09-17',
+    title: 'A manufacturer is a client too: brand films beside dealership films, and Assamese',
+    changes: [
+      "A client is a dealership or a manufacturer. Client type, at the top of a client, says which: a dealership sells in one city and its films send people to its showroom; a manufacturer’s films are the marque’s own and run everywhere. A manufacturer is asked for what a brand has — its segment (mass, premium or luxury), its tagline, its website, its YouTube and Instagram, and how its films look — and not for what it does not: no phone, no address, no dealer tier and no Google listing. Import still reads a manufacturer’s website.",
+      "A manufacturer picks from its own ten use cases, drawn from what India’s mass, premium and luxury marques actually post: Launch moment, Product film, Design walkaround, Feature & technology, EV explainer, Safety & rating, Ownership story, Brand film & milestone, National offer and Service & care. A dealership’s list is unchanged, and Festival / Occasion serves both — for a manufacturer the occasion dresses the place the car is shot in, not a showroom floor. A use case picked before a client changed type keeps its tile, so it can still be taken off.",
+      "A manufacturer’s film is a brand film from its first part to its last. It is told there is no dealership in it — no showroom signage, dealership name, local address or phone number anywhere in frame — and every part after the first is told again, since each is made from its own prompt. The footer and end card carry the marque, its tagline and its website; a film showing several models calls them the brand’s range; and the brief reader and the script writer both know they are working for a manufacturer.",
+      "A manufacturer’s project starts from a cinematic brand film — real locations, natural light, nothing of a showroom in frame — and closes on Find your nearest authorised showroom, and Visual style and the call to action show exactly that, so the field and the film agree. Type over either and the film uses what was typed. The segment sets the tone the copy is written in, and what the team writes under How their films look goes into every film for that brand. The YouTube and Instagram links are kept with the client for reference.",
+      "Dealership films are unchanged. Built by this release and the one before it and compared word for word — every part, the continuation and the pre-flight checks, for single use cases, combined ones and line-ups — they match, including for a client left holding a manufacturer’s fields after being switched back to Dealership.",
+      "Assamese joins Languages. Its guide leads with the trap a model reading with Hindi or Bengali habits falls into: শ, ষ and স are all said as x — অসম is oxom, not asam — with চ and ছ said as s and জ and ঝ as z, and it warns about ৰ and ৱ, the two letters a line pasted from Bengali gets wrong on a card. Cards in Assamese script draw with the fonts the server already has. The ad phrases in its glossary are a starting point for a native speaker to confirm.",
+    ],
+  },
   {
     version: '3.7',
     date: '2026-09-15',

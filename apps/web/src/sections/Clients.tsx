@@ -635,7 +635,7 @@ export function ClientsSection() {
             </Field>
             {isOem && (
               <>
-                <Field label="Segment" hint="Mass, premium or luxury. It sets the tone of the copy — a luxury film never mentions price — never which use cases exist.">
+                <Field label="Segment" hint="Mass, premium or luxury. It sets the tone the copy is written in — never which use cases exist.">
                   <select
                     value={draft.segment ?? 'mass'}
                     onChange={(e) => set({ segment: e.target.value as ClientProfile['segment'] })}

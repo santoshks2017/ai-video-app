@@ -3353,7 +3353,9 @@ app.post<{ Body: { project?: EditProject; label?: string } }>('/api/edits/render
   const load = async (src: EditSource): Promise<Buffer | null> => {
     if (src.type === 'video' && src.jobId) {
       const job = await getJob(src.jobId);
-      return job?.finalStoragePath ? ((await readObject(job.finalStoragePath))?.bytes ?? null) : null;
+      // A layered edit plays the film's clean footage; everything else plays the finished film.
+      const path = src.variant === 'clean' ? job?.cleanStoragePath : job?.finalStoragePath;
+      return path ? ((await readObject(path))?.bytes ?? null) : null;
     }
     if (src.storagePath && /^refs\/[\w-]+\/[^/]+$/.test(src.storagePath)) {
       return (await readObject(src.storagePath))?.bytes ?? null;
@@ -3368,9 +3370,10 @@ app.post<{ Body: { project?: EditProject; label?: string } }>('/api/edits/render
     const saved = await saveDerived(base, bytes, {
       kind: 'edit',
       label: req.body?.label?.trim().slice(0, 120) || 'Edited cut',
-      note: `Edited in the video editor: ${count('video')} video, ${count('image')} still, ${count('text')} text and ${count('audio')} sound clip(s) — ${seconds.toFixed(1)}s at ${project.aspect}, rendered in ${Math.round((Date.now() - started) / 1000)}s.`,
+      note: `Edited in the video editor: ${count('video')} video, ${count('image')} still, ${count('text')} text, ${project.clips.filter((c) => c.layer).length} layer and ${count('audio')} sound clip(s) — ${seconds.toFixed(1)}s at ${project.aspect}, rendered in ${Math.round((Date.now() - started) / 1000)}s.`,
       caller: req.caller,
       resolution: base.resolution,
+      editProject: project,
     });
     return { jobId: saved.jobId, finalUrl: `/api/clips/${saved.jobId}/final` };
   } catch (err) {

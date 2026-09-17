@@ -137,6 +137,8 @@ import {
   boxesFrom1000,
   CATEGORIES,
   editProjectFromLayers,
+  editSetEndCardSeconds,
+  editClipEnd,
   editLayerGuides,
   editSnapBox,
   editCaptionSpots,
@@ -1986,4 +1988,15 @@ test('a dragged layer catches on the centre line and the safe margin', () => {
     editCaptionSpots(look, { w: 300, h: 100 }, 60).find((s) => s.spot === 'bottom-left'),
     { spot: 'bottom-left', x: 29 / 720, y: 1091 / 1280 },
   );
+});
+
+test('a longer end card carries the logos, footer and music to the new end', () => {
+  const p = editSetEndCardSeconds(layered(), 'endcard', 5);
+  const byId = new Map(p.clips.map((c) => [c.id, c]));
+  assert.ok(Math.abs(editClipEnd(byId.get('endcard')!) - 13.6) < 1e-9);
+  assert.ok(Math.abs(editClipEnd(byId.get('logo-dealer')!) - 13.6) < 1e-9);
+  assert.ok(Math.abs(editClipEnd(byId.get('footer')!) - 13.6) < 1e-9);
+  assert.ok(Math.abs(editClipEnd(byId.get('music')!) - 13.6) < 1e-9);
+  assert.ok(Math.abs(editClipEnd(byId.get('cap-0')!) - 3.4) < 1e-9, 'a caption that ended earlier is left alone');
+  assert.equal(editClipLength(editSetEndCardSeconds(layered(), 'endcard', 30).clips.find((c) => c.id === 'endcard')!), 8, 'held to eight seconds');
 });

@@ -27,11 +27,13 @@ import {
   editClipLength,
   editFilterFfmpeg,
   type EditClip,
+  type EditLayer,
   type EditProject,
   type EditSource,
   type EditTextStyle,
 } from '@ava/shared';
-import { run, probe, hasAudio, FF_THREADS, esc } from './post.js';
+import { run, probe, hasAudio, FF_THREADS, esc, mediaSeconds, musicBedGraph, speechSpans, withEndCardDuck } from './post.js';
+import { drawLayer, scaleLogo } from './layerDraw.js';
 
 export type LoadSource = (src: EditSource) => Promise<Buffer | null>;
 
@@ -237,7 +239,7 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
     const hidden = new Set(p.tracks.filter((t) => t.hidden).map((t) => t.id));
     const muted = new Set(p.tracks.filter((t) => t.muted).map((t) => t.id));
     const main = p.clips
-      .filter((c) => c.trackId === EDIT_MAIN_TRACK && c.source && c.source.type !== 'audio')
+      .filter((c) => c.trackId === EDIT_MAIN_TRACK && ((c.source && c.source.type !== 'audio') || c.layer?.kind === 'endcard'))
       .sort((a, b) => a.start - b.start);
     if (!main.length || hidden.has(EDIT_MAIN_TRACK)) {
       throw new Error('Put at least one video or image on the main track, and make sure the track is not hidden.');
@@ -245,7 +247,7 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
 
     const cache = new Map<string, Buffer>();
     const bytesFor = async (src: EditSource): Promise<Buffer> => {
-      const key = (src.type === 'video' && src.jobId) || src.storagePath || src.url;
+      const key = (src.type === 'video' && src.jobId ? `${src.jobId}:${src.variant ?? 'final'}` : '') || src.storagePath || src.url;
       const have = cache.get(key);
       if (have) return have;
       const got = await load(src);
@@ -254,19 +256,20 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
       return got;
     };
 
-    // The frame size follows the first film: 1080 on a side when it was made that
-    // large, 720 otherwise. Stills and later clips are fitted into it.
+    // A film's layers are drawn on its own frame. Otherwise the frame follows the first
+    // film: 1080 on a side when it was made that large, 720 otherwise.
     let shortSide = 720;
-    const firstFilm = main.find((c) => c.source?.type === 'video');
+    const firstFilm = p.look ? undefined : main.find((c) => c.source?.type === 'video');
     if (firstFilm?.source) {
       const f = join(dir, 'probe.mp4');
       await writeFile(f, await bytesFor(firstFilm.source));
       const m = await probe(f);
       shortSide = Math.min(m.width, m.height) >= 1000 ? 1080 : 720;
     }
-    const { width: W, height: H } = editAspectSize(p.aspect, shortSide);
+    const { width: W, height: H } = p.look ? { width: p.look.width, height: p.look.height } : editAspectSize(p.aspect, shortSide);
 
     const pieces: Piece[] = [];
+    let endCardStart: number | undefined;
     let cursor = 0;
     let n = 0;
     for (const [k, c] of main.entries()) {
@@ -282,27 +285,101 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
         pieces.push({ file: await gapPiece(dir, n++, gap, W, H), len: gap });
         cursor += gap;
       }
-      const file = await renderPiece(dir, n++, c, await bytesFor(c.source!), W, H, muted.has(EDIT_MAIN_TRACK));
+      // The end card is drawn as the film drew it and plays as a still, easing in from black.
+      const file =
+        c.layer?.kind === 'endcard'
+          ? await renderPiece(dir, n++, { ...c, source: { type: 'image', label: 'End card', url: '' } }, await drawLayer(c.layer, p.look!), W, H, true)
+          : await renderPiece(dir, n++, c, await bytesFor(c.source!), W, H, muted.has(EDIT_MAIN_TRACK));
       const joins = Boolean(look && pieces.length && overlap > 0.05);
+      if (c.layer?.kind === 'endcard' && endCardStart === undefined) endCardStart = cursor - (joins ? overlap : 0);
       pieces.push({ file, len, transition: joins ? { xfade: look!.xfade, duration: overlap } : undefined });
       cursor += len - (joins ? overlap : 0);
     }
     const joined = await joinPieces(dir, pieces);
     const total = cursor;
 
-    const texts = p.clips.filter(
-      (c) => c.trackId !== EDIT_MAIN_TRACK && c.text?.trim() && c.style && !hidden.has(c.trackId) && c.start < total,
-    );
+    const visible = (c: EditClip): boolean => !hidden.has(c.trackId) && c.start < total;
+    const layersOf = (kind: EditLayer['kind']): EditClip[] =>
+      p.clips.filter((c) => c.trackId !== EDIT_MAIN_TRACK && c.layer?.kind === kind && c.place && visible(c));
+    const captions = layersOf('caption');
+    const logos = layersOf('logo');
+    const footers = layersOf('footer');
+    const texts = p.clips.filter((c) => c.trackId !== EDIT_MAIN_TRACK && !c.layer && c.text?.trim() && c.style && visible(c));
     const sounds = p.clips.filter(
       (c) => c.source?.type === 'audio' && !hidden.has(c.trackId) && !muted.has(c.trackId) && c.start < total,
     );
-    if (!texts.length && !sounds.length) return { bytes: await readFile(joined), seconds: total };
+    if (!captions.length && !logos.length && !footers.length && !texts.length && !sounds.length) {
+      return { bytes: await readFile(joined), seconds: total };
+    }
 
     const out = join(dir, 'final.mp4');
     const args = ['-v', 'error', '-y', '-threads', FF_THREADS, '-i', joined];
     const g: string[] = [];
     let v = '[0:v]';
     let input = 1;
+    let label = 0;
+    let fileNo = 0;
+    const span = (c: EditClip): { S: number; E: number } => ({ S: c.start, E: Math.min(total, editClipEnd(c)) });
+    const lay = (idx: number, x: number, y: number, enable: string): void => {
+      g.push(`${v}[${idx}:v]overlay=${x}:${y}${enable}[vl${label}]`);
+      v = `[vl${label++}]`;
+    };
+
+    // Captions: each looped only across its own window and faded on its alpha, as the film drew them.
+    for (const c of captions) {
+      const { S, E } = span(c);
+      if (E - S <= 0.05) continue;
+      const file = join(dir, `layer-${fileNo++}.png`);
+      await writeFile(file, await drawLayer(c.layer as Extract<EditLayer, { kind: 'caption' }>, p.look!, c.place!.scale));
+      args.push('-loop', '1', '-framerate', String(FPS), '-t', n3(E - S), '-itsoffset', n3(S), '-threads', FF_THREADS, '-i', file);
+      const fi = Math.min(c.fadeIn, (E - S) / 2);
+      const fo = Math.min(c.fadeOut, (E - S) / 2);
+      const fades = [
+        fi > 0.01 ? `fade=t=in:st=${n3(S)}:d=${n3(fi)}:alpha=1` : '',
+        fo > 0.01 ? `fade=t=out:st=${n3(Math.max(S, E - fo))}:d=${n3(fo)}:alpha=1` : '',
+      ]
+        .filter(Boolean)
+        .join(',');
+      g.push(`[${input}:v]format=rgba,settb=AVTB${fades ? `,${fades}` : ''}[ly${input}]`);
+      g.push(`${v}[ly${input}]overlay=${Math.round(c.place!.x * W)}:${Math.round(c.place!.y * H)}:eof_action=pass[vl${label}]`);
+      v = `[vl${label++}]`;
+      input++;
+    }
+
+    // Logos: in colour over the film, in white from the end card on where the film did that.
+    const logoInput = async (path: string, scale: number): Promise<number> => {
+      const art = await load({ type: 'image', label: 'Logo', url: '', storagePath: path });
+      if (!art) throw new Error('A logo image is missing from storage — replace the logo and export again.');
+      const file = join(dir, `layer-${fileNo++}.png`);
+      await writeFile(file, await scaleLogo(art, scale));
+      args.push('-threads', FF_THREADS, '-i', file);
+      return input++;
+    };
+    for (const c of logos) {
+      const { S, E } = span(c);
+      if (E - S <= 0.05) continue;
+      const layer = c.layer as Extract<EditLayer, { kind: 'logo' }>;
+      const x = Math.round(c.place!.x * W);
+      const y = Math.round(c.place!.y * H);
+      const switchAt =
+        layer.whiteOnEndCard && layer.whitePath && endCardStart !== undefined && endCardStart < E ? Math.max(S, endCardStart) : undefined;
+      const colourEnd = switchAt ?? E;
+      if (colourEnd - S > 0.001) lay(await logoInput(layer.colourPath, c.place!.scale), x, y, `:enable='gte(t,${n3(S)})*lt(t,${n3(colourEnd)})'`);
+      if (switchAt !== undefined) lay(await logoInput(layer.whitePath!, c.place!.scale), x, y, `:enable='gte(t,${n3(switchAt)})*lt(t,${n3(E)})'`);
+    }
+
+    // The footer strip, full width, at its height on the frame.
+    for (const c of footers) {
+      const { S, E } = span(c);
+      const layer = c.layer as Extract<EditLayer, { kind: 'footer' }>;
+      if (E - S <= 0.05 || !layer.text.trim()) continue;
+      const file = join(dir, `layer-${fileNo++}.png`);
+      await writeFile(file, await drawLayer(layer, p.look!));
+      args.push('-threads', FF_THREADS, '-i', file);
+      lay(input++, 0, Math.round(c.place!.y * H), `:enable='gte(t,${n3(S)})*lt(t,${n3(E)})'`);
+    }
+
+    // Free text on top, as before.
     for (const [k, c] of texts.entries()) {
       const S = c.start;
       const E = Math.min(total, editClipEnd(c));
@@ -333,13 +410,31 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
     for (const [j, c] of sounds.entries()) {
       const src = join(dir, `sound-${j}`);
       await writeFile(src, await bytesFor(c.source!));
-      args.push('-ss', n3(c.in), '-t', n3(c.out - c.in), '-i', src);
       const len = Math.min(editClipLength(c), total - c.start);
       const delay = Math.round(c.start * 1000);
-      const afades = audioFades(len, c.fadeIn, c.fadeOut);
-      g.push(
-        `[${input}:a]asetpts=PTS-STARTPTS,${atempoChain(c.speed || 1)},volume=${c.volume.toFixed(2)},${AUDIO},atrim=duration=${n3(len)}${afades ? `,${afades}` : ''},adelay=${delay}|${delay}[s${j}]`,
-      );
+      if (c.bed) {
+        // The film's music, mixed the way composeFinal mixed it, over this edit's own lengths.
+        args.push('-i', src);
+        const open = Math.max(-40, Math.min(-14, c.bed.loudness));
+        const duck = Math.min(0, c.bed.duckDb);
+        let spans =
+          duck < 0
+            ? (await speechSpans([joined], [total])).map(([a, b]): [number, number] => [a - c.start, b - c.start]).filter(([, b]) => b > 0)
+            : [];
+        if (spans.length && endCardStart !== undefined) spans = withEndCardDuck(spans, len, total - endCardStart);
+        g.push(
+          ...musicBedGraph(input, await mediaSeconds(src), len, open, spans, duck).map((s) =>
+            s.replace(/\[(bs\d+|bx\d+|bedraw|bed)\]/g, `[$1_${j}]`),
+          ),
+        );
+        g.push(`[bed_${j}]volume=${c.volume.toFixed(2)},adelay=${delay}|${delay}[s${j}]`);
+      } else {
+        args.push('-ss', n3(c.in), '-t', n3(c.out - c.in), '-i', src);
+        const afades = audioFades(len, c.fadeIn, c.fadeOut);
+        g.push(
+          `[${input}:a]asetpts=PTS-STARTPTS,${atempoChain(c.speed || 1)},volume=${c.volume.toFixed(2)},${AUDIO},atrim=duration=${n3(len)}${afades ? `,${afades}` : ''},adelay=${delay}|${delay}[s${j}]`,
+        );
+      }
       mix.push(`[s${j}]`);
       input++;
     }
@@ -349,6 +444,8 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
       a = '[aout]';
     }
     args.push('-filter_complex', g.join(';'), '-map', v, '-map', a, ...ENCODE_V, ...ENCODE_A, '-movflags', '+faststart', out);
+    // Tests record the exact call.
+    if (process.env.AVA_EDIT_TRACE) await writeFile(process.env.AVA_EDIT_TRACE, JSON.stringify(args));
     await run('ffmpeg', args);
     return { bytes: await readFile(out), seconds: total };
   } finally {

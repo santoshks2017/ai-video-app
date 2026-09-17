@@ -222,7 +222,7 @@ function runForLog(cmd: string, args: string[]): Promise<string> {
 }
 
 /** A media file's length in seconds, from its container. */
-async function mediaSeconds(file: string): Promise<number> {
+export async function mediaSeconds(file: string): Promise<number> {
   const out = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]);
   return Number(out.trim()) || 0;
 }
@@ -1305,60 +1305,14 @@ async function composeCore(
       await writeFile(bed, overlay.musicBed);
       clipInputs.push('-i', bed);
       const m = clipIdx++;
-      // Never looped: music restarting mid-film is the most audible glitch there is.
-      // The server asks for a track longer than the film and it is trimmed to fit; if
-      // one still comes back short, copies of it are joined with a slow crossfade.
       const bedSeconds = await mediaSeconds(bed);
-      const XF = 2;
-      const copies =
-        bedSeconds > XF * 2 && bedSeconds < filmSeconds
-          ? Math.min(6, Math.ceil((filmSeconds - XF) / (bedSeconds - XF)))
-          : 1;
-      const norm = 'aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo';
-      if (copies > 1) {
-        parts.push(`[${m}:a]${norm},asplit=${copies}${Array.from({ length: copies }, (_, i) => `[bs${i}]`).join('')}`);
-        let prev = 'bs0';
-        for (let i = 1; i < copies; i++) {
-          const out = i === copies - 1 ? 'bedraw' : `bx${i}`;
-          parts.push(`[${prev}][bs${i}]acrossfade=d=${XF}:c1=qsin:c2=qsin[${out}]`);
-          prev = out;
-        }
-      } else {
-        parts.push(`[${m}:a]${norm}[bedraw]`);
-      }
       // Levelled first — a generated track can come back mastered anywhere — to the
       // level it plays at when nobody is speaking; then it dips under every line.
       const open = Math.max(-40, Math.min(-14, overlay.musicLoudness ?? -20));
       const duck = Math.min(0, overlay.musicDuckDb ?? 0);
-      /*
-       * Where the music stays down.
-       *
-       * Under every spoken line, and then across the end card — which has no speech
-       * of its own, so without this the bed came back up to full level for the last
-       * three seconds. After a film spent ducked under a voice, that reads as a
-       * stray burst of music over the dealership's contact details.
-       */
-      const spans =
-        duck < 0
-          ? (await speechSpans(files, rawDurations)).map(([a, b]): [number, number] => [a / speed, b / speed])
-          : [];
-      if (spans.length && endCardFile) {
-        const cardSeconds = overlay.endCard?.seconds ?? 0;
-        const from = Math.max(0, filmSeconds - cardSeconds - DUCK_ATTACK);
-        const last = spans[spans.length - 1]!;
-        // Merged rather than appended when it lands close to the final line, so the
-        // spans stay MIN_MUSIC_PAUSE apart — the spacing duckVolume's ramps rely on.
-        if (from - last[1] < MIN_MUSIC_PAUSE) last[1] = filmSeconds;
-        else spans.push([from, filmSeconds]);
-      }
-      parts.push(
-        `[bedraw]atrim=end=${filmSeconds.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${open}:TP=-2:LRA=11,${norm},` +
-          `afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, filmSeconds - 1.5).toFixed(3)}:d=1.5` +
-          // Small frames first: volume is worked out once per frame, and loudnorm hands back
-          // its last seconds as one large frame, which held the music down over the end card.
-          (spans.length ? `,asetnsamples=n=1024:p=0,volume='${duckVolume(spans, duck)}':eval=frame` : '') +
-          '[bed]',
-      );
+      let spans = duck < 0 ? (await speechSpans(files, rawDurations)).map(([a, b]): [number, number] => [a / speed, b / speed]) : [];
+      if (spans.length && endCardFile) spans = withEndCardDuck(spans, filmSeconds, overlay.endCard?.seconds ?? 0);
+      parts.push(...musicBedGraph(m, bedSeconds, filmSeconds, open, spans, duck));
       parts.push(`[voice][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mixed]`);
       audioOut = 'mixed';
     }
@@ -1590,6 +1544,55 @@ async function composeCore(
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * The music bed's filters. Never looped — music restarting mid-film is the most audible
+ * glitch there is — so a short track is joined to copies of itself with a slow crossfade;
+ * then levelled, faded in and out, and dipped under every span.
+ *
+ * Small frames go before the dip: volume is worked out once per frame, and loudnorm hands
+ * back its last seconds as one large frame, which held the music down over the end card.
+ */
+export function musicBedGraph(input: number, bedSeconds: number, filmSeconds: number, open: number, spans: Array<[number, number]>, duck: number): string[] {
+  const out: string[] = [];
+  const XF = 2;
+  const copies = bedSeconds > XF * 2 && bedSeconds < filmSeconds ? Math.min(6, Math.ceil((filmSeconds - XF) / (bedSeconds - XF))) : 1;
+  const norm = 'aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo';
+  if (copies > 1) {
+    out.push(`[${input}:a]${norm},asplit=${copies}${Array.from({ length: copies }, (_, i) => `[bs${i}]`).join('')}`);
+    let prev = 'bs0';
+    for (let i = 1; i < copies; i++) {
+      const o = i === copies - 1 ? 'bedraw' : `bx${i}`;
+      out.push(`[${prev}][bs${i}]acrossfade=d=${XF}:c1=qsin:c2=qsin[${o}]`);
+      prev = o;
+    }
+  } else {
+    out.push(`[${input}:a]${norm}[bedraw]`);
+  }
+  out.push(
+    `[bedraw]atrim=end=${filmSeconds.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${open}:TP=-2:LRA=11,${norm},` +
+      `afade=t=in:st=0:d=0.8,afade=t=out:st=${Math.max(0, filmSeconds - 1.5).toFixed(3)}:d=1.5` +
+      (spans.length ? `,asetnsamples=n=1024:p=0,volume='${duckVolume(spans, duck)}':eval=frame` : '') +
+      '[bed]',
+  );
+  return out;
+}
+
+/**
+ * Where the music stays down across the end card, which has no speech of its own — without
+ * this the bed came back up to full level for the last three seconds, a stray burst of music
+ * over the dealership's contact details. Merged into the last line when they are close, so
+ * spans stay MIN_MUSIC_PAUSE apart, the spacing duckVolume's ramps rely on.
+ */
+export function withEndCardDuck(spans: Array<[number, number]>, filmSeconds: number, cardSeconds: number): Array<[number, number]> {
+  if (!spans.length) return spans;
+  const out = spans.map(([a, b]): [number, number] => [a, b]);
+  const from = Math.max(0, filmSeconds - cardSeconds - DUCK_ATTACK);
+  const last = out[out.length - 1]!;
+  if (from - last[1] < MIN_MUSIC_PAUSE) last[1] = filmSeconds;
+  else out.push([from, filmSeconds]);
+  return out;
 }
 
 export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {}): Promise<Buffer> {

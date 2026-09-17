@@ -337,6 +337,24 @@ export function trimEditClip(
   return settle({ ...p, clips: p.clips.map((x) => (x.id === clipId ? u : x)) }, c.trackId, opts.magnet);
 }
 
+/** A longer or shorter end card, with every layer and the music that ran to the end of the film still running to its end. */
+export function editSetEndCardSeconds(p: EditProject, clipId: string, seconds: number): EditProject {
+  const card = p.clips.find((c) => c.id === clipId && c.layer?.kind === 'endcard');
+  if (!card) return p;
+  const oldEnd = editProjectLength(p);
+  const len = Math.max(1, Math.min(8, seconds));
+  const next = packEditTrack(updateEditClip(p, clipId, { out: card.in + len * card.speed }), EDIT_MAIN_TRACK);
+  const newEnd = next.clips.filter((c) => c.trackId === EDIT_MAIN_TRACK).reduce((m, c) => Math.max(m, editClipEnd(c)), 0);
+  return {
+    ...next,
+    clips: next.clips.map((c) => {
+      if (c.trackId === EDIT_MAIN_TRACK || !(c.layer || c.bed) || Math.abs(editClipEnd(c) - oldEnd) > 0.05) return c;
+      const recorded = c.source && c.source.type !== 'image' ? c.source.duration : Infinity;
+      return { ...c, out: Math.min(c.in + (newEnd - c.start) * c.speed, recorded) };
+    }),
+  };
+}
+
 export function updateEditClip(p: EditProject, clipId: string, patch: Partial<EditClip>): EditProject {
   return { ...p, clips: p.clips.map((x) => (x.id === clipId ? { ...x, ...patch, id: x.id } : x)) };
 }

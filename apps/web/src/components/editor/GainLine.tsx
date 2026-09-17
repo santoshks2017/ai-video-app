@@ -232,7 +232,7 @@ export function GainLinePanel({
         Volume line · {points.length} key point{points.length === 1 ? '' : 's'}
       </span>
       <p className="ve-hint">
-        {clip.bed ? 'The music dips under the voice at these points, as it did in the film. ' : ''}
+        {clip.bed && clip.bed.duckDb < 0 ? 'The music dips under the voice at these points, as it did in the film. ' : ''}
         Drag a point up or down on the timeline, click the line to add one, double-click a point to remove it.
       </p>
       {point && selected !== null && (

@@ -2093,7 +2093,14 @@ test("the film's music opens with its dips as key points, and a volume line is c
   assert.deepEqual(music.original?.gain, music.gain, 'Back to automatic has something to go back to');
   assert.deepEqual(music.bed, { loudness: -20, duckDb: -12, measured: -14 });
   assert.equal(validateEditProject(p), null);
-  assert.equal(layered().clips.find((c) => c.id === 'music')!.gain, undefined, 'no line when the film never measured its voice');
+  assert.equal(layered().clips.find((c) => c.id === 'music')!.gain, undefined, 'no line when the film dipped its music but never kept where its voice is');
+  const level = editProjectFromLayers({
+    aspect: '9:16',
+    layers: { ...FILM, music: { ...FILM.music!, duckDb: 0 } },
+    clean: { type: 'video', label: 'Film', url: 'https://x/clean.mp4', duration: 8.6, jobId: 'j1', variant: 'clean' },
+    music: { type: 'audio', label: 'Music', url: 'https://x/music.m4a', duration: 14, storagePath: 'refs/c/music.m4a' },
+  }).clips.find((c) => c.id === 'music')!;
+  assert.deepEqual(level.gain, [], 'music that never dipped opens with a level line, ready for key points');
 
   const withMusic = (patch: Partial<EditClip>) => ({ ...p, clips: p.clips.map((c) => (c.id === 'music' ? { ...c, ...patch } : c)) });
   assert.match(String(validateEditProject(withMusic({ gain: [{ t: 2, db: 0 }, { t: 1, db: 0 }] }))), /out of order/);

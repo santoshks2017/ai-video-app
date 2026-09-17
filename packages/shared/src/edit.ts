@@ -226,9 +226,13 @@ export function editProjectFromLayers(input: {
   };
 }
 
+/** Whether the film's dips can be laid out: it knows where its voice is, or its music never dipped. */
+const musicLineKnown = (music: FilmMusicLayer): boolean => Boolean(music.speech) || !(music.duckDb < 0);
+
 /**
  * The film's music as a clip's settings: its level, and its dips as the first points on its
- * volume line. No line when the film never measured where its voice is.
+ * volume line — a level line, ready for points, when the music never dipped. No line when
+ * the film dipped its music but never kept where its voice is.
  */
 function filmMusicLine(
   music: FilmMusicLayer,
@@ -236,8 +240,8 @@ function filmMusicLine(
   out: number,
 ): Pick<EditClip, 'bed' | 'gain' | 'original'> {
   const bed = { loudness: music.loudness, duckDb: music.duckDb, ...(music.measured !== undefined ? { measured: music.measured } : {}) };
-  if (!music.speech) return { bed };
-  const gain = autoMusicGain(music.speech, music.duckDb, film.bodySeconds, Boolean(film.endCard));
+  if (!musicLineKnown(music)) return { bed };
+  const gain = autoMusicGain(music.speech ?? [], music.duckDb, film.bodySeconds, Boolean(film.endCard));
   return { bed, gain, original: { start: 0, in: 0, out, gain } };
 }
 
@@ -247,7 +251,7 @@ function filmMusicLine(
  */
 export function editWithFilmMusicLine(p: EditProject, film: Pick<FilmLayers, 'bodySeconds' | 'endCard' | 'music'>): EditProject {
   const music = film.music;
-  if (!music?.speech || !p.clips.some((c) => c.bed && !c.gain)) return p;
+  if (!music || !musicLineKnown(music) || !p.clips.some((c) => c.bed && !c.gain)) return p;
   return {
     ...p,
     clips: p.clips.map((c) => {

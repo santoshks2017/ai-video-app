@@ -85,6 +85,10 @@ interface Material {
 type Panel = 'material' | 'text' | 'transitions' | 'filters' | 'clip';
 
 const LANE_PAD = 14;
+/** How the player and the timeline share the room, kept for this browser. */
+const LAYOUT_KEY = 'ava.edit.layout.timeline';
+const MIN_TIMELINE_H = 150;
+const MIN_TOP_H = 230;
 const ROW_H: Record<string, number> = {
   [EDIT_CAPTION_TRACK]: 36,
   [EDIT_DEALER_LOGO_TRACK]: 30,
@@ -220,6 +224,7 @@ const ICONS = {
   play: 'M7 5l12 7-12 7z',
   pause: 'M8 5v14M16 5v14',
   full: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
+  fullExit: 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5',
   plus: 'M12 5v14M5 12h14',
 };
 
@@ -709,6 +714,71 @@ export function VideoEditor({
 
   /* ---- player geometry ---- */
 
+  /* ---- how the room is shared between the player and the timeline ---- */
+
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<HTMLElement>(null);
+  const timelineRef = useRef<HTMLElement>(null);
+  /** The timeline's height in pixels, as it was last dragged. 0 leaves it as the layout has it. */
+  const [timelineH, setTimelineH] = useState(() => {
+    try {
+      const v = Number(localStorage.getItem(LAYOUT_KEY));
+      return Number.isFinite(v) && v > 0 ? v : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const split = useRef<{ y: number; h: number } | null>(null);
+  const splitTo = (h: number): void => {
+    const room = wrapRef.current?.clientHeight ?? 0;
+    const next = Math.round(Math.max(MIN_TIMELINE_H, Math.min(room ? room - MIN_TOP_H : h, h)));
+    setTimelineH(next);
+    try {
+      localStorage.setItem(LAYOUT_KEY, String(next));
+    } catch {
+      /* storage off: the size lasts for this sitting */
+    }
+  };
+  const resetSplit = (): void => {
+    setTimelineH(0);
+    try {
+      localStorage.removeItem(LAYOUT_KEY);
+    } catch {
+      /* nothing to clear */
+    }
+  };
+  const splitDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    split.current = { y: e.clientY, h: timelineRef.current?.getBoundingClientRect().height ?? timelineH };
+  };
+  const splitMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (split.current) splitTo(split.current.h + (split.current.y - e.clientY));
+  };
+  const splitUp = (): void => {
+    split.current = null;
+  };
+  // A window that has shrunk takes the room back from the timeline.
+  useEffect(() => {
+    if (!timelineH) return;
+    const onResize = (): void => splitTo(timelineH);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  });
+
+  /* ---- full screen: the player with its transport, so it still plays and pauses ---- */
+
+  const [fullScreen, setFullScreen] = useState(false);
+  useEffect(() => {
+    const onChange = (): void => setFullScreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+  const toggleFullScreen = (): void => {
+    if (document.fullscreenElement) void document.exitFullscreen?.();
+    else void playerRef.current?.requestFullscreen?.();
+  };
+
   const boxRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   useEffect(() => {
@@ -884,13 +954,16 @@ export function VideoEditor({
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-      // Arrow keys belong to a selected layer while the preview has focus.
-      if (e.key.startsWith('Arrow') && t?.closest?.('.ve-layers')) return;
+      // Arrow keys belong to a selected layer while the preview has focus, and to the handle between
+      // the player and the timeline while that has it.
+      if (e.key.startsWith('Arrow') && (t?.closest?.('.ve-layers') || t?.classList?.contains('ve-splitter'))) return;
       // Nothing is edited while the film is still opening: it would be replaced when it opens.
       if (!ready && e.key !== 'Escape') return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (e.key === 'Escape') {
+        // In full screen the browser leaves it; the editor stays open.
+        if (document.fullscreenElement) return;
         if (exporting && !exporting.busy) setExporting(null);
         else if (!exporting) onClose();
         return;
@@ -1156,7 +1229,13 @@ export function VideoEditor({
   const trackRows = project.tracks.map((tr) => tr.id);
 
   return createPortal(
-    <div className="ve-wrap" role="dialog" aria-label="Video editor">
+    <div
+      className="ve-wrap"
+      role="dialog"
+      aria-label="Video editor"
+      ref={wrapRef}
+      style={timelineH ? { gridTemplateRows: `auto minmax(0, 1fr) auto ${timelineH}px` } : undefined}
+    >
       {/* The looks as colour matrices, so the preview grades exactly as the export will. */}
       <svg className="ve-defs" aria-hidden="true">
         {EDIT_FILTERS.map((f) => (
@@ -1391,7 +1470,7 @@ export function VideoEditor({
           </div>
         </aside>
 
-        <section className="ve-player">
+        <section className="ve-player" ref={playerRef}>
           <div className="ve-panel-head">
             <h3>Player</h3>
           </div>
@@ -1503,15 +1582,44 @@ export function VideoEditor({
                 <option value="9:16">9:16</option>
                 <option value="1:1">1:1</option>
               </select>
-              <button type="button" className="ve-icon" aria-label="Full screen view" title="Full screen" onClick={() => void boxRef.current?.requestFullscreen?.()}>
-                <Icon d={ICONS.full} />
+              <button
+                type="button"
+                className="ve-icon"
+                aria-label={fullScreen ? 'Leave full screen' : 'Full screen view'}
+                title={fullScreen ? 'Leave full screen' : 'Full screen'}
+                onClick={toggleFullScreen}
+              >
+                <Icon d={fullScreen ? ICONS.fullExit : ICONS.full} />
               </button>
             </div>
           </div>
         </section>
       </div>
 
-      <section className={`ve-timeline${ready ? '' : ' waiting'}`} aria-busy={!ready}>
+      <div
+        className="ve-splitter"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Drag to give the player or the timeline more room"
+        title="Drag to give the player or the timeline more room · double-click to reset"
+        tabIndex={0}
+        onPointerDown={splitDown}
+        onPointerMove={splitMove}
+        onPointerUp={splitUp}
+        onPointerCancel={splitUp}
+        onLostPointerCapture={splitUp}
+        onDoubleClick={resetSplit}
+        onKeyDown={(e) => {
+          const step = e.shiftKey ? 60 : 20;
+          const now = timelineH || (timelineRef.current?.getBoundingClientRect().height ?? 0);
+          if (e.key === 'ArrowUp') splitTo(now + step);
+          else if (e.key === 'ArrowDown') splitTo(now - step);
+          else return;
+          e.preventDefault();
+        }}
+      />
+
+      <section className={`ve-timeline${ready ? '' : ' waiting'}`} aria-busy={!ready} ref={timelineRef}>
         <div className="ve-toolbar">
           <div className="ve-tools">
             <button type="button" className="ve-icon" title="Undo (⌘Z)" aria-label="Undo" disabled={!past.current.length} onClick={undo}>

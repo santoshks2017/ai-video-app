@@ -6,6 +6,8 @@
  * the video editor opens as layers over the film's clean footage. Positions are
  * pixels on the film's own frame.
  */
+import type { SpeechSpan } from './musicGain.js';
+
 export interface LayerColours {
   panel: string;
   text: string;
@@ -48,6 +50,10 @@ export interface FilmMusicLayer {
   storagePath: string;
   loudness: number;
   duckDb: number;
+  /** Where the film heard someone speaking, in seconds of the film: where its music dips. */
+  speech?: SpeechSpan[];
+  /** The track's own loudness in LUFS, before it is levelled; null when it could not be measured. */
+  measured?: number | null;
 }
 export interface FilmLayers {
   version: 1;

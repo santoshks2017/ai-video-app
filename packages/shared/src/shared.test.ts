@@ -138,6 +138,19 @@ import {
   CATEGORIES,
   editProjectFromLayers,
   editSetEndCardSeconds,
+  autoMusicGain,
+  gainAt,
+  dbAt,
+  addGainPoint,
+  moveGainPoint,
+  removeGainPoint,
+  editWithFilmMusicLine,
+  editSoundLevel,
+  MUSIC_DUCK_ATTACK,
+  MUSIC_DUCK_RELEASE,
+  MIN_MUSIC_PAUSE,
+  GAIN_MAX_POINTS,
+  type GainPoint,
   editClipEnd,
   editLayerGuides,
   editSnapBox,
@@ -1999,4 +2012,123 @@ test('a longer end card carries the logos, footer and music to the new end', () 
   assert.ok(Math.abs(editClipEnd(byId.get('music')!) - 13.6) < 1e-9);
   assert.ok(Math.abs(editClipEnd(byId.get('cap-0')!) - 3.4) < 1e-9, 'a caption that ended earlier is left alone');
   assert.equal(editClipLength(editSetEndCardSeconds(layered(), 'endcard', 30).clips.find((c) => c.id === 'endcard')!), 8, 'held to eight seconds');
+});
+
+/*
+ * The film's music: the dips composeFinal applies, written the way apps/api/src/post.ts
+ * writes them (withEndCardDuck, then duckVolume's ramps), so the line the editor starts
+ * from is held to the film's own sound rather than to a copy of the same arithmetic.
+ */
+function filmDuck(speech: Array<[number, number]>, duckDb: number, bodySeconds: number, cardSeconds: number): (t: number) => number {
+  let spans = speech.map(([a, b]): [number, number] => [a, b]);
+  const filmSeconds = bodySeconds + cardSeconds;
+  if (spans.length && cardSeconds > 0) {
+    const from = Math.max(0, filmSeconds - cardSeconds - MUSIC_DUCK_ATTACK);
+    const last = spans[spans.length - 1]!;
+    if (from - last[1] < MIN_MUSIC_PAUSE) last[1] = filmSeconds;
+    else spans = [...spans, [from, filmSeconds]];
+  }
+  const depth = 1 - Math.pow(10, duckDb / 20);
+  const clip = (v: number) => Math.max(0, Math.min(1, v));
+  return (t) =>
+    1 - depth * clip(spans.reduce((sum, [a, b]) => sum + clip(Math.min((t - (a - MUSIC_DUCK_ATTACK)) / MUSIC_DUCK_ATTACK, (b + MUSIC_DUCK_RELEASE - t) / MUSIC_DUCK_RELEASE)), 0));
+}
+const spansOf = (pairs: Array<[number, number]>) => pairs.map(([from, to]) => ({ from, to }));
+function worstGap(points: GainPoint[], film: (t: number) => number, until: number): number {
+  let worst = 0;
+  for (let t = 0; t <= until; t += 0.01) worst = Math.max(worst, Math.abs(gainAt(points, t) - film(t)));
+  return worst;
+}
+
+test("the music's first key points dip it exactly where the film dipped it", () => {
+  const apart: Array<[number, number]> = [[1, 3], [5.2, 7]];
+  const line = autoMusicGain(spansOf(apart), -12, 10, true);
+  assert.ok(worstGap(line, filmDuck(apart, -12, 10, 3), 13) < 1e-3, 'two lines and the end card, each with its own dip');
+  assert.deepEqual(line.slice(0, 4), [{ t: 0.7, db: 0 }, { t: 1, db: -12 }, { t: 3, db: -12 }, { t: 3.8, db: 0 }]);
+  assert.deepEqual(line.at(-1), { t: 9.7, db: -12 }, 'down into the end card, and held there');
+
+  const early: Array<[number, number]> = [[0.1, 3], [4.5, 8.5]];
+  const merged = autoMusicGain(spansOf(early), -12, 9.5, true);
+  assert.ok(worstGap(merged, filmDuck(early, -12, 9.5, 3), 12.5) < 1e-3, 'a line that starts at once, and one that runs into the end card');
+  assert.equal(merged[0]!.t, 0, 'the line starts at the film, part-way down its dip');
+  assert.ok(merged[0]!.db < 0 && merged[0]!.db > -12);
+  assert.deepEqual(merged.at(-1), { t: 4.5, db: -12 }, 'the last line and the end card are one dip');
+
+  const noCard: Array<[number, number]> = [[2, 4]];
+  assert.ok(worstGap(autoMusicGain(spansOf(noCard), -12, 8, false), filmDuck(noCard, -12, 8, 0), 8) < 1e-3, 'without an end card the music comes back up');
+  assert.deepEqual(autoMusicGain(spansOf(noCard), 0, 8, true), [], 'a film that never dipped its music has a level line');
+  assert.deepEqual(autoMusicGain([], -12, 8, true), [], 'and so does one nobody speaks in');
+});
+
+test('a volume line holds past its ends and moves in a straight line between points', () => {
+  const line: GainPoint[] = [{ t: 1, db: 0 }, { t: 2, db: -12 }, { t: 2, db: -6 }];
+  assert.equal(gainAt([], 5), 1);
+  assert.equal(gainAt(line, 0), 1);
+  assert.ok(Math.abs(gainAt(line, 1.5) - (1 + Math.pow(10, -12 / 20)) / 2) < 1e-12, 'halfway in amplitude');
+  assert.ok(Math.abs(dbAt(line, 9) - -6) < 1e-9, 'the later of two points at one moment wins, and holds');
+});
+
+test('key points are added on the line, dragged between their neighbours, and removed', () => {
+  const line: GainPoint[] = [{ t: 1, db: 0 }, { t: 3, db: -12 }];
+  const added = addGainPoint(line, 2);
+  assert.equal(added.index, 1);
+  assert.ok(Math.abs(dbAt(added.points, 2) - dbAt(line, 2)) < 0.01, 'adding a point does not change what plays');
+  const moved = moveGainPoint(added.points, 1, 5, -99);
+  assert.deepEqual(moved[1], { t: 3, db: -40 }, 'held before the next point and above the floor');
+  assert.deepEqual(removeGainPoint(moved, 1), [{ t: 1, db: 0 }, { t: 3, db: -12 }]);
+  const full = Array.from({ length: GAIN_MAX_POINTS }, (_, i) => ({ t: i, db: 0 }));
+  assert.equal(addGainPoint(full, 3.5).index, -1, 'a full line takes no more');
+});
+
+test("the film's music opens with its dips as key points, and a volume line is checked before any work", () => {
+  const speech = spansOf([[0.9, 3.2], [5, 7.4]]);
+  const p = editProjectFromLayers({
+    aspect: '9:16',
+    layers: { ...FILM, music: { ...FILM.music!, speech, measured: -14 } },
+    clean: { type: 'video', label: 'Film', url: 'https://x/clean.mp4', duration: 8.6, jobId: 'j1', variant: 'clean' },
+    music: { type: 'audio', label: 'Music', url: 'https://x/music.m4a', duration: 14, storagePath: 'refs/c/music.m4a' },
+  });
+  const music = p.clips.find((c) => c.id === 'music')!;
+  assert.deepEqual(music.gain, autoMusicGain(speech, -12, 8.6, true));
+  assert.deepEqual(music.original?.gain, music.gain, 'Back to automatic has something to go back to');
+  assert.deepEqual(music.bed, { loudness: -20, duckDb: -12, measured: -14 });
+  assert.equal(validateEditProject(p), null);
+  assert.equal(layered().clips.find((c) => c.id === 'music')!.gain, undefined, 'no line when the film never measured its voice');
+
+  const withMusic = (patch: Partial<EditClip>) => ({ ...p, clips: p.clips.map((c) => (c.id === 'music' ? { ...c, ...patch } : c)) });
+  assert.match(String(validateEditProject(withMusic({ gain: [{ t: 2, db: 0 }, { t: 1, db: 0 }] }))), /out of order/);
+  assert.match(String(validateEditProject(withMusic({ gain: [{ t: 1, db: -80 }] }))), /lower than -40 dB/);
+  assert.match(String(validateEditProject(withMusic({ gain: [{ t: Number.NaN, db: 0 }] }))), /cannot be read/);
+  assert.match(String(validateEditProject(withMusic({ gain: Array.from({ length: GAIN_MAX_POINTS + 1 }, (_, i) => ({ t: i, db: 0 })) }))), /more than/);
+  const clean = p.clips.find((c) => c.id === 'clean')!;
+  assert.match(String(validateEditProject({ ...p, clips: p.clips.map((c) => (c.id === clean.id ? { ...c, gain: [] } : c)) })), /Only a sound clip/);
+});
+
+test('an edit saved before volume lines gets the film’s dips, on the music’s own timeline', () => {
+  const speech = spansOf([[0.9, 3.2]]);
+  const film = { ...FILM, music: { ...FILM.music!, speech, measured: -14 } };
+  const saved = layered();
+  const moved = { ...saved, clips: saved.clips.map((c) => (c.id === 'music' ? { ...c, start: 1, in: 0.5 } : c)) };
+  const up = editWithFilmMusicLine(moved, film).clips.find((c) => c.id === 'music')!;
+  const onFilm = autoMusicGain(speech, -12, 8.6, true);
+  assert.deepEqual(up.gain, onFilm.map((pt) => ({ t: Math.round((pt.t - 0.5) * 1000) / 1000, db: pt.db })), 'shifted from the film onto the music');
+  assert.equal(up.bed?.measured, -14);
+  const lined = { ...saved, clips: saved.clips.map((c) => (c.id === 'music' ? { ...c, gain: [{ t: 1, db: -3 }] } : c)) };
+  assert.equal(editWithFilmMusicLine(lined, film), lined, 'a line someone already has is theirs');
+});
+
+test('the preview plays a sound at the level export gives it', () => {
+  const bed: EditClip = {
+    id: 'm', trackId: 'a1', start: 2, in: 0, out: 10, speed: 1, volume: 1, fadeIn: 0, fadeOut: 0,
+    source: { type: 'audio', label: 'Music', url: '', duration: 10 },
+    bed: { loudness: -20, duckDb: -12, measured: -14 },
+    gain: [{ t: 4, db: 0 }, { t: 5, db: -12 }],
+  };
+  const levelled = Math.pow(10, -6 / 20);
+  assert.ok(Math.abs(editSoundLevel(bed, 2 + 3) - levelled) < 1e-9, 'levelled from -14 to -20 LUFS, before the dip');
+  assert.ok(Math.abs(editSoundLevel(bed, 2 + 6) - levelled * Math.pow(10, -12 / 20)) < 1e-9, 'and down 12 dB after it');
+  assert.ok(Math.abs(editSoundLevel(bed, 2 + 0.4) - levelled * 0.5) < 1e-9, 'fading in over its first 0.8 s');
+  assert.ok(Math.abs(editSoundLevel(bed, 2 + 9.25) - levelled * Math.pow(10, -12 / 20) * 0.5) < 1e-9, 'and out over its last 1.5 s');
+  const sound: EditClip = { ...bed, bed: undefined, gain: undefined, volume: 0.5, fadeIn: 1, fadeOut: 0 };
+  assert.ok(Math.abs(editSoundLevel(sound, 2.5) - 0.25) < 1e-9, "any other sound: its volume and its own fades");
 });

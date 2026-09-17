@@ -13,7 +13,8 @@
  * timeline already shows it so.
  */
 
-import { LAYER_COLOUR_KEYS, type FilmLayers, type LayerBox, type LayerColours } from './filmLayers.js';
+import { LAYER_COLOUR_KEYS, type FilmLayers, type FilmMusicLayer, type LayerBox, type LayerColours } from './filmLayers.js';
+import { autoMusicGain, gainAt, musicFadeAt, musicPreviewLevel, validateGainPoints, type GainPoint } from './musicGain.js';
 import { CAPTION_SPOTS, captionSpotXY, overlayMargins, type CaptionSpot } from './captionSpot.js';
 
 export type EditAspect = '16:9' | '9:16' | '1:1';
@@ -86,10 +87,19 @@ export interface EditClip {
   transition?: { id: string; duration: number };
   layer?: EditLayer;
   place?: EditPlacement;
-  /** A sound clip that is the film's music: levelled, and dipped under the voice, at export. */
-  bed?: { loudness: number; duckDb: number };
-  /** The layer as the film first drew it, for Reset. */
-  original?: { start: number; in: number; out: number; layer?: EditLayer; place?: EditPlacement };
+  /**
+   * A sound clip that is the film's music: levelled to `loudness` at export, faded in and out.
+   * `measured` is the track's own loudness, so the preview plays it at that level too.
+   */
+  bed?: { loudness: number; duckDb: number; measured?: number | null };
+  /**
+   * A sound clip's volume line: key points on its source's timeline, in dB against `volume`.
+   * The film's music gets the film's dips as its first points. Unset on the music of an
+   * edit made before lines existed, which export still dips under the voice by ear.
+   */
+  gain?: GainPoint[];
+  /** The layer, or the music's line, as the film first had it, for Reset. */
+  original?: { start: number; in: number; out: number; layer?: EditLayer; place?: EditPlacement; gain?: GainPoint[] };
 }
 
 export interface EditProject {
@@ -195,7 +205,8 @@ export function editProjectFromLayers(input: {
     );
   }
   if (input.music && L.music) {
-    clips.push({ id: 'music', trackId: EDIT_AUDIO_TRACK, start: 0, in: 0, out: Math.min(total, input.music.duration), source: input.music, bed: { loudness: L.music.loudness, duckDb: L.music.duckDb }, ...base });
+    const out = Math.min(total, input.music.duration);
+    clips.push({ id: 'music', trackId: EDIT_AUDIO_TRACK, start: 0, in: 0, out, source: input.music, ...filmMusicLine(L.music, L, out), ...base });
   }
   const tracks: EditTrack[] = [
     { id: EDIT_CAPTION_TRACK, kind: 'layer' },
@@ -213,6 +224,63 @@ export function editProjectFromLayers(input: {
     clips,
     look: { colours: { ...L.colours }, width: L.width, height: L.height, ...(L.captionHeadSize ? { captionHeadSize: L.captionHeadSize } : {}) },
   };
+}
+
+/**
+ * The film's music as a clip's settings: its level, and its dips as the first points on its
+ * volume line. No line when the film never measured where its voice is.
+ */
+function filmMusicLine(
+  music: FilmMusicLayer,
+  film: Pick<FilmLayers, 'bodySeconds' | 'endCard'>,
+  out: number,
+): Pick<EditClip, 'bed' | 'gain' | 'original'> {
+  const bed = { loudness: music.loudness, duckDb: music.duckDb, ...(music.measured !== undefined ? { measured: music.measured } : {}) };
+  if (!music.speech) return { bed };
+  const gain = autoMusicGain(music.speech, music.duckDb, film.bodySeconds, Boolean(film.endCard));
+  return { bed, gain, original: { start: 0, in: 0, out, gain } };
+}
+
+/**
+ * An edit whose music has no volume line yet — saved before lines existed — given the
+ * film's dips as its line, and the preview level. Anything with a line is left as it is.
+ */
+export function editWithFilmMusicLine(p: EditProject, film: Pick<FilmLayers, 'bodySeconds' | 'endCard' | 'music'>): EditProject {
+  const music = film.music;
+  if (!music?.speech || !p.clips.some((c) => c.bed && !c.gain)) return p;
+  return {
+    ...p,
+    clips: p.clips.map((c) => {
+      if (!c.bed || c.gain) return c;
+      const line = filmMusicLine(music, film, c.out);
+      // The film's dips are on the film's timeline; the line is on the music's own.
+      const onSource = (points: GainPoint[] | undefined) =>
+        points?.map((pt) => ({ t: Math.max(0, Math.round((c.in + (pt.t - c.start) * (c.speed || 1)) * 1000) / 1000), db: pt.db }));
+      const gain = onSource(line.gain);
+      return {
+        ...c,
+        bed: { ...c.bed, ...(line.bed?.measured !== undefined ? { measured: line.bed.measured } : {}) },
+        ...(gain ? { gain, original: { start: c.start, in: c.in, out: c.out, gain } } : {}),
+      };
+    }),
+  };
+}
+
+/**
+ * How loud a sound clip plays at `t` on the timeline, as the multiplier export applies:
+ * its volume, its line, and the film music's level and fades (or the clip's own fades).
+ */
+export function editSoundLevel(c: EditClip, t: number): number {
+  const local = t - c.start;
+  const len = editClipLength(c);
+  let level = c.volume * gainAt(c.gain ?? [], c.in + local * (c.speed || 1));
+  if (c.bed) {
+    level *= musicPreviewLevel(c.bed.loudness, c.bed.measured) * musicFadeAt(local, len);
+  } else {
+    if (c.fadeIn > 0) level *= Math.max(0, Math.min(1, local / c.fadeIn));
+    if (c.fadeOut > 0) level *= Math.max(0, Math.min(1, (len - local) / c.fadeOut));
+  }
+  return Math.max(0, level);
 }
 
 export function editProjectLength(p: EditProject): number {
@@ -462,6 +530,11 @@ export function validateEditProject(p: unknown): string | null {
     const nums = [c.start, c.in, c.out, c.speed, c.volume, c.fadeIn, c.fadeOut];
     if (nums.some((v) => typeof v !== 'number' || !Number.isFinite(v))) return 'A clip has a position or length that is not a number.';
     if (c.out - c.in <= 0 || c.speed <= 0) return 'A clip has no length.';
+    if (c.gain !== undefined) {
+      if (c.source?.type !== 'audio') return 'Only a sound clip has a volume line.';
+      const badLine = validateGainPoints(c.gain);
+      if (badLine) return badLine;
+    }
     if (c.layer === undefined) continue;
     const bad = validateEditLayer(c.layer);
     if (bad) return bad;

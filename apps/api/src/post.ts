@@ -1133,7 +1133,11 @@ async function peopleFrames(file: string, localFrom: number, seconds: number, di
  * Build the finished video. Returns an MP4 buffer.
  * A single segment with no overlays short-circuits to the input untouched.
  */
-export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {}): Promise<Buffer> {
+async function composeCore(
+  segments: Buffer[],
+  overlay: BrandOverlay,
+  want: { final: boolean; clean: boolean },
+): Promise<{ final?: Buffer; clean?: Buffer }> {
   if (segments.length === 0) throw new Error('no segments to compose');
 
   const colours: OverlayColours = overlay.theme ?? {
@@ -1153,7 +1157,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     !overlay.targetShortSide &&
     !overlay.musicBed &&
     (overlay.speed ?? 1) === 1;
-  if (nothingToDo) return segments[0]!;
+  if (nothingToDo && want.final && !want.clean) return { final: segments[0]! };
 
   const dir = await mkdtemp(join(tmpdir(), 'ava-post-'));
   try {
@@ -1218,6 +1222,45 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       }
     }
 
+    // Picture and sound are each padded and trimmed to the clip's own length, so
+    // a part whose audio stops a few milliseconds short leaves no gap and none can
+    // drift out of sync over five joins. The end card eases in from black.
+    const MICRO_FADE = 0.015;
+    const chainFor = (i: number, isEndCard: boolean): [string, string] => {
+      const d = metas[i]!.duration.toFixed(3);
+      return [
+        `[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,${isEndCard || speed === 1 ? '' : `setpts=(PTS-STARTPTS)/${speed},`}fps=${fps},format=yuv420p,tpad=stop_mode=clone:stop_duration=${(0.25 + (i === lastBody ? tailPad : 0)).toFixed(3)},trim=end=${d},setpts=N/FRAME_RATE/TB,settb=AVTB${
+          isEndCard ? ',fade=t=in:st=0:d=0.35' : ''
+        }[c${i}v]`,
+        `[${i}:a]aresample=44100:async=1,aformat=sample_fmts=fltp:channel_layouts=stereo,${isEndCard || speed === 1 ? '' : `atempo=${speed},`}apad,atrim=end=${d},asetpts=N/SR/TB,afade=t=in:st=0:d=${MICRO_FADE},afade=t=out:st=${Math.max(0, Number(d) - MICRO_FADE).toFixed(3)}:d=${MICRO_FADE}[c${i}a]`,
+      ];
+    };
+
+    /*
+     * The footage alone, for the video editor: the same chains and the same concat as
+     * the film below, without the end card, the music or anything drawn on top.
+     */
+    let clean: Buffer | undefined;
+    if (want.clean) {
+      const cleanInputs: string[] = [];
+      const cleanParts: string[] = [];
+      files.forEach((file, i) => {
+        cleanInputs.push('-threads', FF_THREADS, '-i', file);
+        cleanParts.push(...chainFor(i, false));
+      });
+      cleanParts.push(`${files.map((_, i) => `[c${i}v][c${i}a]`).join('')}concat=n=${files.length}:v=1:a=1[vcat][voice]`);
+      const cleanOut = join(dir, 'clean.mp4');
+      await run('ffmpeg', [
+        '-v', 'error', '-y', ...cleanInputs,
+        '-filter_complex_threads', FF_THREADS, '-filter_complex', cleanParts.join(';'),
+        '-map', '[vcat]', '-map', '[voice]',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16', '-pix_fmt', 'yuv420p', '-threads', FF_THREADS,
+        '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', cleanOut,
+      ]);
+      clean = await readFile(cleanOut);
+      if (!want.final && !overlay.onLayers) return { clean };
+    }
+
     // --- the parts, joined whole ---
     // Every part plays in full, cut to cut. The crossfade that used to join them
     // blended the last half-second of one part into the first half-second of the
@@ -1245,24 +1288,12 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       metas.push({ duration: overlay.endCard.seconds, width: W, height: H, fps });
     }
     const clipCount = metas.length;
-    const MICRO_FADE = 0.015;
 
     let clipIdx = 0;
     clipFiles.forEach((file, i) => {
       clipInputs.push('-threads', FF_THREADS, '-i', file);
-      const d = metas[i]!.duration.toFixed(3);
       const isEndCard = Boolean(endCardFile) && i === clipCount - 1;
-      // Picture and sound are each padded and trimmed to the clip's own length, so
-      // a part whose audio stops a few milliseconds short leaves no gap and none can
-      // drift out of sync over five joins. The end card eases in from black.
-      parts.push(
-        `[${i}:v]scale=${W}:${H}:flags=lanczos,setsar=1,${isEndCard || speed === 1 ? '' : `setpts=(PTS-STARTPTS)/${speed},`}fps=${fps},format=yuv420p,tpad=stop_mode=clone:stop_duration=${(0.25 + (i === lastBody ? tailPad : 0)).toFixed(3)},trim=end=${d},setpts=N/FRAME_RATE/TB,settb=AVTB${
-          isEndCard ? ',fade=t=in:st=0:d=0.35' : ''
-        }[c${i}v]`,
-      );
-      parts.push(
-        `[${i}:a]aresample=44100:async=1,aformat=sample_fmts=fltp:channel_layouts=stereo,${isEndCard || speed === 1 ? '' : `atempo=${speed},`}apad,atrim=end=${d},asetpts=N/SR/TB,afade=t=in:st=0:d=${MICRO_FADE},afade=t=out:st=${Math.max(0, Number(d) - MICRO_FADE).toFixed(3)}:d=${MICRO_FADE}[c${i}a]`,
-      );
+      parts.push(...chainFor(i, isEndCard));
       clipIdx++;
     });
     parts.push(`${clipFiles.map((_, i) => `[c${i}v][c${i}a]`).join('')}concat=n=${clipCount}:v=1:a=1[vcat][voice]`);
@@ -1553,11 +1584,37 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     ];
     // Tests record the exact call, so a refactor can prove the film is built as before.
     if (process.env.AVA_POST_TRACE) await writeFile(process.env.AVA_POST_TRACE, JSON.stringify(finalArgs));
+    if (!want.final) return { clean };
     await run('ffmpeg', finalArgs);
-    return await readFile(out);
+    return { final: await readFile(out), clean };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {}): Promise<Buffer> {
+  return (await composeCore(segments, overlay, { final: true, clean: false })).final!;
+}
+
+/**
+ * The film's footage with nothing drawn on it — joined, scaled and paced exactly as the
+ * finished film, without its captions, logos, footer, end card or music. What the video
+ * editor lays the film's layers back onto. With `plan`, it also works out where
+ * composeFinal would draw each overlay.
+ */
+export async function composeClean(
+  segments: Buffer[],
+  overlay: BrandOverlay = {},
+  opts: { plan?: boolean } = {},
+): Promise<{ bytes: Buffer; layers: ComposedLayers | null }> {
+  if (segments.length === 0) throw new Error('no segments to compose');
+  const captured: { layers: ComposedLayers | null } = { layers: null };
+  const planned: BrandOverlay =
+    opts.plan === false
+      ? { ...overlay, onLayers: undefined }
+      : { ...overlay, onLayers: (l) => { captured.layers = l; } };
+  const { clean } = await composeCore(segments, planned, { final: false, clean: true });
+  return { bytes: clean!, layers: captured.layers };
 }
 
 /**

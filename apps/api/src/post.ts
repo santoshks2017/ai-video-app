@@ -510,7 +510,7 @@ const LOGO_BOX = { w: 0.26, h: 0.085 };
 const shortSide = (w: number, h: number): number => Math.min(w, h);
 
 /** Bottom strip: solid bar + centred contact detail, wrapped and fitted. */
-async function footerPng(text: string, W: number, H: number, colours: Pick<OverlayColours, 'panel' | 'text'>): Promise<Buffer> {
+export async function footerPng(text: string, W: number, H: number, colours: Pick<OverlayColours, 'panel' | 'text'>): Promise<Buffer> {
   const S = shortSide(W, H);
   const pad = Math.round(W * 0.045);
   const maxWidth = W - pad * 2;
@@ -545,7 +545,7 @@ async function footerPng(text: string, W: number, H: number, colours: Pick<Overl
 }
 
 /** Full-frame outro: dealer name, CTA, contact — always the last thing on screen. */
-async function endCardPng(
+export async function endCardPng(
   spec: EndCardSpec,
   w: number,
   h: number,
@@ -651,7 +651,7 @@ async function normalizedLogo(
 }
 
 /** A logo trimmed to its artwork and scaled to the shared box, not yet placed. */
-async function fitLogo(
+export async function fitLogo(
   src: Buffer,
   W: number,
   H: number,

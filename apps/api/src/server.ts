@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { getFirestore } from 'firebase-admin/firestore';
 import { listUsageFacts } from './spendLog.js';
 import Fastify from 'fastify';
@@ -56,6 +57,7 @@ import { generateVeoClip, VeoError } from './veo.js';
 import { countRequest, markExhausted, usageToday } from './usage.js';
 import { renderEditProject } from './editRender.js';
 import { editOpenPlan } from './editOpen.js';
+import { drawLayer, fitReplacementLogo, type DrawnLayer } from './layerDraw.js';
 import { importWebsite } from './siteImport.js';
 import { drawActorSheet, fillActorProfile } from './actorProfile.js';
 import { cleanLogo, findBrandLogo } from './logos.js';
@@ -139,6 +141,10 @@ import {
   type DealerView,
   type FilmLayers,
   type FilmLogoLayer,
+  validateEditLayer,
+  validateEditLook,
+  type EditLayer,
+  type EditLook,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title, syncColours } from './carSync.js';
 import { seePhotos, seeDealerPhotos, findPeople } from './vision.js';
@@ -3371,6 +3377,37 @@ app.post<{ Body: { project?: EditProject; label?: string } }>('/api/edits/render
     app.log.error({ err: (err as Error).message }, 'edit render failed');
     return reply.code(400).send({ code: 'edit-failed', message: (err as Error).message.slice(0, 600) });
   }
+});
+
+/** A caption's, the footer's or the end card's picture, drawn exactly as an export will draw it. */
+app.post<{ Body: { layer?: EditLayer; look?: EditLook; scale?: number } }>('/api/edits/layer', async (req, reply) => {
+  const { layer, look } = req.body ?? {};
+  const bad = validateEditLayer(layer) ?? validateEditLook(look);
+  if (bad) return reply.code(400).send({ code: 'bad-request', message: bad });
+  if (layer!.kind === 'logo') return reply.code(400).send({ code: 'bad-request', message: 'A logo is shown from its own image.' });
+  if (layer!.kind === 'footer' && !layer!.text.trim()) return { png: '', width: 0, height: 0 };
+  const scale = Number.isFinite(req.body?.scale) ? Math.max(0.25, Math.min(4, Number(req.body!.scale))) : 1;
+  const png = await drawLayer(layer as DrawnLayer, look!, scale);
+  const m = await sharp(png).metadata();
+  return { png: png.toString('base64'), width: m.width ?? 0, height: m.height ?? 0 };
+});
+
+/** A new logo for a layer: cleaned when it was uploaded, fitted here to the film's logo box. */
+app.post<{ Body: { storagePath?: string; whitePath?: string; look?: EditLook } }>('/api/edits/logo', async (req, reply) => {
+  const { storagePath, whitePath, look } = req.body ?? {};
+  const ref = /^refs\/[\w-]+\/[^/]+$/;
+  if (!storagePath || !ref.test(storagePath) || (whitePath !== undefined && !ref.test(whitePath))) {
+    return reply.code(400).send({ code: 'bad-request', message: 'Upload the logo first.' });
+  }
+  const badLook = validateEditLook(look);
+  if (badLook) return reply.code(400).send({ code: 'bad-request', message: badLook });
+  const colour = await readObject(storagePath);
+  if (!colour) return reply.code(404).send({ code: 'not-found', message: 'That logo is gone from storage. Upload it again.' });
+  const white = whitePath ? await readObject(whitePath) : null;
+  const fitted = await fitReplacementLogo(colour.bytes, white?.bytes ?? null, look!);
+  const c = await putRef('logo-edit.png', 'image/png', fitted.colour);
+  const w = fitted.white ? await putRef('logo-edit-white.png', 'image/png', fitted.white) : null;
+  return { colourPath: c.storagePath, ...(w ? { whitePath: w.storagePath } : {}), w: fitted.w, h: fitted.h };
 });
 
 app.get<{ Params: { jobId: string } }>('/api/generations/:jobId', async (req, reply) => {

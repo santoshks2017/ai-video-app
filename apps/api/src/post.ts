@@ -27,6 +27,8 @@ import {
   overlayMargins,
   type CaptionSpot,
   type CaptionSpotCandidate,
+  type FilmLayers,
+  type LayerBox,
   type PeopleInShot,
 } from '@ava/shared';
 
@@ -99,10 +101,23 @@ export interface BrandOverlay {
    * caption never lands on a face. Unset, or answering null, leaves placement as it was.
    */
   findPeople?: (frames: Buffer[]) => Promise<PeopleInShot | null>;
+  /** Told where every overlay was drawn, so the editor can open the film as layers. Changes nothing drawn. */
+  onLayers?: (layers: ComposedLayers) => void;
   accent?: string;
   ink?: string;
   /** The colours of the captions, the footer strip and the end card. Unset: Midnight, from `accent` and `ink`. */
   theme?: OverlayColours;
+}
+
+/** A logo as it was drawn: its box on the frame and the artwork itself, before it is stored. */
+export interface ComposedLogo extends LayerBox {
+  which: 'dealer' | 'brand';
+  colour: Buffer;
+  white?: Buffer;
+  whiteOnEndCard: boolean;
+}
+export interface ComposedLayers extends Omit<FilmLayers, 'logos' | 'music'> {
+  logos: ComposedLogo[];
 }
 
 /** What an overlay is drawn in. The same fields as @ava/shared's OverlayTheme. */
@@ -687,18 +702,29 @@ async function logoStrip(
   H: number,
 ): Promise<Buffer> {
   const { boxW, boxH } = fits[0]!;
-  const gap = Math.round(shortSide(W, H) * 0.035);
-  const width = fits.length === 1 ? boxW : fits.reduce((a, f) => a + f.w, 0) + gap * (fits.length - 1);
-  let x = fits.length === 1 && align === 'right' ? Math.max(0, boxW - fits[0]!.w) : 0;
-  const layers = fits.map((f) => {
-    const layer = { input: f.art, left: x, top: Math.max(0, Math.round((boxH - f.h) / 2)) };
-    x += f.w + gap;
-    return layer;
-  });
+  const { width, items } = logoStripLayout(fits, align, boxW, boxH, Math.round(shortSide(W, H) * 0.035));
   return sharp({ create: { width, height: boxH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-    .composite(layers)
+    .composite(fits.map((f, i) => ({ input: f.art, left: items[i]!.left, top: items[i]!.top })))
     .png()
     .toBuffer();
+}
+
+/** Where each logo sits inside its corner's strip: the layout logoStrip draws and the editor records. */
+export function logoStripLayout(
+  fits: { w: number; h: number }[],
+  align: 'left' | 'right',
+  boxW: number,
+  boxH: number,
+  gap: number,
+): { width: number; items: { left: number; top: number }[] } {
+  const width = fits.length === 1 ? boxW : fits.reduce((a, f) => a + f.w, 0) + gap * (fits.length - 1);
+  let x = fits.length === 1 && align === 'right' ? Math.max(0, boxW - fits[0]!.w) : 0;
+  const items = fits.map((f) => {
+    const item = { left: x, top: Math.max(0, Math.round((boxH - f.h) / 2)) };
+    x += f.w + gap;
+    return item;
+  });
+  return { width, items };
 }
 
 /** How much of the frame a caption may take, and how far it sits off the edge. */
@@ -1333,6 +1359,8 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       : null;
     const footerH = footerBytes ? ((await sharp(footerBytes).metadata()).height ?? 0) : 0;
     const footerIdx = footerBytes ? await addOverlayInput('footer.png', footerBytes) : -1;
+    const footerLayer = footerBytes ? { text: overlay.footerText!.trim(), x: 0, y: H - footerH, w: W, h: footerH } : undefined;
+    const captionLayers: ComposedLayers['captions'] = [];
     /*
      * Each logo twice: in colour for the film, in white for the end card.
      *
@@ -1340,30 +1368,49 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
      * logos were cleaned still carries its white canvas — and that is what put two
      * white boxes on a navy end card. A logo that cannot be cleaned is used as it is.
      */
+    // Both logo inputs are the same normalised box, so a single margin puts them
+    // on the same baseline however different the uploaded files were.
+    const { margin, logoBand } = overlayMargins(W, H);
     const placement = { brand: overlay.logoPlacement?.brand ?? 'left', dealer: overlay.logoPlacement?.dealer ?? 'right' };
+    const logoLayers: ComposedLogo[] = [];
     const cornerLogos = async (align: 'left' | 'right'): Promise<{ colour: number; white: number } | null> => {
       // The brand before the dealership, whichever corner they share.
-      const srcs = ([['brand', overlay.brandLogo], ['dealer', overlay.dealerLogo]] as const)
-        .filter(([k, b]) => b && placement[k] === align)
-        .map(([, b]) => b!);
+      const picked = ([['brand', overlay.brandLogo], ['dealer', overlay.dealerLogo]] as const).filter(
+        ([k, b]) => b && placement[k] === align,
+      );
+      const srcs = picked.map(([, b]) => b!);
       if (!srcs.length) return null;
       const cleaned = await Promise.all(srcs.map((b) => cleanLogo(b).catch(() => null)));
-      const strip = async (pick: (i: number) => Buffer): Promise<Buffer> =>
-        logoStrip(await Promise.all(srcs.map((_, i) => fitLogo(pick(i), W, H))), align, W, H);
-      const colour = await addOverlayInput(`${align}-logos.png`, await strip((i) => cleaned[i]?.colour ?? srcs[i]!));
-      const white =
-        endCardFile && !isLight(colours.card) && cleaned.some(Boolean)
-          ? await addOverlayInput(`${align}-logos-white.png`, await strip((i) => cleaned[i]?.white ?? srcs[i]!))
-          : -1;
+      const fitsFor = (pick: (i: number) => Buffer) => Promise.all(srcs.map((_, i) => fitLogo(pick(i), W, H)));
+      const colourFits = await fitsFor((i) => cleaned[i]?.colour ?? srcs[i]!);
+      const colour = await addOverlayInput(`${align}-logos.png`, await logoStrip(colourFits, align, W, H));
+      const drawWhite = Boolean(endCardFile) && !isLight(colours.card) && cleaned.some(Boolean);
+      const whiteFits = drawWhite || overlay.onLayers ? await fitsFor((i) => cleaned[i]?.white ?? srcs[i]!) : null;
+      const white = drawWhite ? await addOverlayInput(`${align}-logos-white.png`, await logoStrip(whiteFits!, align, W, H)) : -1;
+      if (overlay.onLayers) {
+        const { boxW, boxH } = colourFits[0]!;
+        const { width, items } = logoStripLayout(colourFits, align, boxW, boxH, Math.round(shortSide(W, H) * 0.035));
+        const stripX = align === 'left' ? margin : W - width - margin;
+        colourFits.forEach((f, i) => {
+          const whiteArt = whiteFits && (drawWhite || cleaned[i]) ? whiteFits[i]!.art : undefined;
+          logoLayers.push({
+            which: picked[i]![0],
+            x: stripX + items[i]!.left,
+            y: margin + items[i]!.top,
+            w: f.w,
+            h: f.h,
+            colour: f.art,
+            ...(whiteArt ? { white: whiteArt } : {}),
+            whiteOnEndCard: drawWhite,
+          });
+        });
+      }
       return { colour, white };
     };
     const leftLogos = await cornerLogos('left');
     const rightLogos = await cornerLogos('right');
 
     // --- lay the brand furniture on top ---
-    // Both logo inputs are the same normalised box, so a single margin puts them
-    // on the same baseline however different the uploaded files were.
-    const { margin, logoBand } = overlayMargins(W, H);
     let vCur = 'vcat';
 
     // --- timed captions ---
@@ -1429,6 +1476,19 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
         console.info(JSON.stringify({ msg: 'caption placed', card: cardNo, spot, looked: Boolean(overlay.findPeople), faces: people?.faces.length ?? null, bodies: people?.bodies.length ?? null }));
       }
       const { x: cardX, y: top } = spotXY(spot, W, H, cardW, cardH, margin, footerH, logoBand);
+      captionLayers.push({
+        id: `cap-${cardNo}`,
+        text,
+        ...(card.sub?.trim() ? { sub: card.sub.trim() } : {}),
+        from,
+        to,
+        x: cardX,
+        y: top,
+        w: cardW,
+        h: cardH,
+        spot,
+        auto: !isCardSpot(card.position),
+      });
       const label = `cd${cardNo}`;
       const outLabel = `vc${cardNo}`;
       parts.push(
@@ -1460,6 +1520,23 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       vCur = 'vf';
     }
     parts.push(`[${vCur}]null[vout]`);
+    overlay.onLayers?.({
+      version: 1,
+      width: W,
+      height: H,
+      fps,
+      speed,
+      targetShortSide: overlay.targetShortSide ?? 0,
+      bodySeconds: bodyEnd,
+      colours: { panel: colours.panel, text: colours.text, accent: colours.accent, card: colours.card, cardText: colours.cardText, cardMuted: colours.cardMuted },
+      ...(headSize ? { captionHeadSize: headSize } : {}),
+      captions: captionLayers,
+      ...(footerLayer ? { footer: footerLayer } : {}),
+      logos: logoLayers,
+      ...(endCardFile && overlay.endCard
+        ? { endCard: { lines: overlay.endCard.lines.map((l) => l.trim()).filter(Boolean), seconds: overlay.endCard.seconds } }
+        : {}),
+    });
 
     const out = join(dir, 'final.mp4');
     const finalArgs = [

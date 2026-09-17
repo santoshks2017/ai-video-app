@@ -52,6 +52,7 @@ import {
 import { api, isApiError, type EditOpen, type GenerationHistoryItem } from '../lib/api.js';
 import { abs, uploadRef } from '../lib/client.js';
 import { filesFrom, PASTE_KEYS } from './ui.js';
+import { LayerPanel } from './editor/LayerPanel.js';
 import { LayerStage } from './editor/LayerStage.js';
 import { useLayerImages } from './editor/useLayerImages.js';
 
@@ -905,6 +906,21 @@ export function VideoEditor({
   const inUse = (m: Material): boolean => project.clips.some((c) => c.source?.url === m.source.url);
 
   const clipPanel = (c: EditClip): ReactNode => {
+    if (c.layer && projectRef.current.look) {
+      return (
+        <LayerPanel
+          clip={c}
+          project={projectRef.current}
+          look={projectRef.current.look}
+          images={layerImages}
+          readOnly={demo}
+          onPatch={(key, patch) => edit(`${key}:${c.id}`, updateEditClip(projectRef.current, c.id, patch))}
+          onProject={(key, next) => edit(`${key}:${c.id}`, next)}
+          onDelete={deleteNow}
+          onNotice={setNotice}
+        />
+      );
+    }
     const len = editClipLength(c);
     const kind = editClipKind(c);
     const upd = (key: string, patch: Partial<EditClip>, resettle = false): void => {

@@ -3097,3 +3097,6 @@ fieldset.lock.inline { display: contents; }
 .ve-guide { position: absolute; pointer-events: none; background: #f472b6; }
 .ve-guide.v { top: 0; bottom: 0; width: 1px; }
 .ve-guide.h { left: 0; right: 0; height: 1px; }
+.ve-logo-preview { padding: 10px; border-radius: 6px; background: repeating-conic-gradient(#334155 0% 25%, #1e293b 0% 50%) 50% / 14px 14px; }
+.ve-logo-preview img { display: block; max-height: 56px; max-width: 100%; margin: 0 auto; }
+.ve-check { display: flex; align-items: center; gap: 8px; font-size: 13px; }

@@ -45,12 +45,15 @@ import {
   type Brief,
   type EditAspect,
   type EditClip,
+  type EditPlacement,
   type EditProject,
   type EditSource,
 } from '@ava/shared';
 import { api, isApiError, type EditOpen, type GenerationHistoryItem } from '../lib/api.js';
 import { abs, uploadRef } from '../lib/client.js';
 import { filesFrom, PASTE_KEYS } from './ui.js';
+import { LayerStage } from './editor/LayerStage.js';
+import { useLayerImages } from './editor/useLayerImages.js';
 
 /**
  * The video editor.
@@ -689,6 +692,10 @@ export function VideoEditor({
     : project.clips.filter(
         (c) => c.trackId === EDIT_TEXT_TRACK && c.text && c.style && viewTime >= c.start && viewTime < editClipEnd(c),
       );
+  const layerImages = useLayerImages(project.clips, project.look);
+  const placeLayer = (id: string, place: EditPlacement): void => live(updateEditClip(projectRef.current, id, { place }));
+  const commitLayer = (before: EditProject): void => commit(projectRef.current, before);
+  const nudgeLayer = (id: string, place: EditPlacement): void => edit(`nudge:${id}`, updateEditClip(projectRef.current, id, { place }));
 
   /* ---- timeline ---- */
 
@@ -816,6 +823,8 @@ export function VideoEditor({
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      // Arrow keys belong to a selected layer while the preview has focus.
+      if (e.key.startsWith('Arrow') && t?.closest?.('.ve-layers')) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (e.key === 'Escape') {
@@ -1319,6 +1328,34 @@ export function VideoEditor({
                     src={mainClip.source.url}
                     alt=""
                     style={{ filter: lookOf(mainClip), opacity: fadeOpacity(mainClip, viewTime) * transitionProgress }}
+                  />
+                )}
+                {mainClip?.layer?.kind === 'endcard' && layerImages.get(mainClip.id) && (
+                  <img className="ve-layer" src={layerImages.get(mainClip.id)!.url} alt="" style={{ opacity: fadeOpacity(mainClip, viewTime) * transitionProgress }} />
+                )}
+                {project.look && (
+                  <LayerStage
+                    project={project}
+                    look={project.look}
+                    viewTime={viewTime}
+                    stageW={stageW}
+                    stageH={stageH}
+                    selectedId={selectedId}
+                    images={layerImages}
+                    fadeOpacity={fadeOpacity}
+                    readOnly={demo}
+                    onSelect={(id) => {
+                      setSelectedId(id);
+                      setPanel('clip');
+                    }}
+                    onMove={placeLayer}
+                    onCommit={commitLayer}
+                    onNudge={nudgeLayer}
+                    onEditText={(id) => {
+                      setSelectedId(id);
+                      setPanel('clip');
+                      setTimeout(() => document.querySelector<HTMLTextAreaElement>('.ve-props textarea')?.focus(), 0);
+                    }}
                   />
                 )}
                 {texts.map((t) => {

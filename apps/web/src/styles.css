@@ -3086,3 +3086,14 @@ fieldset.lock.inline { display: contents; }
 /* Beside the tour button the credit's own right margin is the gap; alone, it keeps clear of the edge. */
 .tab-credit + .tab-tour { margin-left: 0; }
 @media (max-width: 900px) { .tab-credit { display: none; } }
+
+/* ---- the video editor: a film's layers over the preview ---- */
+.ve-layers { position: absolute; inset: 0; pointer-events: none; outline: none; }
+.ve-layer-box { position: absolute; pointer-events: auto; cursor: move; touch-action: none; }
+.ve-layer-box img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
+.ve-layer-box.footer { cursor: ns-resize; }
+.ve-layer-box.on { outline: 1.5px solid #38bdf8; outline-offset: 2px; }
+.ve-layer-handle { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 50%; background: #38bdf8; border: 2px solid #fff; cursor: nwse-resize; touch-action: none; }
+.ve-guide { position: absolute; pointer-events: none; background: #f472b6; }
+.ve-guide.v { top: 0; bottom: 0; width: 1px; }
+.ve-guide.h { left: 0; right: 0; height: 1px; }

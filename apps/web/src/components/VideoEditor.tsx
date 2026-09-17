@@ -90,7 +90,7 @@ const ROW_H: Record<string, number> = {
   [EDIT_MAIN_TRACK]: 66,
   [EDIT_AUDIO_TRACK]: 42,
 };
-const rowH = (id: string): number => rowH(id) ?? 36;
+const rowH = (id: string): number => ROW_H[id] ?? 36;
 const TRACK_LABEL: Record<string, string> = {
   [EDIT_CAPTION_TRACK]: 'Captions',
   [EDIT_DEALER_LOGO_TRACK]: 'Dealer logo',

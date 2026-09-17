@@ -2704,6 +2704,11 @@ textarea.guide {
   .ve-player { padding: 8px 12px 10px; grid-template-rows: minmax(0, 1fr) auto; }
   .ve-player .ve-panel-head { display: none; }
   .ve-player-box { min-height: 120px; }
+  /* Nothing is wider than the window: the rows of tools wrap, and the zoom slider gives way first. */
+  .ve-toolbar { flex-wrap: wrap; row-gap: 4px; }
+  .ve-tools { min-width: 0; }
+  .ve-tools > * { flex-shrink: 0; }
+  .ve-zoom { flex-shrink: 1; min-width: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ve-mat-add { transition: none; }

@@ -90,7 +90,8 @@ export function LayerStage(props: Props) {
 
   const begin = (e: ReactPointerEvent<HTMLElement>, c: EditClip, mode: Drag['mode']): void => {
     e.stopPropagation();
-    box.current?.focus();
+    // Held for the arrow keys, without scrolling a narrow editor out from under the pointer.
+    box.current?.focus({ preventScroll: true });
     props.onSelect(c.id);
     if (props.readOnly) return;
     props.onGrab();

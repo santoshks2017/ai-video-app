@@ -11,6 +11,7 @@ const SCRIPTS: Record<string, string> = {
   hi: 'Devanagari',
   mr: 'Devanagari',
   bn: 'Bengali script',
+  as: 'Assamese script',
   pa: 'Gurmukhi',
   ta: 'Tamil script',
   te: 'Telugu script',

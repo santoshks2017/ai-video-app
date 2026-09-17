@@ -11,6 +11,27 @@ export const DEALER_VISUAL_STYLE =
   'Bright premium modern showroom, glossy floors, realistic reflections, energetic dealership-ad feel';
 export const DEALER_CTA = 'Book your test drive today';
 
+/** What a manufacturer's film looks like and asks for, where a dealership's default would be wrong. */
+export const OEM_VISUAL_STYLE =
+  'Cinematic brand film — real locations, natural light, the car as the hero, nothing of a showroom in frame';
+export const OEM_CTA = 'Find your nearest authorised showroom';
+
+/**
+ * The look and the call to action a film will actually use. A project is created holding
+ * the dealership defaults, so a manufacturer's film swaps them for its own — and the
+ * editor shows the same thing, or the field and the film would disagree.
+ */
+export function effectiveLook(
+  kind: 'dealer' | 'oem' | undefined,
+  spec: { visualStyle: string; cta: string },
+): { visualStyle: string; cta: string } {
+  const oem = kind === 'oem';
+  return {
+    visualStyle: oem && spec.visualStyle.trim() === DEALER_VISUAL_STYLE ? OEM_VISUAL_STYLE : spec.visualStyle,
+    cta: oem && spec.cta.trim() === DEALER_CTA ? OEM_CTA : spec.cta,
+  };
+}
+
 export function emptyBrief(): Brief {
   return {
     categories: [],

@@ -143,9 +143,14 @@ function composeStory(groups: { cat: CategoryDef; beats: Beat[] }[], ctx: Render
 
   const theme = storyTheme(ctx.brief);
   if (!theme) return film;
-  const look = `Wherever the showroom is in frame, it is dressed for ${theme.occasion}${
+  const dressing = `it is dressed for ${theme.occasion}${
     theme.dressing ? ` — ${theme.dressing}` : ''
   }; in close-ups the decor glows softly out of focus behind.`;
+  // The decor is in every shot either way, but a manufacturer's film has no showroom
+  // for it to hang in — it hangs in the place the car is shot.
+  const look = theme.oem
+    ? `Wherever the setting is in frame, ${dressing}`
+    : `Wherever the showroom is in frame, ${dressing}`;
   return film.map((b) =>
     /dressed for/i.test(b.shot) ? b : { ...b, shot: `${b.shot} ${look}`, ...(b.shotAlt ? { shotAlt: `${b.shotAlt} ${look}` } : {}) },
   );

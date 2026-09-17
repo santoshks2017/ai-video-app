@@ -131,8 +131,10 @@ const isLight = (colour: string): boolean => {
 };
 /**
  * The type the overlays are set in. The Cloud Run image installs DejaVu Sans and
- * Noto (for Devanagari) and nothing else, so DejaVu is what production draws —
- * it leads the stack so a local render looks like the real one wherever it can.
+ * the core Noto set — which covers Devanagari, Bengali-Assamese, Gurmukhi, Tamil,
+ * Telugu, Kannada and Malayalam — and nothing else, so DejaVu is what production
+ * draws for Latin and fontconfig falls back to Noto for an Indian script. DejaVu
+ * leads the stack so a local render looks like the real one wherever it can.
  * POST_FONT overrides it, which is how the layout is tested against a wide face.
  */
 export const FONT = process.env.POST_FONT || 'DejaVu Sans, Noto Sans, Helvetica, Arial, sans-serif';

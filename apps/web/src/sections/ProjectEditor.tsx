@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  effectiveLook,
   packOf,
   parseRupees,
   revenueMissing,
@@ -693,6 +694,9 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const parts = built?.parts ?? [];
   const sells = client?.vehicleKind ?? 'car';
   // A dealership and a manufacturer make different films, so each picks from its own list.
+  // A manufacturer's project is created holding the dealership defaults and the film
+  // swaps them for the marque's own, so the fields show what will actually be used.
+  const look = effectiveLook(client?.kind, project.spec);
   const forThisClient = categoriesFor(client?.kind);
   // A use case picked before the client's type changed keeps its tile: it still shapes
   // the film, and the tile is the only way to take it off.
@@ -1367,7 +1371,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     </select>
                   </Field>
                   <Field label="Primary CTA">
-                    <input value={project.spec.cta} onChange={(e) => setSpec({ cta: e.target.value })} />
+                    <input value={look.cta} onChange={(e) => setSpec({ cta: e.target.value })} />
                   </Field>
                   <Field label="Footer strip" hint="Set once per client, in Clients.">
                     <input readOnly value={client ? footerPreview : 'Select a client to set the footer'} />
@@ -1404,7 +1408,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
 
               <Section sub title="Advanced" step="Look, resolution, clip length">
                 <Field label="Visual style">
-                  <input value={project.spec.visualStyle} onChange={(e) => setSpec({ visualStyle: e.target.value })} />
+                  <input value={look.visualStyle} onChange={(e) => setSpec({ visualStyle: e.target.value })} />
                 </Field>
                 <div className="row2">
                   <Field

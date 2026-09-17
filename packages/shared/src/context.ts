@@ -5,7 +5,7 @@
 
 import type { AspectRatio, Brief, NarrationMode } from './types.js';
 import { narrationMode } from './narration.js';
-import { DEALER_CTA, DEALER_VISUAL_STYLE } from './defaults.js';
+import { DEALER_CTA, DEALER_VISUAL_STYLE, OEM_CTA, OEM_VISUAL_STYLE } from './defaults.js';
 
 /**
  * "Test drive" for cars, "test ride" for bikes and scooters. The CTA, the end card,
@@ -88,14 +88,12 @@ export function buildContext(brief: Brief): RenderContext {
     aspect: brief.aspect,
     music: brief.music.trim(),
     cta: adaptTrial(
-      chosen(brief.cta, DEALER_CTA) || (oem ? 'Find your nearest authorised showroom' : DEALER_CTA),
+      chosen(brief.cta, DEALER_CTA) || (oem ? OEM_CTA : DEALER_CTA),
       vehicle,
     ),
     visStyle:
       chosen(brief.visualStyle, DEALER_VISUAL_STYLE) ||
-      (oem
-        ? 'Cinematic brand film — real locations, natural light, the car as the hero, nothing of a showroom in frame'
-        : DEALER_VISUAL_STYLE),
+      (oem ? OEM_VISUAL_STYLE : DEALER_VISUAL_STYLE),
     endcardOn: brief.endCardOn,
     endcard: brief.endCard.trim(),
     footer,

@@ -380,15 +380,21 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         const noun = brief.lineup.kind === 'bike' ? 'motorcycle or scooter' : 'car';
         const plural = brief.lineup.kind === 'bike' ? 'motorcycles and scooters' : 'cars';
         L.push(
-          `No single model is the subject. This is a ${brief.lineup.brand} ${plural} dealership. Every vehicle on screen must be a current ${brief.lineup.brand} ${noun} the dealer sells today, from this range and nothing else: ${brief.lineup.models.join(', ')}.`,
+          brief.dealer.kind === 'oem'
+            ? `No single model is the subject. This is the ${brief.lineup.brand} ${plural} range. Every vehicle on screen must be a current ${brief.lineup.brand} ${noun} the brand sells today, from this range and nothing else: ${brief.lineup.models.join(', ')}.`
+            : `No single model is the subject. This is a ${brief.lineup.brand} ${plural} dealership. Every vehicle on screen must be a current ${brief.lineup.brand} ${noun} the dealer sells today, from this range and nothing else: ${brief.lineup.models.join(', ')}.`,
         );
         L.push(
           `Show two or three of them, matching the current generation exactly as in the supplied reference images — the current face, lamps, wheels and proportions. Do not show an older generation, a different brand, or a ${brief.lineup.brand} that is not on that list.`,
         );
         L.push(
           brief.lineup.kind === 'bike'
-            ? 'This showroom sells two-wheelers. No cars anywhere in the film, including in the background.'
-            : `This showroom sells cars. No motorcycles or scooters anywhere in the film, including in the background — ${brief.lineup.brand} badges both, and the wrong one on screen makes the film unusable.`,
+            ? brief.dealer.kind === 'oem'
+              ? 'This range is two-wheelers. No cars anywhere in the film, including in the background.'
+              : 'This showroom sells two-wheelers. No cars anywhere in the film, including in the background.'
+            : brief.dealer.kind === 'oem'
+              ? `This range is cars. No motorcycles or scooters anywhere in the film, including in the background — ${brief.lineup.brand} badges both, and the wrong one on screen makes the film unusable.`
+              : `This showroom sells cars. No motorcycles or scooters anywhere in the film, including in the background — ${brief.lineup.brand} badges both, and the wrong one on screen makes the film unusable.`,
         );
       }
       if (brief.modelSpecific && brief.alsoFeatured?.length) {
@@ -667,11 +673,18 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         }. Do NOT write the presenter's name or any label anywhere on screen.`,
       );
     }
+    // Every part after the first is built from this, so what the opening establishes
+    // about whose film it is has to be said again here.
+    const contOem = brief.dealer.kind === 'oem';
     C.push(
       ctx.useFake
-        ? `Fictional branding only: ${ctx.displayBrandModel} — Dealership: ${ctx.displayDealer}. No real manufacturer logo or badge.`
-        : `Brand and model: ${ctx.displayBrandModel}. Dealership: ${ctx.displayDealer}.`,
+        ? `Fictional branding only: ${ctx.displayBrandModel} — ${contOem ? 'Manufacturer' : 'Dealership'}: ${ctx.displayDealer}. No real manufacturer logo or badge.`
+        : `Brand and model: ${ctx.displayBrandModel}. ${contOem ? 'Manufacturer' : 'Dealership'}: ${ctx.displayDealer}.`,
     );
+    if (contOem)
+      C.push(
+        "This is the manufacturer's own film, not a dealership's: no showroom signage, no dealership name, no local address and no phone number anywhere in frame.",
+      );
     if (brief.modelSpecific && brief.carColour) {
       // A continuation segment is built on the previous frame, but a model
       // re-reading its references can still drift back to the photos' paint.

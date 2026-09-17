@@ -1,6 +1,6 @@
 /**
- * Seven more Indian languages for the Languages library: Bengali, Kannada, Malayalam,
- * Marathi, Punjabi, Tamil and Telugu.
+ * Eight more Indian languages for the Languages library: Assamese, Bengali, Kannada,
+ * Malayalam, Marathi, Punjabi, Tamil and Telugu.
  *
  * Adapted from the team's pronunciation guides (September 2026) to the conventions the
  * Hindi guide settled on in production: respell sparingly, a respelled word is one plain
@@ -236,6 +236,48 @@ const BENGALI: Guide = {
   ],
 };
 
+const ASSAMESE: Guide = {
+  name: 'Assamese',
+  nativeName: 'অসমীয়া',
+  code: 'as',
+  script: 'Assamese script',
+  traps: 'শ, ষ and স all said as x (অসম is oxom, not asam), চ and ছ said as s, জ and ঝ as z',
+  functionWords: 'আৰু, ৰ, ক, লৈ, পৰা, ত',
+  different: [
+    '- শ, ষ and স are all said as x — the sound in Scottish "loch", never an s. অসম is oxom, সোনকালে is xonkale. Check this one first: a writer carrying Hindi or Bengali habits leaves an s in every one of them, and the whole line sounds foreign.',
+    '- চ and ছ are said as s, and জ and ঝ as z. চাওক is saok, আজি is azi.',
+    '- The inherent vowel is o, not a: ৰং is rong, মন is mon.',
+    '- Assamese writes ৰ and ৱ where Bengali writes র and ব. A line pasted from Bengali carries the wrong letter and reads as a typo on screen.',
+    '- Retroflex and dental are not distinguished in speech; context carries them. Aspiration still matters: খ kh, ঘ gh, থ th, ধ dh, ভ bh — never drop the h.',
+  ].join('\n'),
+  vowels:
+    'অ / inherent → o (ৰং → rong) · আ া → aa (কাম → kaam) · ই ঈ → i · উ ঊ → u\nএ → e (কেনে → kene) · ঐ → oi · ও → o · ঔ → ou · ং → trailing ng',
+  consonants:
+    'শ ষ স → x (অসম → oxom) · চ ছ → s · জ ঝ → z · খ kh · ঘ gh · থ th · ধ dh · ফ f · ভ bh\nৰ is r and ৱ is w — the two letters Assamese does not share with Bengali.',
+  spoken:
+    'Write the word as it is said, remembering স is x and চ is s: অসমত is said oxomot — not asamat, and not asomot.',
+  upTo: 'পৰ্যন্ত',
+  gender:
+    'Assamese verbs do not change with gender: কৰিছোঁ is the same whether the presenter is a man or a woman. Nothing to lock — choose the natural phrasing.',
+  checks: [
+    'In the words you did respell: শ/ষ/স are x, চ/ছ are s, জ/ঝ are z, and the inherent vowel is o, not a.',
+  ],
+  cardNote:
+    'ৰ and ৱ are the letters a Bengali font or a copy-paste gets wrong — check both on every card. Conjuncts (ক্ষ, ত্ৰ, জ্ঞ) garble first; use a simpler word where one exists.',
+  phrases: [
+    ['এতিয়াই বুক কৰক', 'book now', 'etiyai book korok'],
+    ['আজিয়েই', 'today only', 'aziyei'],
+    ['আহক', 'please come', 'ahok'],
+    ['চাওক', 'please see', 'saok'],
+    ['অভিনন্দন', 'congratulations', 'obhinondon'],
+    ['ধুনীয়া', 'beautiful', 'dhuniya'],
+    ['ৰেহাই', 'discount', 'rehai', 'Assamese ads often just say "discount" in English — use whichever the copy already uses.'],
+    ['আপোনাৰ নতুন গাড়ী', 'your new car', 'aponar notun gari'],
+    ['সোনকালে কৰক', 'hurry up', 'xonkale korok'],
+    ['আমাৰ ওচৰলৈ আহক', 'visit us', 'amar osorloi ahok'],
+  ],
+};
+
 const KANNADA: Guide = {
   name: 'Kannada',
   nativeName: 'ಕನ್ನಡ',
@@ -467,4 +509,4 @@ const TELUGU: Guide = {
   ],
 };
 
-export const REGIONAL_LANGUAGE_SEEDS: LanguageSeed[] = [BENGALI, KANNADA, MALAYALAM, MARATHI, PUNJABI, TAMIL, TELUGU].map(seed);
+export const REGIONAL_LANGUAGE_SEEDS: LanguageSeed[] = [ASSAMESE, BENGALI, KANNADA, MALAYALAM, MARATHI, PUNJABI, TAMIL, TELUGU].map(seed);

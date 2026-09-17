@@ -131,6 +131,9 @@ import {
   categoriesFor,
   sceneRules,
   chooseCaptionSpot,
+  captionSpotXY,
+  overlayMargins,
+  CAPTION_SPOTS,
   boxesFrom1000,
   CATEGORIES,
 } from '@ava/shared';
@@ -1900,4 +1903,13 @@ test('boxes a vision model returns are read as fractions of the frame, and nonse
   assert.deepEqual(boxesFrom1000([[0, 0, 0, 0], 'x', [100, 900, 50, 950], [1, 2, 3]]), []);
   assert.deepEqual(boxesFrom1000([[-50, 100, 1200, 300]]), [{ x0: 0.1, y0: 0, x1: 0.3, y1: 1 }], 'clamped to the frame');
   assert.deepEqual(boxesFrom1000(undefined), []);
+});
+
+test('a caption spot is the same place for the compositor and the editor', () => {
+  assert.deepEqual(overlayMargins(720, 1280), { margin: 29, logoBand: 61 });
+  assert.deepEqual([...CAPTION_SPOTS], ['bottom-left', 'bottom-right', 'top-left', 'top-right', 'middle-left', 'middle-right', 'bottom-center']);
+  assert.deepEqual(captionSpotXY('bottom-left', 720, 1280, 300, 100, 29, 60, 61), { x: 29, y: 1091 });
+  assert.deepEqual(captionSpotXY('top-right', 720, 1280, 300, 100, 29, 60, 61), { x: 391, y: 119 });
+  assert.deepEqual(captionSpotXY('middle-left', 720, 1280, 300, 100, 29, 60, 61), { x: 29, y: 590 });
+  assert.deepEqual(captionSpotXY('bottom-center', 720, 1280, 300, 100, 29, 60, 61), { x: 210, y: 1091 });
 });

@@ -19,7 +19,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { cleanLogo } from './logos.js';
-import { chooseCaptionSpot, type CaptionSpotCandidate, type PeopleInShot } from '@ava/shared';
+import {
+  CAPTION_SPOTS,
+  captionSpotXY,
+  chooseCaptionSpot,
+  isCaptionSpot,
+  overlayMargins,
+  type CaptionSpot,
+  type CaptionSpotCandidate,
+  type PeopleInShot,
+} from '@ava/shared';
 
 export interface EndCardSpec {
   /** Dealer name first, then CTA, then contact lines. */
@@ -988,28 +997,11 @@ async function tightenJoins(files: string[], dir: string): Promise<{ files: stri
 }
 
 /** Where a caption can go, in the order they are preferred when two are equally clear. */
-const CARD_SPOTS = ['bottom-left', 'bottom-right', 'top-left', 'top-right', 'middle-left', 'middle-right', 'bottom-center'] as const;
-type CardSpot = (typeof CARD_SPOTS)[number];
-const isCardSpot = (v: unknown): v is CardSpot => (CARD_SPOTS as readonly string[]).includes(v as string);
-
-/** A caption's top-left corner at a spot: above the footer strip, below the logos, inside the margin. */
-function spotXY(
-  spot: CardSpot,
-  W: number,
-  H: number,
-  w: number,
-  h: number,
-  margin: number,
-  footerH: number,
-  logoBand: number,
-): { x: number; y: number } {
-  const [row, col] = spot.split('-') as [string, string];
-  const x = col === 'left' ? margin : col === 'right' ? W - w - margin : Math.round((W - w) / 2);
-  const bottom = Math.max(margin, H - footerH - margin - h);
-  const top = Math.min(bottom, margin + logoBand + margin);
-  const y = row === 'bottom' ? bottom : row === 'top' ? top : Math.round(Math.min(Math.max(top, (H - h) / 2), bottom));
-  return { x: Math.max(0, x), y: Math.max(0, y) };
-}
+// Caption spots and their geometry live in shared, so the editor places a caption exactly where this does.
+const CARD_SPOTS = CAPTION_SPOTS;
+type CardSpot = CaptionSpot;
+const isCardSpot = isCaptionSpot;
+const spotXY = captionSpotXY;
 
 /**
  * Where a caption covers the least of what is happening.
@@ -1371,8 +1363,7 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     // --- lay the brand furniture on top ---
     // Both logo inputs are the same normalised box, so a single margin puts them
     // on the same baseline however different the uploaded files were.
-    const margin = Math.round(shortSide(W, H) * 0.04);
-    const logoBand = Math.round(shortSide(W, H) * LOGO_BOX.h);
+    const { margin, logoBand } = overlayMargins(W, H);
     let vCur = 'vcat';
 
     // --- timed captions ---

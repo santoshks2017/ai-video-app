@@ -92,3 +92,33 @@ export function boxesFrom1000(raw: unknown): FrameBox[] {
   }
   return out;
 }
+
+/** The places an Auto caption can take, in the order a tie goes. */
+export const CAPTION_SPOTS = ['bottom-left', 'bottom-right', 'top-left', 'top-right', 'middle-left', 'middle-right', 'bottom-center'] as const;
+export type CaptionSpot = (typeof CAPTION_SPOTS)[number];
+export const isCaptionSpot = (v: unknown): v is CaptionSpot => (CAPTION_SPOTS as readonly string[]).includes(v as string);
+
+/** How far overlays sit off the frame's edges, and the band the corner logos take. */
+export function overlayMargins(W: number, H: number): { margin: number; logoBand: number } {
+  const S = Math.min(W, H);
+  return { margin: Math.round(S * 0.04), logoBand: Math.round(S * 0.085) };
+}
+
+/** A caption's top-left corner at a spot: above the footer strip, below the logos, inside the margin. */
+export function captionSpotXY(
+  spot: CaptionSpot,
+  W: number,
+  H: number,
+  w: number,
+  h: number,
+  margin: number,
+  footerH: number,
+  logoBand: number,
+): { x: number; y: number } {
+  const [row, col] = spot.split('-') as [string, string];
+  const x = col === 'left' ? margin : col === 'right' ? W - w - margin : Math.round((W - w) / 2);
+  const bottom = Math.max(margin, H - footerH - margin - h);
+  const top = Math.min(bottom, margin + logoBand + margin);
+  const y = row === 'bottom' ? bottom : row === 'top' ? top : Math.round(Math.min(Math.max(top, (H - h) / 2), bottom));
+  return { x: Math.max(0, x), y: Math.max(0, y) };
+}

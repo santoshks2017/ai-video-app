@@ -29,6 +29,7 @@ export * from './analytics.js';
 export * from './actorProfile.js';
 export * from './logoLayout.js';
 export * from './captionSpot.js';
+export * from './filmLayers.js';
 export * from './siteSignals.js';
 export * from './overlayLook.js';
 export * from './pieces.js';

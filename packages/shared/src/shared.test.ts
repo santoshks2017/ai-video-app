@@ -136,6 +136,17 @@ import {
   CAPTION_SPOTS,
   boxesFrom1000,
   CATEGORIES,
+  editProjectFromLayers,
+  editLayerGuides,
+  editSnapBox,
+  editCaptionSpots,
+  EDIT_CAPTION_TRACK,
+  EDIT_DEALER_LOGO_TRACK,
+  EDIT_FOOTER_TRACK,
+  EDIT_TEXT_TRACK,
+  EDIT_AUDIO_TRACK,
+  type FilmLayers,
+  type EditClip,
 } from '@ava/shared';
 
 function base(overrides: Partial<Brief> = {}): Brief {
@@ -1360,7 +1371,7 @@ test('the timecode reads like the player, and an edge snaps to what is near it',
 
 test('the server refuses an edit it cannot render', () => {
   assert.equal(validateEditProject(null), 'No edit was sent.');
-  assert.match(String(validateEditProject({ ...newEditProject(), version: 2 })), /different version/);
+  assert.match(String(validateEditProject({ ...newEditProject(), version: 3 })), /different version/);
   const ok = put(newEditProject(), 'a', 5).project;
   assert.equal(validateEditProject(ok), null);
   const broken = { ...ok, clips: [{ ...ok.clips[0]!, out: Number.NaN }] };
@@ -1912,4 +1923,67 @@ test('a caption spot is the same place for the compositor and the editor', () =>
   assert.deepEqual(captionSpotXY('top-right', 720, 1280, 300, 100, 29, 60, 61), { x: 391, y: 119 });
   assert.deepEqual(captionSpotXY('middle-left', 720, 1280, 300, 100, 29, 60, 61), { x: 29, y: 590 });
   assert.deepEqual(captionSpotXY('bottom-center', 720, 1280, 300, 100, 29, 60, 61), { x: 210, y: 1091 });
+});
+
+const FILM: FilmLayers = {
+  version: 1, width: 720, height: 1280, fps: 30, speed: 1.2, targetShortSide: 720, bodySeconds: 8.6,
+  colours: { panel: '#0f172a', text: '#ffffff', accent: '#38bdf8', card: '#0f172a', cardText: '#ffffff', cardMuted: '#cbd5e1' },
+  captionHeadSize: 42,
+  captions: [{ id: 'cap-0', text: 'Happy Ganesh Chaturthi', from: 0.9, to: 3.4, x: 29, y: 1091, w: 420, h: 100, spot: 'bottom-left', auto: true }],
+  footer: { text: 'Garve Renault  ·  Pune', x: 0, y: 1220, w: 720, h: 60 },
+  logos: [{ which: 'dealer', x: 540, y: 29, w: 151, h: 61, colourPath: 'refs/a/logo.png', whitePath: 'refs/b/white.png', whiteOnEndCard: true }],
+  endCard: { lines: ['Garve Renault', 'Book your test drive today'], seconds: 3 },
+  music: { storagePath: 'refs/c/music.m4a', loudness: -20, duckDb: -12 },
+};
+const layered = () =>
+  editProjectFromLayers({
+    aspect: '9:16',
+    layers: FILM,
+    clean: { type: 'video', label: 'Film', url: 'https://x/clean.mp4', duration: 8.6, jobId: 'j1', variant: 'clean' },
+    music: { type: 'audio', label: 'Music', url: 'https://x/music.m4a', duration: 14, storagePath: 'refs/c/music.m4a' },
+  });
+
+test('a composed film opens as clean footage with its overlays as layers', () => {
+  const p = layered();
+  assert.equal(p.version, 2);
+  assert.deepEqual(p.tracks.map((t) => t.id), [EDIT_CAPTION_TRACK, EDIT_DEALER_LOGO_TRACK, EDIT_FOOTER_TRACK, EDIT_TEXT_TRACK, EDIT_MAIN_TRACK, EDIT_AUDIO_TRACK], 'no brand logo row without a brand logo');
+  const byId = new Map(p.clips.map((c) => [c.id, c]));
+  assert.equal(byId.get('clean')?.out, 8.6);
+  assert.equal(byId.get('endcard')?.start, 8.6);
+  assert.equal(byId.get('endcard')?.fadeIn, 0.35);
+  const cap = byId.get('cap-0')!;
+  assert.equal(cap.start, 0.9);
+  assert.ok(Math.abs(editClipLength(cap) - 2.5) < 1e-9);
+  assert.deepEqual(cap.place, { x: 29 / 720, y: 1091 / 1280, scale: 1 });
+  assert.equal(cap.fadeIn, 0.28);
+  assert.equal(byId.get('logo-dealer')?.out, 11.6, 'a logo runs through the end card');
+  assert.deepEqual(byId.get('footer')?.place, { x: 0, y: 1220 / 1280, scale: 1 });
+  assert.deepEqual(byId.get('music')?.bed, { loudness: -20, duckDb: -12 });
+  assert.deepEqual(cap.original?.place, cap.place, 'Reset has something to go back to');
+  assert.equal(validateEditProject(p), null);
+});
+
+test('a layered edit is checked before any work', () => {
+  const p = layered();
+  const withCaption = (patch: Partial<EditClip>) => ({ ...p, clips: p.clips.map((c) => (c.id === 'cap-0' ? { ...c, ...patch } : c)) });
+  assert.match(String(validateEditProject(withCaption({ layer: { kind: 'caption', text: '' } }))), /needs words/);
+  assert.match(String(validateEditProject(withCaption({ place: { x: 0.1, y: 0.1, scale: 9 } }))), /position or size/);
+  assert.match(String(validateEditProject({ ...p, look: undefined })), /frame or look/);
+  assert.match(
+    String(validateEditProject(withCaption({ layer: { kind: 'logo', which: 'dealer', colourPath: '../etc/passwd', whiteOnEndCard: false, w: 10, h: 10 } }))),
+    /no image/,
+  );
+  assert.match(String(validateEditProject({ ...p, version: 3 })), /different version/);
+});
+
+test('a dragged layer catches on the centre line and the safe margin', () => {
+  const look = { colours: FILM.colours, width: 720, height: 1280 };
+  const r = editSnapBox({ x: 0.26, y: 0.3 }, { w: 0.5, h: 0.1 }, editLayerGuides(look), { x: 0.02, y: 0.02 });
+  assert.ok(Math.abs(r.x - 0.25) < 1e-9, 'its centre caught the centre line');
+  assert.equal(r.caught.x, 0.5);
+  assert.equal(r.y, 0.3, 'nothing within reach vertically');
+  assert.deepEqual(
+    editCaptionSpots(look, { w: 300, h: 100 }, 60).find((s) => s.spot === 'bottom-left'),
+    { spot: 'bottom-left', x: 29 / 720, y: 1091 / 1280 },
+  );
 });

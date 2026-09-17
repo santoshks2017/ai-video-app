@@ -13,8 +13,11 @@
  * timeline already shows it so.
  */
 
+import { LAYER_COLOUR_KEYS, type FilmLayers, type LayerBox, type LayerColours } from './filmLayers.js';
+import { CAPTION_SPOTS, captionSpotXY, overlayMargins, type CaptionSpot } from './captionSpot.js';
+
 export type EditAspect = '16:9' | '9:16' | '1:1';
-export type EditTrackKind = 'video' | 'text' | 'audio';
+export type EditTrackKind = 'video' | 'text' | 'audio' | 'layer';
 
 export interface EditTrack {
   id: string;
@@ -24,7 +27,7 @@ export interface EditTrack {
 }
 
 export type EditSource =
-  | { type: 'video'; label: string; url: string; duration: number; jobId?: string; storagePath?: string; poster?: string }
+  | { type: 'video'; label: string; url: string; duration: number; jobId?: string; storagePath?: string; poster?: string; variant?: 'clean' }
   | { type: 'image'; label: string; url: string; storagePath?: string }
   | { type: 'audio'; label: string; url: string; duration: number; storagePath?: string };
 
@@ -40,6 +43,26 @@ export interface EditTextStyle {
   /** Centre of the text, as fractions of the frame. */
   x: number;
   y: number;
+}
+
+/** Something drawn over the film after it was made: a caption, the footer, a logo, or the end card. */
+export type EditLayer =
+  | { kind: 'caption'; text: string; sub?: string }
+  | { kind: 'footer'; text: string }
+  | { kind: 'logo'; which: 'dealer' | 'brand'; colourPath: string; whitePath?: string; whiteOnEndCard: boolean; w: number; h: number }
+  | { kind: 'endcard'; lines: string[] };
+/** A layer's top-left corner as fractions of the frame, and its size where 1 is as designed. */
+export interface EditPlacement {
+  x: number;
+  y: number;
+  scale: number;
+}
+/** The film's frame and the colours its layers are drawn in. */
+export interface EditLook {
+  colours: LayerColours;
+  width: number;
+  height: number;
+  captionHeadSize?: number;
 }
 
 export interface EditClip {
@@ -61,18 +84,33 @@ export interface EditClip {
   filter?: { id: string; strength: number };
   /** Into this clip from the one before it on the main track. */
   transition?: { id: string; duration: number };
+  layer?: EditLayer;
+  place?: EditPlacement;
+  /** A sound clip that is the film's music: levelled, and dipped under the voice, at export. */
+  bed?: { loudness: number; duckDb: number };
+  /** The layer as the film first drew it, for Reset. */
+  original?: { start: number; in: number; out: number; layer?: EditLayer; place?: EditPlacement };
 }
 
 export interface EditProject {
-  version: 1;
+  version: 1 | 2;
   aspect: EditAspect;
   tracks: EditTrack[];
   clips: EditClip[];
+  /** Set when the edit holds a film's layers. */
+  look?: EditLook;
 }
 
 export const EDIT_MAIN_TRACK = 'v1';
 export const EDIT_TEXT_TRACK = 't1';
 export const EDIT_AUDIO_TRACK = 'a1';
+export const EDIT_CAPTION_TRACK = 'c1';
+export const EDIT_DEALER_LOGO_TRACK = 'l1';
+export const EDIT_BRAND_LOGO_TRACK = 'l2';
+export const EDIT_FOOTER_TRACK = 'f1';
+/** How a caption fades in and out, and how the end card eases in — as the film draws them. */
+export const EDIT_LAYER_FADE = 0.28;
+export const EDIT_END_CARD_FADE = 0.35;
 /** Nothing is cut shorter than this — a sliver of a clip is a flash, never an edit. */
 export const EDIT_MIN_CLIP = 0.2;
 /** How long a still or a line of text lasts when it is first put down. */
@@ -86,7 +124,7 @@ export const editClipEnd = (c: EditClip): number => c.start + editClipLength(c);
 
 export function newEditProject(aspect: EditAspect = '16:9'): EditProject {
   return {
-    version: 1,
+    version: 2,
     aspect,
     tracks: [
       { id: EDIT_TEXT_TRACK, kind: 'text' },
@@ -94,6 +132,86 @@ export function newEditProject(aspect: EditAspect = '16:9'): EditProject {
       { id: EDIT_AUDIO_TRACK, kind: 'audio' },
     ],
     clips: [],
+  };
+}
+
+export const editClipKind = (c: EditClip): 'layer' | 'text' | 'image' | 'audio' | 'video' =>
+  c.layer ? 'layer' : c.text !== undefined ? 'text' : (c.source?.type ?? 'video');
+
+/**
+ * A composed film as an edit: its clean footage on the main track, the end card after it,
+ * and every caption, logo and the footer as a layer where the film drew it.
+ */
+export function editProjectFromLayers(input: {
+  aspect: EditAspect;
+  layers: FilmLayers;
+  clean: Extract<EditSource, { type: 'video' }>;
+  music?: Extract<EditSource, { type: 'audio' }>;
+}): EditProject {
+  const L = input.layers;
+  const total = L.bodySeconds + (L.endCard?.seconds ?? 0);
+  const base = { speed: 1, volume: 1, fadeIn: 0, fadeOut: 0 };
+  const at = (b: LayerBox): EditPlacement => ({ x: b.x / L.width, y: b.y / L.height, scale: 1 });
+  const kept = (c: EditClip): EditClip => ({ ...c, original: { start: c.start, in: c.in, out: c.out, layer: c.layer, place: c.place } });
+  const clips: EditClip[] = [kept({ id: 'clean', trackId: EDIT_MAIN_TRACK, start: 0, in: 0, out: L.bodySeconds, source: input.clean, ...base })];
+  if (L.endCard) {
+    clips.push(
+      kept({ id: 'endcard', trackId: EDIT_MAIN_TRACK, start: L.bodySeconds, in: 0, out: L.endCard.seconds, layer: { kind: 'endcard', lines: [...L.endCard.lines] }, ...base, fadeIn: EDIT_END_CARD_FADE }),
+    );
+  }
+  for (const c of L.captions) {
+    clips.push(
+      kept({
+        id: c.id,
+        trackId: EDIT_CAPTION_TRACK,
+        start: c.from,
+        in: 0,
+        out: c.to - c.from,
+        layer: { kind: 'caption', text: c.text, ...(c.sub ? { sub: c.sub } : {}) },
+        place: at(c),
+        ...base,
+        fadeIn: EDIT_LAYER_FADE,
+        fadeOut: EDIT_LAYER_FADE,
+      }),
+    );
+  }
+  for (const g of L.logos) {
+    clips.push(
+      kept({
+        id: `logo-${g.which}`,
+        trackId: g.which === 'dealer' ? EDIT_DEALER_LOGO_TRACK : EDIT_BRAND_LOGO_TRACK,
+        start: 0,
+        in: 0,
+        out: total,
+        layer: { kind: 'logo', which: g.which, colourPath: g.colourPath, ...(g.whitePath ? { whitePath: g.whitePath } : {}), whiteOnEndCard: g.whiteOnEndCard, w: g.w, h: g.h },
+        place: at(g),
+        ...base,
+      }),
+    );
+  }
+  if (L.footer) {
+    clips.push(
+      kept({ id: 'footer', trackId: EDIT_FOOTER_TRACK, start: 0, in: 0, out: total, layer: { kind: 'footer', text: L.footer.text }, place: { x: 0, y: L.footer.y / L.height, scale: 1 }, ...base }),
+    );
+  }
+  if (input.music && L.music) {
+    clips.push({ id: 'music', trackId: EDIT_AUDIO_TRACK, start: 0, in: 0, out: Math.min(total, input.music.duration), source: input.music, bed: { loudness: L.music.loudness, duckDb: L.music.duckDb }, ...base });
+  }
+  const tracks: EditTrack[] = [
+    { id: EDIT_CAPTION_TRACK, kind: 'layer' },
+    { id: EDIT_DEALER_LOGO_TRACK, kind: 'layer' },
+    { id: EDIT_BRAND_LOGO_TRACK, kind: 'layer' },
+    { id: EDIT_FOOTER_TRACK, kind: 'layer' },
+    { id: EDIT_TEXT_TRACK, kind: 'text' },
+    { id: EDIT_MAIN_TRACK, kind: 'video' },
+    { id: EDIT_AUDIO_TRACK, kind: 'audio' },
+  ];
+  return {
+    version: 2,
+    aspect: input.aspect,
+    tracks: tracks.filter((t) => t.kind !== 'layer' || clips.some((c) => c.trackId === t.id)),
+    clips,
+    look: { colours: { ...L.colours }, width: L.width, height: L.height, ...(L.captionHeadSize ? { captionHeadSize: L.captionHeadSize } : {}) },
   };
 }
 
@@ -266,21 +384,116 @@ export function editAspectSize(aspect: EditAspect, shortSide = 720): { width: nu
   return { width: long, height: shortSide };
 }
 
+const REF_PATH = /^refs\/[\w-]+\/[^/]+$/;
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isText = (v: unknown, max: number, min = 0): v is string => typeof v === 'string' && v.length >= min && v.length <= max;
+
+export function validateEditLook(look: unknown): string | null {
+  const l = look as Partial<EditLook> | undefined;
+  if (!l || typeof l !== 'object') return 'The edit has no frame or look for its layers.';
+  const size = (n: unknown): boolean => Number.isInteger(n) && (n as number) >= 16 && (n as number) <= 4096;
+  if (!size(l.width) || !size(l.height)) return 'The edit has an impossible frame size.';
+  const colours = l.colours as unknown as Record<string, unknown> | undefined;
+  if (!colours || LAYER_COLOUR_KEYS.some((k) => !/^#[0-9a-f]{3,8}$/i.test(String(colours[k])))) return 'The edit has a look that cannot be read.';
+  if (l.captionHeadSize !== undefined && (!isNum(l.captionHeadSize) || l.captionHeadSize <= 0 || l.captionHeadSize > 400)) {
+    return 'The edit has a caption size that cannot be read.';
+  }
+  return null;
+}
+
+export function validateEditLayer(layer: unknown): string | null {
+  const x = layer as Record<string, unknown> | undefined;
+  if (!x || typeof x !== 'object') return 'A layer is malformed.';
+  if (x.kind === 'caption') {
+    if (!isText(x.text, 200, 1) || !x.text.trim()) return 'A caption needs words, up to 200 characters.';
+    return x.sub === undefined || isText(x.sub, 200) ? null : 'A caption’s second line is too long.';
+  }
+  if (x.kind === 'footer') return isText(x.text, 300) ? null : 'The footer text is too long.';
+  if (x.kind === 'logo') {
+    if (x.which !== 'dealer' && x.which !== 'brand') return 'A logo layer must be the dealer or the brand logo.';
+    if (!isText(x.colourPath, 300) || !REF_PATH.test(x.colourPath)) return 'A logo layer has no image.';
+    if (x.whitePath !== undefined && (!isText(x.whitePath, 300) || !REF_PATH.test(x.whitePath))) return 'A logo layer has a white version that cannot be read.';
+    if (!isNum(x.w) || !isNum(x.h) || x.w <= 0 || x.h <= 0 || x.w > 4096 || x.h > 4096) return 'A logo layer has an impossible size.';
+    return typeof x.whiteOnEndCard === 'boolean' ? null : 'A logo layer is malformed.';
+  }
+  if (x.kind === 'endcard') {
+    const lines = x.lines as unknown[];
+    return Array.isArray(lines) && lines.length <= 6 && lines.every((l) => isText(l, 160))
+      ? null
+      : 'An end card takes up to six lines of up to 160 characters.';
+  }
+  return 'A layer is of a kind this editor does not know.';
+}
+
 /** Why a project cannot be rendered, or null when it can. Checked on the server before any work. */
 export function validateEditProject(p: unknown): string | null {
   if (!p || typeof p !== 'object') return 'No edit was sent.';
   const x = p as Partial<EditProject>;
-  if (x.version !== 1) return 'This edit was made by a different version of the editor.';
+  if (x.version !== 1 && x.version !== 2) return 'This edit was made by a different version of the editor.';
   if (!['16:9', '9:16', '1:1'].includes(String(x.aspect))) return 'Unknown aspect ratio.';
   if (!Array.isArray(x.tracks) || !Array.isArray(x.clips)) return 'The edit has no tracks.';
   if (x.clips.length > 200) return 'Too many clips — 200 is the most one export takes.';
+  const hasLayers = x.clips.some((c) => c && typeof c === 'object' && (c as EditClip).layer !== undefined);
+  if (hasLayers || x.look !== undefined) {
+    if (x.version !== 2) return 'This edit was made by a different version of the editor.';
+    const bad = validateEditLook(x.look);
+    if (bad) return bad;
+  }
   for (const c of x.clips) {
     if (!c || typeof c !== 'object') return 'A clip is malformed.';
     const nums = [c.start, c.in, c.out, c.speed, c.volume, c.fadeIn, c.fadeOut];
     if (nums.some((v) => typeof v !== 'number' || !Number.isFinite(v))) return 'A clip has a position or length that is not a number.';
     if (c.out - c.in <= 0 || c.speed <= 0) return 'A clip has no length.';
+    if (c.layer === undefined) continue;
+    const bad = validateEditLayer(c.layer);
+    if (bad) return bad;
+    if (c.layer.kind === 'endcard') {
+      if (c.trackId !== EDIT_MAIN_TRACK) return 'The end card belongs on the main track.';
+      continue;
+    }
+    const pl = c.place;
+    if (!pl || !isNum(pl.x) || !isNum(pl.y) || !isNum(pl.scale) || pl.x < -1 || pl.x > 2 || pl.y < -1 || pl.y > 2 || pl.scale < 0.25 || pl.scale > 4) {
+      return 'A layer has a position or size that cannot be read.';
+    }
   }
   return null;
+}
+
+/** Lines a dragged layer catches on: the safe margin and the centre, as fractions of the frame. */
+export function editLayerGuides(look: EditLook): { x: number[]; y: number[] } {
+  const { margin } = overlayMargins(look.width, look.height);
+  return { x: [margin / look.width, 0.5, 1 - margin / look.width], y: [margin / look.height, 0.5, 1 - margin / look.height] };
+}
+
+/** A dragged box, snapped by an edge or its centre to the nearest guide within reach. Fractions of the frame. */
+export function editSnapBox(
+  pos: { x: number; y: number },
+  size: { w: number; h: number },
+  guides: { x: number[]; y: number[] },
+  reach: { x: number; y: number },
+): { x: number; y: number; caught: { x?: number; y?: number } } {
+  const axis = (p: number, s: number, lines: number[], r: number): { v: number; line?: number } => {
+    let best: { v: number; d: number; line?: number } = { v: p, d: r };
+    for (const line of lines) {
+      for (const off of [0, s / 2, s]) {
+        const d = Math.abs(p + off - line);
+        if (d <= best.d) best = { v: line - off, d, line };
+      }
+    }
+    return { v: best.v, line: best.line };
+  };
+  const ax = axis(pos.x, size.w, guides.x, reach.x);
+  const ay = axis(pos.y, size.h, guides.y, reach.y);
+  return { x: ax.v, y: ay.v, caught: { x: ax.line, y: ay.line } };
+}
+
+/** Where a caption of this size (pixels) would sit at each Auto spot, as fractions of the frame. */
+export function editCaptionSpots(look: EditLook, size: { w: number; h: number }, footerH: number): { spot: CaptionSpot; x: number; y: number }[] {
+  const { margin, logoBand } = overlayMargins(look.width, look.height);
+  return CAPTION_SPOTS.map((spot) => {
+    const at = captionSpotXY(spot, look.width, look.height, size.w, size.h, margin, footerH, logoBand);
+    return { spot, x: at.x / look.width, y: at.y / look.height };
+  });
 }
 
 /* ---- what the panels offer ---- */

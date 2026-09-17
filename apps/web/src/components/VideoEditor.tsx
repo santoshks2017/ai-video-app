@@ -12,7 +12,11 @@ import {
 import { createPortal } from 'react-dom';
 import {
   EDIT_AUDIO_TRACK,
+  EDIT_BRAND_LOGO_TRACK,
+  EDIT_CAPTION_TRACK,
+  EDIT_DEALER_LOGO_TRACK,
   EDIT_FILTERS,
+  EDIT_FOOTER_TRACK,
   EDIT_FONTS,
   EDIT_MAIN_TRACK,
   EDIT_STILL_SECONDS,
@@ -22,6 +26,7 @@ import {
   addEditClip,
   duplicateEditClip,
   editClipAt,
+  editClipKind,
   editProjectFromLayers,
   editClipEnd,
   editClipLength,
@@ -72,7 +77,38 @@ interface Material {
 type Panel = 'material' | 'text' | 'transitions' | 'filters' | 'clip';
 
 const LANE_PAD = 14;
-const ROW_H: Record<string, number> = { [EDIT_TEXT_TRACK]: 36, [EDIT_MAIN_TRACK]: 66, [EDIT_AUDIO_TRACK]: 42 };
+const ROW_H: Record<string, number> = {
+  [EDIT_CAPTION_TRACK]: 36,
+  [EDIT_DEALER_LOGO_TRACK]: 30,
+  [EDIT_BRAND_LOGO_TRACK]: 30,
+  [EDIT_FOOTER_TRACK]: 30,
+  [EDIT_TEXT_TRACK]: 36,
+  [EDIT_MAIN_TRACK]: 66,
+  [EDIT_AUDIO_TRACK]: 42,
+};
+const rowH = (id: string): number => rowH(id) ?? 36;
+const TRACK_LABEL: Record<string, string> = {
+  [EDIT_CAPTION_TRACK]: 'Captions',
+  [EDIT_DEALER_LOGO_TRACK]: 'Dealer logo',
+  [EDIT_BRAND_LOGO_TRACK]: 'Brand logo',
+  [EDIT_FOOTER_TRACK]: 'Footer',
+  [EDIT_TEXT_TRACK]: 'Text',
+  [EDIT_MAIN_TRACK]: 'Main',
+  [EDIT_AUDIO_TRACK]: 'Sound',
+};
+/** What a clip is called on its bar and in its panel. */
+const clipLabel = (c: EditClip): string =>
+  c.layer?.kind === 'caption'
+    ? c.layer.text
+    : c.layer?.kind === 'footer'
+      ? c.layer.text || 'Footer'
+      : c.layer?.kind === 'logo'
+        ? c.layer.which === 'dealer'
+          ? 'Dealer logo'
+          : 'Brand logo'
+        : c.layer?.kind === 'endcard'
+          ? 'End card'
+          : (c.text ?? c.source?.label ?? '');
 const asAspect = (a?: string): EditAspect => (a === '9:16' || a === '1:1' ? a : '16:9');
 const mmss = (s: number): string =>
   `${String(Math.floor(Math.max(0, s) / 60)).padStart(2, '0')}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
@@ -861,7 +897,7 @@ export function VideoEditor({
 
   const clipPanel = (c: EditClip): ReactNode => {
     const len = editClipLength(c);
-    const kind = c.text !== undefined ? 'text' : (c.source?.type ?? 'video');
+    const kind = editClipKind(c);
     const upd = (key: string, patch: Partial<EditClip>, resettle = false): void => {
       const next = updateEditClip(projectRef.current, c.id, patch);
       edit(`${key}:${c.id}`, resettle ? settle(next, c) : next);
@@ -872,7 +908,7 @@ export function VideoEditor({
         <div className="ve-props-head">
           <b>{kind === 'text' ? 'Text' : kind === 'image' ? 'Still' : kind === 'audio' ? 'Sound' : 'Video'}</b>
           <span>
-            {c.text ?? c.source?.label} · {len.toFixed(1)}s
+            {clipLabel(c)} · {len.toFixed(1)}s
           </span>
         </div>
 
@@ -1014,7 +1050,7 @@ export function VideoEditor({
     );
   };
 
-  const trackRows = [EDIT_TEXT_TRACK, EDIT_MAIN_TRACK, EDIT_AUDIO_TRACK];
+  const trackRows = project.tracks.map((tr) => tr.id);
 
   return createPortal(
     <div className="ve-wrap" role="dialog" aria-label="Video editor">
@@ -1378,9 +1414,9 @@ export function VideoEditor({
             {trackRows.map((id) => {
               const t = trackOf(id);
               return (
-                <div key={id} className="ve-track-header" style={{ height: ROW_H[id] }}>
-                  <span className="ve-track-kind">{id === EDIT_TEXT_TRACK ? 'Text' : id === EDIT_MAIN_TRACK ? 'Main' : 'Sound'}</span>
-                  {id !== EDIT_TEXT_TRACK && (
+                <div key={id} className="ve-track-header" style={{ height: rowH(id) }}>
+                  <span className="ve-track-kind">{TRACK_LABEL[id] ?? id}</span>
+                  {(t?.kind === 'video' || t?.kind === 'audio') && (
                     <button type="button" className={`ve-icon tiny${t?.muted ? ' off' : ''}`} aria-label={t?.muted ? 'Unmute track' : 'Mute track'} title={t?.muted ? 'Unmute' : 'Mute'} onClick={() => toggleTrack(id, 'muted')}>
                       <Icon d={t?.muted ? ICONS.soundOff : ICONS.sound} />
                     </button>
@@ -1413,7 +1449,7 @@ export function VideoEditor({
                 <div
                   key={id}
                   className={`ve-lane${trackOf(id)?.hidden ? ' hidden' : ''}`}
-                  style={{ height: ROW_H[id] }}
+                  style={{ height: rowH(id) }}
                   onPointerDown={(e) => {
                     if (e.target !== e.currentTarget) return;
                     setSelectedId(null);
@@ -1433,21 +1469,21 @@ export function VideoEditor({
                     .map((c) => {
                       const w = Math.max(8, editClipLength(c) * pps);
                       const poster = c.source?.type === 'video' ? c.source.poster : c.source?.type === 'image' ? c.source.url : undefined;
-                      const kind = c.text !== undefined ? 'text' : (c.source?.type ?? 'video');
+                      const kind = editClipKind(c);
                       return (
                         <div
                           key={c.id}
-                          className={`ve-clip ${kind}${c.id === selectedId ? ' on' : ''}`}
+                          className={`ve-clip ${kind}${c.layer ? ` ${c.layer.kind}` : ''}${c.id === selectedId ? ' on' : ''}`}
                           style={{ left: LANE_PAD + c.start * pps, width: w, backgroundImage: poster ? `url("${poster}")` : undefined }}
                           onPointerDown={(e) => beginDrag(e, 'move', c)}
                           onPointerMove={dragMove}
                           onPointerUp={endDrag}
-                          title={c.text ?? c.source?.label}
+                          title={clipLabel(c)}
                         >
                           {c.transition && <span className="ve-trans-mark" style={{ width: Math.max(6, c.transition.duration * pps) }} />}
                           <span className="ve-grip in" onPointerDown={(e) => beginDrag(e, 'in', c)} onPointerMove={dragMove} onPointerUp={endDrag} />
                           <span className="ve-clip-label">
-                            {c.text ?? c.source?.label}
+                            {clipLabel(c)}
                             {c.speed !== 1 ? ` · ${c.speed.toFixed(2)}×` : ''}
                             {c.filter ? ` · ${EDIT_FILTERS.find((f) => f.id === c.filter!.id)?.name ?? ''}` : ''}
                           </span>

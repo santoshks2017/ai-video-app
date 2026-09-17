@@ -2644,6 +2644,11 @@ textarea.guide {
   border: 1px solid rgba(255, 255, 255, 0.08); background-color: #2c3440; background-size: auto 100%; background-repeat: repeat-x;
 }
 .ve-clip.text { background: #5b3f8a; }
+.ve-clip.layer { background: #2f5d62; }
+.ve-clip.layer.caption { background: #6b4fa0; }
+.ve-clip.layer.logo { background: #7a5b2c; }
+.ve-clip.layer.footer { background: #3b5b7a; }
+.ve-clip.layer.endcard { background: #1f3a5f; }
 .ve-clip.audio { background: #1f5a4a repeating-linear-gradient(90deg, transparent 0 3px, rgba(255, 255, 255, 0.12) 3px 4px); }
 .ve-clip.image { background-color: #3d3a2e; }
 .ve-clip.on { border: 2px solid #fff; }

@@ -3481,11 +3481,32 @@ app.post<{ Body: { layer?: EditLayer; look?: EditLook; scale?: number } }>('/api
   if (bad) return reply.code(400).send({ code: 'bad-request', message: bad });
   if (layer!.kind === 'logo') return reply.code(400).send({ code: 'bad-request', message: 'A logo is shown from its own image.' });
   if (layer!.kind === 'footer' && !layer!.text.trim()) return { png: '', width: 0, height: 0 };
-  const scale = Number.isFinite(req.body?.scale) ? Math.max(0.25, Math.min(4, Number(req.body!.scale))) : 1;
-  const png = await drawLayer(layer as DrawnLayer, look!, scale);
+  // The sizes the editor offers, no more: a caption at twice its size on a film's own frame.
+  const scale = Number.isFinite(req.body?.scale) ? Math.max(0.5, Math.min(2, Number(req.body!.scale))) : 1;
+  const png = await drawingTurn(() => drawLayer(layer as DrawnLayer, look!, scale));
   const m = await sharp(png).metadata();
   return { png: png.toString('base64'), width: m.width ?? 0, height: m.height ?? 0 };
 });
+
+/**
+ * Layer pictures are drawn two at a time on an instance. The route is open to viewers, and
+ * the same instance stitches paid films: a burst of drawings queues rather than crowding them out.
+ */
+const DRAWING_AT_ONCE = 2;
+let drawing = 0;
+const waitingToDraw: Array<() => void> = [];
+async function drawingTurn<T>(work: () => Promise<T>): Promise<T> {
+  // A drawing that finishes hands its turn straight to the next in line, so none slips in between.
+  if (drawing >= DRAWING_AT_ONCE) await new Promise<void>((go) => waitingToDraw.push(go));
+  else drawing++;
+  try {
+    return await work();
+  } finally {
+    const next = waitingToDraw.shift();
+    if (next) next();
+    else drawing--;
+  }
+}
 
 /** A new logo for a layer: cleaned when it was uploaded, fitted here to the film's logo box. */
 app.post<{ Body: { storagePath?: string; whitePath?: string; look?: EditLook } }>('/api/edits/logo', async (req, reply) => {

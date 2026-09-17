@@ -14,7 +14,7 @@
  */
 
 import { LAYER_COLOUR_KEYS, type FilmLayers, type FilmMusicLayer, type LayerBox, type LayerColours } from './filmLayers.js';
-import { autoMusicGain, gainAt, musicFadeAt, musicPreviewLevel, validateGainPoints, type GainPoint } from './musicGain.js';
+import { autoMusicGain, gainAt, musicFadeAt, musicPreviewLevel, validateGainPoints, MUSIC_FADE_IN, MUSIC_FADE_OUT, type GainPoint } from './musicGain.js';
 import { CAPTION_SPOTS, captionSpotXY, overlayMargins, type CaptionSpot } from './captionSpot.js';
 
 export type EditAspect = '16:9' | '9:16' | '1:1';
@@ -125,6 +125,8 @@ export const EDIT_END_CARD_FADE = 0.35;
 export const EDIT_MIN_CLIP = 0.2;
 /** How long a still or a line of text lasts when it is first put down. */
 export const EDIT_STILL_SECONDS = 3;
+/** The longest side a layered film's frame can have, in pixels. */
+export const EDIT_MAX_FRAME = 2160;
 
 export const editUid = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -206,7 +208,18 @@ export function editProjectFromLayers(input: {
   }
   if (input.music && L.music) {
     const out = Math.min(total, input.music.duration);
-    clips.push({ id: 'music', trackId: EDIT_AUDIO_TRACK, start: 0, in: 0, out, source: input.music, ...filmMusicLine(L.music, L, out), ...base });
+    clips.push({
+      id: 'music',
+      trackId: EDIT_AUDIO_TRACK,
+      start: 0,
+      in: 0,
+      out,
+      source: input.music,
+      ...filmMusicLine(L.music, L, out),
+      ...base,
+      fadeIn: MUSIC_FADE_IN,
+      fadeOut: MUSIC_FADE_OUT,
+    });
   }
   const tracks: EditTrack[] = [
     { id: EDIT_CAPTION_TRACK, kind: 'layer' },
@@ -252,6 +265,7 @@ function filmMusicLine(
 export function editWithFilmMusicLine(p: EditProject, film: Pick<FilmLayers, 'bodySeconds' | 'endCard' | 'music'>): EditProject {
   const music = film.music;
   if (!music || !musicLineKnown(music) || !p.clips.some((c) => c.bed && !c.gain)) return p;
+  const end = editProjectLength(p);
   return {
     ...p,
     clips: p.clips.map((c) => {
@@ -261,8 +275,15 @@ export function editWithFilmMusicLine(p: EditProject, film: Pick<FilmLayers, 'bo
       const onSource = (points: GainPoint[] | undefined) =>
         points?.map((pt) => ({ t: Math.max(0, Math.round((c.in + (pt.t - c.start) * (c.speed || 1)) * 1000) / 1000), db: pt.db }));
       const gain = onSource(line.gain);
+      // Its fades were fixed at export before; a line brings the clip's own fades into play,
+      // so an untouched clip is given the ones the film had.
+      const fades =
+        gain && c.fadeIn === 0 && c.fadeOut === 0
+          ? { fadeIn: c.in <= 0.001 ? MUSIC_FADE_IN : 0, fadeOut: Math.abs(editClipEnd(c) - end) < 0.05 ? MUSIC_FADE_OUT : 0 }
+          : {};
       return {
         ...c,
+        ...fades,
         bed: { ...c.bed, ...(line.bed?.measured !== undefined ? { measured: line.bed.measured } : {}) },
         ...(gain ? { gain, original: { start: c.start, in: c.in, out: c.out, gain } } : {}),
       };
@@ -278,8 +299,10 @@ export function editSoundLevel(c: EditClip, t: number): number {
   const local = t - c.start;
   const len = editClipLength(c);
   let level = c.volume * gainAt(c.gain ?? [], c.in + local * (c.speed || 1));
-  if (c.bed) {
-    level *= musicPreviewLevel(c.bed.loudness, c.bed.measured) * musicFadeAt(local, len);
+  if (c.bed) level *= musicPreviewLevel(c.bed.loudness, c.bed.measured);
+  if (c.bed && !c.gain) {
+    // Music from an edit made before volume lines: export fades it the film's way.
+    level *= musicFadeAt(local, len);
   } else {
     if (c.fadeIn > 0) level *= Math.max(0, Math.min(1, local / c.fadeIn));
     if (c.fadeOut > 0) level *= Math.max(0, Math.min(1, (len - local) / c.fadeOut));
@@ -481,7 +504,9 @@ const isText = (v: unknown, max: number, min = 0): v is string => typeof v === '
 export function validateEditLook(look: unknown): string | null {
   const l = look as Partial<EditLook> | undefined;
   if (!l || typeof l !== 'object') return 'The edit has no frame or look for its layers.';
-  const size = (n: unknown): boolean => Number.isInteger(n) && (n as number) >= 16 && (n as number) <= 4096;
+  // A film is at most 1080p, so no side is longer than 1920; 2160 leaves room and no more.
+  // Anything larger is not a film, only a way to make the server draw something huge.
+  const size = (n: unknown): boolean => Number.isInteger(n) && (n as number) >= 16 && (n as number) <= EDIT_MAX_FRAME;
   if (!size(l.width) || !size(l.height)) return 'The edit has an impossible frame size.';
   const colours = l.colours as unknown as Record<string, unknown> | undefined;
   if (!colours || LAYER_COLOUR_KEYS.some((k) => !/^#[0-9a-f]{3,8}$/i.test(String(colours[k])))) return 'The edit has a look that cannot be read.';
@@ -507,10 +532,11 @@ export function validateEditLayer(layer: unknown): string | null {
     return typeof x.whiteOnEndCard === 'boolean' ? null : 'A logo layer is malformed.';
   }
   if (x.kind === 'endcard') {
+    // As many lines as a project's end card can hold: composeFinal draws every one it is given.
     const lines = x.lines as unknown[];
-    return Array.isArray(lines) && lines.length <= 6 && lines.every((l) => isText(l, 160))
+    return Array.isArray(lines) && lines.length <= 16 && lines.every((l) => isText(l, 300))
       ? null
-      : 'An end card takes up to six lines of up to 160 characters.';
+      : 'An end card takes up to 16 lines of up to 300 characters.';
   }
   return 'A layer is of a kind this editor does not know.';
 }

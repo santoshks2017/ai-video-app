@@ -4,7 +4,19 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { autoMusicGain, dbAt, editProjectFromLayers, gainAt, updateEditClip, type EditSource, type FilmLayers, type GainPoint, type SpeechSpan } from '@ava/shared';
+import {
+  autoMusicGain,
+  dbAt,
+  editProjectFromLayers,
+  gainAt,
+  splitEditClip,
+  trimEditClip,
+  updateEditClip,
+  type EditSource,
+  type FilmLayers,
+  type GainPoint,
+  type SpeechSpan,
+} from '@ava/shared';
 import { composeClean, composeFinal, filmSpeech, gainVolume, measureLoudness, type BrandOverlay, type ComposedLayers } from '../dist/post.js';
 import { renderEditProject } from '../dist/editRender.js';
 import { FIXTURE_COLOURS, fixtureBed, fixtureSegments, hasFfmpeg } from './testlib.ts';
@@ -27,10 +39,11 @@ function voicedSegments(): Buffer[] {
   });
 }
 
-/** Music a voice never touches: a 3 kHz tone, so its level can be read under the speech. */
-function toneBed(seconds: number): Buffer {
+/** Music a voice never touches: a 3 kHz tone, so its level can be read under the speech. With `until`, silent after it. */
+function toneBed(seconds: number, until?: number): Buffer {
   const out = join(scratch(), 'bed.m4a');
-  ff(['-f', 'lavfi', '-i', `sine=frequency=3000:sample_rate=44100:duration=${seconds}`, '-c:a', 'aac', out]);
+  const gate = until === undefined ? [] : ['-af', `volume='if(lt(t,${until}),1,0)':eval=frame`];
+  ff(['-f', 'lavfi', '-i', `sine=frequency=3000:sample_rate=44100:duration=${seconds}`, ...gate, '-c:a', 'aac', out]);
   return readFileSync(out);
 }
 
@@ -51,13 +64,13 @@ const levelAt = (levels: number[], t: number): number => {
   return around.reduce((a, v) => a + v, 0) / around.length;
 };
 
-async function voicedFilm() {
+async function voicedFilm(bed = toneBed(20)) {
   const segments = voicedSegments();
   const overlay: BrandOverlay = {
     theme: FIXTURE_COLOURS,
     endCard: { lines: ['Garve Renault', 'Book your test drive today'], seconds: 3 },
     targetShortSide: 720,
-    musicBed: toneBed(20),
+    musicBed: bed,
     musicLoudness: -20,
     musicDuckDb: -12,
   };
@@ -156,4 +169,19 @@ test("a track's own loudness is measured", { skip: !hasFfmpeg }, async () => {
   const lufs = await measureLoudness(fixtureBed(6));
   assert.ok(lufs !== null && lufs > -24 && lufs < -19, `a -21 dBFS tone measured ${lufs} LUFS`);
   assert.equal(await measureLoudness(Buffer.from('not a sound')), null);
+});
+
+test('music split in two plays on without a seam, and music started later in its track plays from there', { skip: !hasFfmpeg }, async () => {
+  // The track is a tone for its first 6 s and silent after, so where it is played from can be heard.
+  const { project, load, speech } = await voicedFilm(toneBed(20, 6));
+  const pause = (speech[0]!.to + 0.8 + speech[1]!.from - 0.3) / 2;
+  const whole = bandLevels((await renderEditProject(project, load)).bytes, 3000);
+  const split = bandLevels((await renderEditProject(splitEditClip(project, 'music', pause).project, load)).bytes, 3000);
+  for (let t = pause - 0.5; t <= pause + 0.5; t += 0.1) {
+    assert.ok(Math.abs(levelAt(whole, t) - levelAt(split, t)) < 1, `at ${t.toFixed(2)}s, across the cut: whole ${levelAt(whole, t).toFixed(1)} dB, split ${levelAt(split, t).toFixed(1)} dB`);
+  }
+  const later = trimEditClip(project, 'music', 'in', 7, { magnet: false });
+  assert.equal(later.clips.find((c) => c.id === 'music')!.in, 7);
+  const trimmed = bandLevels((await renderEditProject(later, load)).bytes, 3000);
+  assert.ok(levelAt(trimmed, 8) < -60, `from 7 s into the track, where it is silent, not from its start: ${levelAt(trimmed, 8).toFixed(1)} dB`);
 });

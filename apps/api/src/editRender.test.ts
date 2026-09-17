@@ -77,3 +77,35 @@ test('a longer end card makes a longer film, and the music fades out at its new 
   const graph = args[args.indexOf('-filter_complex') + 1]!;
   assert.ok(graph.includes(`afade=t=out:st=${(seconds - 1.5).toFixed(3)}:d=1.5`), 'the music fades out over the last second and a half');
 });
+
+test('logos stay in colour on an end card whose look is light', { skip: !hasFfmpeg }, async () => {
+  const { project, load, layers } = await layeredFixture();
+  const light = { ...project, look: { ...project.look!, colours: { ...project.look!.colours, card: '#ffffff', cardText: '#111827', cardMuted: '#4b5563' } } };
+  const { bytes } = await renderEditProject(light, load);
+  const frame = frameAt(bytes, layers.bodySeconds + 1.5);
+  for (const g of layers.logos) {
+    const centre = await colourAt(frame, g.x + Math.round(g.w / 2) - 3, g.y + Math.round(g.h / 2) - 3);
+    assert.ok(distance(centre, [255, 255, 255]) > 100, `the ${g.which} logo is not white on the white card: ${centre}`);
+  }
+});
+
+test('music that stops before the end card is not dipped for it', { skip: !hasFfmpeg }, async () => {
+  const { project, load, layers } = await layeredFixture();
+  const graphOf = async (p: typeof project): Promise<string> => {
+    const trace = join(mkdtempSync(join(tmpdir(), 'ava-trace-')), 'args.json');
+    process.env.AVA_EDIT_TRACE = trace;
+    try {
+      await renderEditProject(p, load);
+    } finally {
+      delete process.env.AVA_EDIT_TRACE;
+    }
+    const args = JSON.parse(readFileSync(trace, 'utf8')) as string[];
+    return args[args.indexOf('-filter_complex') + 1]!;
+  };
+  const total = layers.bodySeconds + layers.endCard!.seconds;
+  // This fixture keeps no speech, so its music is dipped by ear at export, the way edits made before volume lines are.
+  assert.ok((await graphOf(project)).includes(`(${(total + 0.8).toFixed(3)}-t)`), 'music that plays over the end card stays down across it');
+  const len = layers.bodySeconds - 1;
+  const short = updateEditClip(project, 'music', { out: len });
+  assert.ok(!(await graphOf(short)).includes(`(${(len + 0.8).toFixed(3)}-t)`), 'music that ends before the card has no dip for it');
+});

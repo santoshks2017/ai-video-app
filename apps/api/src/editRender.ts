@@ -26,6 +26,9 @@ import {
   editClipEnd,
   editClipLength,
   editFilterFfmpeg,
+  isLightColour,
+  MUSIC_FADE_IN,
+  MUSIC_FADE_OUT,
   type EditClip,
   type EditLayer,
   type EditProject,
@@ -361,8 +364,11 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
       const layer = c.layer as Extract<EditLayer, { kind: 'logo' }>;
       const x = Math.round(c.place!.x * W);
       const y = Math.round(c.place!.y * H);
+      // White on a dark end card only, as composeFinal draws it: a look with a light card keeps the colour logo.
       const switchAt =
-        layer.whiteOnEndCard && layer.whitePath && endCardStart !== undefined && endCardStart < E ? Math.max(S, endCardStart) : undefined;
+        layer.whiteOnEndCard && layer.whitePath && !isLightColour(p.look!.colours.card) && endCardStart !== undefined && endCardStart < E
+          ? Math.max(S, endCardStart)
+          : undefined;
       const colourEnd = switchAt ?? E;
       if (colourEnd - S > 0.001) lay(await logoInput(layer.colourPath, c.place!.scale), x, y, `:enable='gte(t,${n3(S)})*lt(t,${n3(colourEnd)})'`);
       if (switchAt !== undefined) lay(await logoInput(layer.whitePath!, c.place!.scale), x, y, `:enable='gte(t,${n3(switchAt)})*lt(t,${n3(E)})'`);
@@ -421,17 +427,25 @@ export async function renderEditProject(p: EditProject, load: LoadSource): Promi
         if (c.gain) {
           volume = c.gain.length ? gainVolume(c.gain, c.in) : undefined;
         } else {
-          // An edit saved before volume lines: dipped under the voice by ear, as it was then.
+          // An edit saved before volume lines: dipped under the voice by ear, as it was then —
+          // across the end card from where the card starts on this clip, if it plays that long.
           const duck = Math.min(0, c.bed.duckDb);
           let spans =
             duck < 0
               ? (await speechSpans([joined], [total])).map(([a, b]): [number, number] => [a - c.start, b - c.start]).filter(([, b]) => b > 0)
               : [];
-          if (spans.length && endCardStart !== undefined) spans = withEndCardDuck(spans, len, total - endCardStart);
+          const cardAt = endCardStart === undefined ? undefined : endCardStart - c.start;
+          if (spans.length && cardAt !== undefined && cardAt < len) spans = withEndCardDuck(spans, len, len - Math.max(0, cardAt));
           volume = spans.length ? duckVolume(spans, duck) : undefined;
         }
+        // Every clip cut from this track is levelled over the same stretch of it.
+        const track = c.source?.storagePath ?? c.source?.url;
+        const reach = Math.max(
+          ...sounds.filter((o) => o.bed && (o.source?.storagePath ?? o.source?.url) === track).map((o) => o.in + Math.min(editClipLength(o), total - o.start)),
+        );
+        const fades = c.gain ? { fadeIn: c.fadeIn, fadeOut: c.fadeOut } : { fadeIn: MUSIC_FADE_IN, fadeOut: MUSIC_FADE_OUT };
         g.push(
-          ...musicBedGraph(input, await mediaSeconds(src), len, open, volume, c.in).map((s) =>
+          ...musicBedGraph(input, await mediaSeconds(src), len, open, volume, { from: c.in, reach, ...fades }).map((s) =>
             s.replace(/\[(bs\d+|bx\d+|bedraw|bed)\]/g, `[$1_${j}]`),
           ),
         );

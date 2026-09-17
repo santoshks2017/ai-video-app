@@ -138,6 +138,7 @@ import {
   CATEGORIES,
   editProjectFromLayers,
   editSetEndCardSeconds,
+  validateEditLayer,
   autoMusicGain,
   gainAt,
   dbAt,
@@ -1989,6 +1990,9 @@ test('a layered edit is checked before any work', () => {
     /no image/,
   );
   assert.match(String(validateEditProject({ ...p, version: 3 })), /different version/);
+  assert.match(String(validateEditProject({ ...p, look: { ...p.look!, width: 4096, height: 4096 } })), /impossible frame size/, 'no frame larger than a film');
+  const sevenLines = { kind: 'endcard' as const, lines: ['Garve Renault', 'Book your test drive today', 'Plot 12, MIDC', 'Bhosari', 'Pune 411026', '97643 79764', 'garverenault.com'] };
+  assert.equal(validateEditLayer(sevenLines), null, 'an end card with every line the project gave it');
 });
 
 test('a dragged layer catches on the centre line and the safe margin', () => {
@@ -2092,6 +2096,7 @@ test("the film's music opens with its dips as key points, and a volume line is c
   assert.deepEqual(music.gain, autoMusicGain(speech, -12, 8.6, true));
   assert.deepEqual(music.original?.gain, music.gain, 'Back to automatic has something to go back to');
   assert.deepEqual(music.bed, { loudness: -20, duckDb: -12, measured: -14 });
+  assert.deepEqual([music.fadeIn, music.fadeOut], [0.8, 1.5], 'fading in and out as the film did, on sliders that work');
   assert.equal(validateEditProject(p), null);
   assert.equal(layered().clips.find((c) => c.id === 'music')!.gain, undefined, 'no line when the film dipped its music but never kept where its voice is');
   const level = editProjectFromLayers({
@@ -2126,7 +2131,7 @@ test('an edit saved before volume lines gets the film’s dips, on the music’s
 
 test('the preview plays a sound at the level export gives it', () => {
   const bed: EditClip = {
-    id: 'm', trackId: 'a1', start: 2, in: 0, out: 10, speed: 1, volume: 1, fadeIn: 0, fadeOut: 0,
+    id: 'm', trackId: 'a1', start: 2, in: 0, out: 10, speed: 1, volume: 1, fadeIn: 0.8, fadeOut: 1.5,
     source: { type: 'audio', label: 'Music', url: '', duration: 10 },
     bed: { loudness: -20, duckDb: -12, measured: -14 },
     gain: [{ t: 4, db: 0 }, { t: 5, db: -12 }],
@@ -2136,6 +2141,10 @@ test('the preview plays a sound at the level export gives it', () => {
   assert.ok(Math.abs(editSoundLevel(bed, 2 + 6) - levelled * Math.pow(10, -12 / 20)) < 1e-9, 'and down 12 dB after it');
   assert.ok(Math.abs(editSoundLevel(bed, 2 + 0.4) - levelled * 0.5) < 1e-9, 'fading in over its first 0.8 s');
   assert.ok(Math.abs(editSoundLevel(bed, 2 + 9.25) - levelled * Math.pow(10, -12 / 20) * 0.5) < 1e-9, 'and out over its last 1.5 s');
+  const longer: EditClip = { ...bed, fadeIn: 2 };
+  assert.ok(Math.abs(editSoundLevel(longer, 2 + 1) - levelled * 0.5) < 1e-9, "the film's music fades as its own sliders say");
+  const legacy: EditClip = { ...bed, gain: undefined, fadeIn: 0, fadeOut: 0 };
+  assert.ok(Math.abs(editSoundLevel(legacy, 2 + 0.4) - levelled * 0.5) < 1e-9, 'music from an edit made before lines fades the way export fades it');
   const sound: EditClip = { ...bed, bed: undefined, gain: undefined, volume: 0.5, fadeIn: 1, fadeOut: 0 };
   assert.ok(Math.abs(editSoundLevel(sound, 2.5) - 0.25) < 1e-9, "any other sound: its volume and its own fades");
 });

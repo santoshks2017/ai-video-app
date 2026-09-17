@@ -1607,7 +1607,7 @@ async function composeCore(
  * The music bed's filters. Never looped — music restarting mid-film is the most audible
  * glitch there is — so a short track is joined to copies of itself with a slow crossfade;
  * then levelled, faded in and out, and given its `volume` over time: the film's dips, or
- * an edit's volume line. `from` is how far into the track an edit's music clip begins.
+ * an edit's volume line. An edit's music clip says where in the track it plays (`clip`).
  *
  * Small frames go before the dip: volume is worked out once per frame, and loudnorm hands
  * back its last seconds as one large frame, which held the music down over the end card.
@@ -1618,11 +1618,11 @@ export function musicBedGraph(
   filmSeconds: number,
   open: number,
   volume?: string,
-  from = 0,
+  clip?: MusicBedClip,
 ): string[] {
   const out: string[] = [];
   const XF = 2;
-  const reach = from + filmSeconds;
+  const reach = clip?.reach ?? filmSeconds;
   const copies = bedSeconds > XF * 2 && bedSeconds < reach ? Math.min(6, Math.ceil((reach - XF) / (bedSeconds - XF))) : 1;
   const norm = 'aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo';
   if (copies > 1) {
@@ -1636,13 +1636,42 @@ export function musicBedGraph(
   } else {
     out.push(`[${input}:a]${norm}[bedraw]`);
   }
+  const levelled = `[bedraw]atrim=end=${reach.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${open}:TP=-2:LRA=11,${norm}`;
+  const line = volume ? `,asetnsamples=n=1024:p=0,volume='${volume}':eval=frame` : '';
+  if (!clip) {
+    out.push(
+      `${levelled},` +
+        `afade=t=in:st=0:d=${MUSIC_FADE_IN},afade=t=out:st=${Math.max(0, filmSeconds - MUSIC_FADE_OUT).toFixed(3)}:d=${MUSIC_FADE_OUT}` +
+        line +
+        '[bed]',
+    );
+    return out;
+  }
+  // Levelled over the whole stretch of the track the edit uses and only then cut, so two
+  // halves of a split clip are cut from one levelled track and meet without a seam.
+  const fades = [
+    clip.fadeIn > 0 ? `afade=t=in:st=0:d=${+clip.fadeIn.toFixed(3)}` : '',
+    clip.fadeOut > 0 ? `afade=t=out:st=${Math.max(0, filmSeconds - clip.fadeOut).toFixed(3)}:d=${+clip.fadeOut.toFixed(3)}` : '',
+  ].filter(Boolean);
   out.push(
-    `[bedraw]atrim=${from > 0 ? `start=${from.toFixed(3)}:` : ''}end=${reach.toFixed(3)},asetpts=N/SR/TB,loudnorm=I=${open}:TP=-2:LRA=11,${norm},` +
-      `afade=t=in:st=0:d=${MUSIC_FADE_IN},afade=t=out:st=${Math.max(0, filmSeconds - MUSIC_FADE_OUT).toFixed(3)}:d=${MUSIC_FADE_OUT}` +
-      (volume ? `,asetnsamples=n=1024:p=0,volume='${volume}':eval=frame` : '') +
+    `${levelled},atrim=start=${clip.from.toFixed(3)}:end=${(clip.from + filmSeconds).toFixed(3)},asetpts=N/SR/TB` +
+      fades.map((f) => `,${f}`).join('') +
+      line +
       '[bed]',
   );
   return out;
+}
+
+/**
+ * Where an edit's music clip sits in its track: it starts `from` seconds in, the track is
+ * levelled up to `reach` (the furthest any clip of that track plays), and it fades as the
+ * clip says.
+ */
+export interface MusicBedClip {
+  from: number;
+  reach: number;
+  fadeIn: number;
+  fadeOut: number;
 }
 
 /**

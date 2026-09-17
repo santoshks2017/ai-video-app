@@ -25,7 +25,8 @@ export type UsageSection =
   | 'Vehicle sync'
   | 'Vehicle photo filing'
   | 'Vehicle checks'
-  | 'Music';
+  | 'Music'
+  | 'Caption placement';
 
 /** Log one call. `fixedUsd` is for what is priced per item rather than per token — a song. */
 export function recordUsage(section: UsageSection, model: string, usage: TokenUsage | undefined, fixedUsd?: number): void {

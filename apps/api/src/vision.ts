@@ -12,7 +12,8 @@
  * So every photo is looked at, and what it shows is what it is filed under.
  */
 
-import type { TokenUsage } from '@ava/shared';
+import type { TokenUsage, PeopleInShot } from '@ava/shared';
+import { boxesFrom1000 } from '@ava/shared';
 import { recordUsage } from './spendLog.js';
 import type { CarAngle } from '@ava/shared';
 import { resolveTextModel } from './script.js';
@@ -33,6 +34,61 @@ export interface SeenPhoto {
  * the vehicle claimed. Up to 16 at a time; anything the model cannot answer for
  * comes back as `other`, which the caller is free to fall back on.
  */
+/**
+ * Where the people are in a stretch of film, so an Auto caption can be kept off them.
+ *
+ * Two frames from while the caption is up, marked in one call. Null when there is no
+ * answer — a refusal, a timeout, nothing parseable — so the caller keeps the placement
+ * it always had rather than guessing.
+ */
+export async function findPeople(frames: Buffer[], apiKey: string): Promise<PeopleInShot | null> {
+  const batch = frames.slice(0, 3);
+  if (!apiKey || !batch.length) return null;
+  const instruction = [
+    `These ${batch.length} frames are from one shot of a car commercial.`,
+    'Mark every person visible in any of them, however small, turned away or partly out of frame.',
+    '',
+    'faces — one box per head: the face together with the hair.',
+    'people — one box per person: the whole visible body, head included.',
+    '',
+    'A box is [ymin, xmin, ymax, xmax], whole numbers from 0 to 1000 measured on the frame.',
+    'Mark a person in every frame they appear in. If there is nobody, return empty lists.',
+    '',
+    'Return JSON only: {"faces": [[ymin, xmin, ymax, xmax], ...], "people": [[ymin, xmin, ymax, xmax], ...]}. No commentary.',
+  ].join('\n');
+  try {
+    const model = await resolveTextModel(apiKey, 'transform');
+    const res = await fetch(`${GEMINI}/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      signal: AbortSignal.timeout(25_000),
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: instruction },
+              ...batch.map((b) => ({ inline_data: { mime_type: 'image/jpeg', data: b.toString('base64') } })),
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+      }),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      usageMetadata?: TokenUsage;
+    };
+    recordUsage('Caption placement', model, body.usageMetadata);
+    const text = body.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+    const json = JSON.parse(text) as { faces?: unknown; people?: unknown };
+    return { faces: boxesFrom1000(json.faces), bodies: boxesFrom1000(json.people) };
+  } catch {
+    return null;
+  }
+}
+
 export async function seePhotos(
   photos: { bytes: Buffer; mimeType?: string }[],
   subject: string,

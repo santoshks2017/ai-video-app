@@ -135,7 +135,7 @@ import {
   type DealerView,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title, syncColours } from './carSync.js';
-import { seePhotos, seeDealerPhotos } from './vision.js';
+import { seePhotos, seeDealerPhotos, findPeople } from './vision.js';
 import {
   drawSceneFrame,
   sceneImageContext,
@@ -825,6 +825,12 @@ async function googleKey(): Promise<string | undefined> {
   return google && google.usesEnvKey === false ? await getCredentialKey(google.id) : config.googleApiKey;
 }
 const scriptKey = googleKey;
+
+/** Finds the people in a caption's stretch of film, when there is a Google key to ask with. */
+async function peopleFinder(): Promise<((frames: Buffer[]) => ReturnType<typeof findPeople>) | undefined> {
+  const key = await googleKey().catch(() => undefined);
+  return key ? (frames) => findPeople(frames, key) : undefined;
+}
 
 /**
  * Read the brief and propose the project: which use cases, what goes in their fields,
@@ -2312,6 +2318,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
     const bed = await musicBed;
     const finalBytes = await composeFinal(segmentBytes, {
       ...buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes),
+      findPeople: await peopleFinder(),
       onJoins: (n) => {
         joins = n;
       },
@@ -2709,7 +2716,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       const bed = await musicBed;
       const finalBytes = await composeFinal(
         segmentBytes,
-        buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes),
+        { ...buildOverlay(brief, req.body?.sceneOverrides, dealerLogo, brandLogo, bed?.bytes), findPeople: await peopleFinder() },
       );
       const finalStoragePath = await uploadClip(jobId, 0, finalBytes, 'video/mp4'); // part 0 = final
 

@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { cleanLogo } from './logos.js';
+import { chooseCaptionSpot, type CaptionSpotCandidate, type PeopleInShot } from '@ava/shared';
 
 export interface EndCardSpec {
   /** Dealer name first, then CTA, then contact lines. */
@@ -84,6 +85,11 @@ export interface BrandOverlay {
   musicDuckDb?: number;
   /** Plays the finished parts faster or slower — the storyboard's pace. 1 leaves them as generated. */
   speed?: number;
+  /**
+   * Where the people are in a stretch of the film, asked of a vision model, so an Auto
+   * caption never lands on a face. Unset, or answering null, leaves placement as it was.
+   */
+  findPeople?: (frames: Buffer[]) => Promise<PeopleInShot | null>;
   accent?: string;
   ink?: string;
   /** The colours of the captions, the footer strip and the end card. Unset: Midnight, from `accent` and `ink`. */
@@ -1011,9 +1017,13 @@ function spotXY(
  * Six small grey frames are taken from the stretch of the shot the caption is up for,
  * and every place it could go is scored by how much moves inside it from frame to
  * frame and how much detail it covers. Movement counts double: a caption over a
- * plain wall hides nothing, one over the presenter's face or the car driving through
- * hides the shot. A place has to be clearly quieter to win over the one before it in
- * CARD_SPOTS, so a shot with nothing going on keeps its caption bottom-left.
+ * plain wall hides nothing, one over the car driving through hides the shot. A place
+ * has to be clearly quieter to win over the one before it in CARD_SPOTS, so a shot with
+ * nothing going on keeps its caption bottom-left.
+ *
+ * Movement alone cannot find a face: a presenter talking to camera barely moves, and
+ * scored as the calmest place in the shot. So where the people are is passed in, and
+ * chooseCaptionSpot keeps the caption off every face and, where it can, every body.
  */
 async function quietestSpot(
   file: string,
@@ -1028,6 +1038,7 @@ async function quietestSpot(
   margin: number,
   footerH: number,
   logoBand: number,
+  people: PeopleInShot | null = null,
 ): Promise<CardSpot> {
   const gw = 96;
   const gh = Math.max(2, Math.round((gw * H) / W));
@@ -1042,9 +1053,19 @@ async function quietestSpot(
     .catch(() => false);
   const buf = ok ? await readFile(raw).catch(() => null) : null;
   const frames = buf ? Math.floor(buf.length / (gw * gh)) : 0;
-  if (!buf || !frames) return CARD_SPOTS[0];
-  let best: CardSpot = CARD_SPOTS[0];
-  let bestScore = Number.POSITIVE_INFINITY;
+  const rectAt = (x: number, y: number) => ({ x0: x / W, y0: y / H, x1: (x + w) / W, y1: (y + h) / H });
+  const settle = (candidates: CaptionSpotCandidate[]): CardSpot => {
+    const chosen = chooseCaptionSpot(candidates, people);
+    return isCardSpot(chosen) ? chosen : CARD_SPOTS[0];
+  };
+  if (!buf || !frames) {
+    // No picture to score, but the people may still be known.
+    return settle(CARD_SPOTS.map((spot) => {
+      const { x, y } = spotXY(spot, W, H, w, h, margin, footerH, logoBand);
+      return { spot, score: 0, rect: rectAt(x, y) };
+    }));
+  }
+  const candidates: CaptionSpotCandidate[] = [];
   for (const spot of CARD_SPOTS) {
     const { x, y } = spotXY(spot, W, H, w, h, margin, footerH, logoBand);
     const x0 = Math.max(0, Math.floor((x / W) * gw));
@@ -1067,13 +1088,27 @@ async function quietestSpot(
       }
     }
     if (!cells) continue;
-    const score = (detail + 2 * motion * (frames / Math.max(1, frames - 1))) / cells;
-    if (score < bestScore * 0.85) {
-      best = spot;
-      bestScore = score;
-    }
+    candidates.push({ spot, score: (detail + 2 * motion * (frames / Math.max(1, frames - 1))) / cells, rect: rectAt(x, y) });
   }
-  return best;
+  return settle(candidates);
+}
+
+/** Two small colour frames from while a caption is up, to find the people in. */
+async function peopleFrames(file: string, localFrom: number, seconds: number, dir: string, n: number): Promise<Buffer[]> {
+  const span = Math.max(0.4, seconds);
+  const out: Buffer[] = [];
+  for (const [k, at] of [0.3, 0.75].entries()) {
+    const f = join(dir, `people-${n}-${k}.jpg`);
+    const ok = await run('ffmpeg', [
+      '-v', 'error', '-y', '-ss', (Math.max(0, localFrom) + span * at).toFixed(3), '-i', file,
+      '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '4', f,
+    ])
+      .then(() => true)
+      .catch(() => false);
+    const bytes = ok ? await readFile(f).catch(() => null) : null;
+    if (bytes?.length) out.push(bytes);
+  }
+  return out;
 }
 
 /**
@@ -1357,11 +1392,12 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
     const CARD_FADE = 0.28;
 
     const headSize = await captionSize((overlay.cards ?? []).map((c) => c.text ?? ''), W, H);
-    let cardNo = 0;
-    for (const card of (overlay.cards ?? []).slice(0, 16)) {
+    // Where each caption sits in the cut is worked out before any is drawn, so the people
+    // in every Auto caption's stretch are looked for at once rather than one after another.
+    const windows = (overlay.cards ?? []).slice(0, 16).map((card) => {
       const text = card.text?.trim();
       const ci = card.part - 1;
-      if (!text || ci < 0 || ci >= bodyClips) continue;
+      if (!text || ci < 0 || ci >= bodyClips) return null;
       // A segment that came back shorter than it was asked for pulls its own
       // captions in with it, rather than leaving them stranded past the cut.
       // The part may have had its silence trimmed at both ends, so a card's place
@@ -1371,17 +1407,36 @@ export async function composeFinal(segments: Buffer[], overlay: BrandOverlay = {
       const k = card.partSeconds > 0 ? metas[ci]!.duration / planned : 1;
       const from = clipStart[ci]! + Math.max(0, card.start - head) * k;
       const to = Math.min(bodyEnd, clipStart[ci]! + Math.max(0, card.end - head) * k);
-      if (to - from < 0.8) continue; // too brief to read
+      if (to - from < 0.8) return null; // too brief to read
+      return { card, text, ci, from, to };
+    });
+    const peopleIn = windows.map((win, n) =>
+      win && !isCardSpot(win.card.position) && overlay.findPeople
+        ? peopleFrames(files[win.ci]!, (win.from - clipStart[win.ci]!) * speed, (win.to - win.from) * speed, dir, n)
+            .then((frames) => (frames.length ? overlay.findPeople!(frames) : null))
+            .catch(() => null)
+        : Promise.resolve(null),
+    );
+
+    let cardNo = 0;
+    for (const [n, win] of windows.entries()) {
+      if (!win) continue;
+      const { card, text, ci, from, to } = win;
 
       const png = await cardPng(text, card.sub, W, H, colours, headSize);
       const cardMeta = await sharp(png).metadata();
       const cardH = cardMeta.height ?? 0;
       const cardW = cardMeta.width ?? 0;
       const idx = await addOverlayInput(`card-${cardNo}.png`, png, { from, seconds: to - from });
-      // Where the designer put it — or, left to the render, wherever the shot is quietest while it is up.
+      // Where the designer put it — or, left to the render, the quietest place in the shot
+      // that is clear of every face while the caption is up.
+      const people = isCardSpot(card.position) ? null : await peopleIn[n]!;
       const spot: CardSpot = isCardSpot(card.position)
         ? card.position
-        : await quietestSpot(files[ci]!, (from - clipStart[ci]!) * speed, (to - from) * speed, dir, cardNo, W, H, cardW, cardH, margin, footerH, logoBand);
+        : await quietestSpot(files[ci]!, (from - clipStart[ci]!) * speed, (to - from) * speed, dir, cardNo, W, H, cardW, cardH, margin, footerH, logoBand, people);
+      if (!isCardSpot(card.position)) {
+        console.info(JSON.stringify({ msg: 'caption placed', card: cardNo, spot, looked: Boolean(overlay.findPeople), faces: people?.faces.length ?? null, bodies: people?.bodies.length ?? null }));
+      }
       const { x: cardX, y: top } = spotXY(spot, W, H, cardW, cardH, margin, footerH, logoBand);
       const label = `cd${cardNo}`;
       const outLabel = `vc${cardNo}`;

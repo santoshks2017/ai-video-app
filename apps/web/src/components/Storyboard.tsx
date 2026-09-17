@@ -234,7 +234,7 @@ function CaptionEditor({
             value={ov.cardPos ?? 'auto'}
             onChange={(e) => onChange({ cardPos: e.target.value === 'auto' ? undefined : (e.target.value as CardPosition) })}
           >
-            <option value="auto">Auto — clear of the action</option>
+            <option value="auto">Auto — clear of people and the action</option>
             {CARD_POSITIONS.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.label}

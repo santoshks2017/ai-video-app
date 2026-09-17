@@ -130,6 +130,8 @@ import {
   scriptOf,
   categoriesFor,
   sceneRules,
+  chooseCaptionSpot,
+  boxesFrom1000,
   CATEGORIES,
 } from '@ava/shared';
 
@@ -1866,4 +1868,36 @@ test('a number plate is a plain white plate with nothing on it, in everything a 
     // A scene still is the video's first reference, so it is drawn to the same rule.
     assert.match(sceneRules(b).join('\n'), /NUMBER PLATES ARE PLAIN WHITE AND BLANK/);
   }
+});
+
+test('an Auto caption never lands on a face, however calm the face is', () => {
+  // A presenter talking to camera barely moves, so her face scored as the calmest place
+  // in the shot and a festival greeting was drawn across it.
+  const at = (x0: number, y0: number, x1: number, y1: number) => ({ x0, y0, x1, y1 });
+  const candidates = [
+    { spot: 'bottom-left', score: 30, rect: at(0.03, 0.62, 0.5, 0.78) },
+    { spot: 'bottom-right', score: 28, rect: at(0.5, 0.62, 0.97, 0.78) },
+    { spot: 'top-left', score: 26, rect: at(0.03, 0.16, 0.5, 0.31) },
+    { spot: 'top-right', score: 4, rect: at(0.48, 0.16, 0.97, 0.31) },
+  ];
+  assert.equal(chooseCaptionSpot(candidates, null), 'top-right', 'knowing nothing of people, placement is what it always was');
+
+  const presenter = { faces: [at(0.44, 0.2, 0.58, 0.42)], bodies: [at(0.36, 0.2, 0.66, 1)] };
+  const chosen = chooseCaptionSpot(candidates, presenter);
+  assert.notEqual(chosen, 'top-right', 'the calmest place is her face');
+  assert.notEqual(chosen, 'top-left', 'nor the place that comes within a margin of it');
+  assert.equal(chosen, 'bottom-left');
+
+  // Nowhere is clear of a face: the place touching least is taken.
+  assert.equal(chooseCaptionSpot(candidates, { faces: [at(0, 0.1, 1, 0.7)], bodies: [] }), 'bottom-right');
+  // Nobody in the shot: exactly the old rule.
+  assert.equal(chooseCaptionSpot(candidates, { faces: [], bodies: [] }), 'top-right');
+  assert.equal(chooseCaptionSpot([], presenter), undefined);
+});
+
+test('boxes a vision model returns are read as fractions of the frame, and nonsense is dropped', () => {
+  assert.deepEqual(boxesFrom1000([[200, 440, 420, 580]]), [{ x0: 0.44, y0: 0.2, x1: 0.58, y1: 0.42 }]);
+  assert.deepEqual(boxesFrom1000([[0, 0, 0, 0], 'x', [100, 900, 50, 950], [1, 2, 3]]), []);
+  assert.deepEqual(boxesFrom1000([[-50, 100, 1200, 300]]), [{ x0: 0.1, y0: 0, x1: 0.3, y1: 1 }], 'clamped to the frame');
+  assert.deepEqual(boxesFrom1000(undefined), []);
 });

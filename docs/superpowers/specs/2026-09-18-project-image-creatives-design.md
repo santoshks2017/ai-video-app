@@ -136,6 +136,10 @@ the scene, panel at the foot), *Offer* (a large ₹ badge), *Festival greeting* 
 greeting, a light panel), *Feature points*, *Launch*, *Delivery* ("Congratulations {name}").
 Each knows the five sizes: a story stacks what a landscape puts side by side. Logos use the
 client's placement (brand logo left, dealer right unless set otherwise), inside the safe margin.
+On a square, portrait or story, a full dealer panel carries the call to action (on its right)
+and the small print (its last line), so neither lands on the car; over a picture the words keep
+to the upper part (about half a square), and the scene is asked to keep exactly that band calm.
+A wide size keeps the call to action in its left column, clear of the car on the right.
 
 ## The picture, and keeping the car right
 
@@ -144,7 +148,8 @@ client's placement (brand logo left, dealer right unless set otherwise), inside 
   an instruction: put *this* vehicle — same design, colour, badges, wheels — into the scene
   (festive street at dusk for Diwali, showroom floor for an offer, open road for a feature);
   no text, logos or watermarks anywhere; number plates plain white and blank; keep the band
-  where the headline sits and the band where the panel sits calm. One picture per aspect
+  where the headline sits (measured from the laid-out words) and the band where the panel
+  sits calm. One picture per aspect
   ratio the chosen sizes need (1:1, 4:5, 9:16, 16:9; the 1.91:1 size is cut from 16:9).
 - **Check**: each picture goes to the same vehicle check the video uses, beside the reference
   photo. A clear mismatch is made once more; the verdict is shown on the card either way.

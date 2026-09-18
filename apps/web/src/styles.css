@@ -3232,6 +3232,7 @@ fieldset.lock.inline { display: contents; }
 .ip-check-list { margin: 0; padding-left: 16px; font-size: 11px; color: var(--bad); display: grid; gap: 2px; }
 .ip-check-list li { overflow-wrap: anywhere; }
 .ip-ask { display: flex; gap: 6px; margin-top: 8px; }
+.ip-blocked { color: var(--warn); font-weight: 500; }
 .ip-ask input { flex: 1; min-width: 0; font-size: 12px; }
 .ip-check.ok { color: var(--good); }
 .ip-check.bad { color: var(--bad); font-weight: 600; }

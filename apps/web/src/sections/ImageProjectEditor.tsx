@@ -388,10 +388,23 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     return shown ? wordsBand(shown.doc) : undefined;
   };
 
+  /**
+   * What the model calls the vehicle: the library's name for it, or — for a photo attached
+   * without one — the vehicle in that photograph, by the client's make where it is known.
+   */
+  const vehicleName = car ? `${car.brand} ${car.model}` : `${client?.brand ? `${client.brand} ` : ''}vehicle in the photograph`;
+  const vehicleKind: 'car' | 'bike' = (car?.kind ?? client?.vehicleKind) === 'bike' ? 'bike' : 'car';
+
   /** The vehicle's photographs for the model: the chosen one first, then its other sides. */
   const carRefList = (): Array<{ storagePath: string; label: string }> => {
-    if (!car || !p.heroPhoto) return [];
+    if (!p.heroPhoto) return [];
     const hero = p.heroPhoto;
+    if (!car) {
+      // Attached photos only: the chosen one, then the others attached with it.
+      return [hero, ...(p.attachedPhotos ?? []).filter((x) => x.storagePath !== hero.storagePath)]
+        .slice(0, 4)
+        .map((x, i) => ({ storagePath: x.storagePath, label: i === 0 ? `the ${vehicleName}` : `the ${vehicleName}, another photograph` }));
+    }
     const others = photos.filter((x) => x.photo.storagePath !== hero.storagePath);
     return [
       { storagePath: hero.storagePath, label: `the ${car.brand} ${car.model}${hero.angle ? `, ${hero.angle}` : ''}` },
@@ -414,7 +427,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       ...(p.engine?.secondary ? { secondary: p.engine.secondary } : {}),
       ...(p.templateId ? { template: p.templateId } : {}),
       ...(occasion ? { occasion } : {}),
-      vehicle: { name: car ? `${car.brand} ${car.model}` : '', ...(p.carColour ? { colour: p.carColour } : {}), kind: car?.kind === 'bike' ? 'bike' : 'car' },
+      vehicle: { name: vehicleName, ...(p.carColour ? { colour: p.carColour } : {}), kind: vehicleKind },
       ...(p.sceneNote?.trim() ? { note: p.sceneNote.trim() } : {}),
       words: designWordsOf(copy, panelCarries(input).cta, format),
       language: { name: language.name, script: language.script },
@@ -462,7 +475,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
    * whole; a strip wider than it draws gets its picture, one for all the strips of a shape.
    */
   const makeDesigns = async (only?: CreativeFormatId[]): Promise<void> => {
-    if (!car || !p.heroPhoto) return setError('Pick the vehicle and the photo to build on first.');
+    if (!p.heroPhoto) return setError('Pick the vehicle and its photo, or attach a photo of it, first.');
     const formats = only ?? p.formats;
     if (!formats.length) return;
     setBusy('design');
@@ -491,7 +504,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
             aspect,
             engine: engineId,
             ...(occasion ? { occasion } : {}),
-            vehicle: { name: `${car.brand} ${car.model}`, colour: p.carColour, kind: car.kind === 'bike' ? 'bike' : 'car' },
+            vehicle: { name: vehicleName, colour: p.carColour, kind: vehicleKind },
             note: p.sceneNote,
             textBand: ASPECT_TEXT_BAND[aspect],
             panel: false,
@@ -537,7 +550,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
 
   /** Pictures for the sizes' shapes: the ones asked for, or every shape the sizes need. */
   const makePictures = async (only?: PictureAspect[]): Promise<void> => {
-    if (!car || !p.heroPhoto) return setError('Pick the vehicle and the photo to build on first.');
+    if (!p.heroPhoto) return setError('Pick the vehicle and its photo, or attach a photo of it, first.');
     const aspects = only ?? pictureAspectsFor(p.formats);
     if (!aspects.length) return;
     setBusy('scene');
@@ -552,7 +565,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
             aspect,
             engine: engineId,
             occasion,
-            vehicle: { name: `${car.brand} ${car.model}`, colour: p.carColour, kind: car.kind === 'bike' ? 'bike' : 'car' },
+            vehicle: { name: vehicleName, colour: p.carColour, kind: vehicleKind },
             note: p.sceneNote,
             textBand: ASPECT_TEXT_BAND[aspect],
             ...(ASPECT_TEXT_BAND[aspect] === 'top' ? { band: bandFor(aspect) } : {}),
@@ -663,7 +676,18 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const madeFor = (f: CreativeFormatId): boolean => (designsWhole(f) ? Boolean(p.designs?.[f]) : Boolean(p.pictures?.[CREATIVE_FORMAT_BY_ID[f].pictureAspect]));
   const missingDesigns = p.formats.filter((f) => !madeFor(f));
   const designsMade = p.formats.length - missingDesigns.length;
-  const canDesign = canCreate && busy === '' && Boolean(p.heroPhoto) && Boolean(car);
+  /** Why nothing can be made yet, in the words of the step that fixes it — null when it can. */
+  const blockedBy = ((): string | null => {
+    if (!canCreate) return 'Viewer access can look but not make — ask an admin for creator access.';
+    if (busy === 'copy') return 'Writing the copy — a moment.';
+    if (!p.heroPhoto) {
+      if (!car) return 'Pick the vehicle in 01, or attach a photo of it in 02 — the creative is built from a real photo.';
+      return photos.length ? 'Pick the photo to build on in 02.' : `The library has no photos of the ${car.brand} ${car.model} yet — attach one in 02.`;
+    }
+    if (!p.formats.length) return 'Pick at least one size in 03.';
+    return null;
+  })();
+  const canDesign = busy === '' && !blockedBy;
   const fieldsShown = [...engine.fields, ...(second?.fields ?? []).filter((f) => !engine.fields.some((g) => g.id === f.id))];
   const missing = engine.mandatory.filter((id) => !(p.facts[id] ?? '').trim());
 
@@ -739,6 +763,11 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                   </select>
                 </Field>
               </div>
+              {client && !vehicleChoices.length && (
+                <p className="hint ip-blocked">
+                  No {client.brand || 'matching'} vehicles in the library yet — add them under Cars, or attach a photo of the vehicle in 02.
+                </p>
+              )}
               {car && car.colours.length > 0 && (
                 <Field label="Colour">
                   <select value={p.carColour ?? ''} onChange={(e) => set({ carColour: e.target.value || undefined })}>
@@ -836,7 +865,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
 
             <Section num="02" title="The photo" defaultOpen step={p.heroPhoto ? 'Picked' : undefined} need={p.heroPhoto ? undefined : 'Pick one'} note="The picture is built from a real photo of the vehicle, so the car is never an imagined one.">
               {!car && !(p.attachedPhotos ?? []).length ? (
-                <p className="hint">Pick the vehicle above, or attach a photo of it.</p>
+                <p className="hint">Pick the vehicle above, or attach a photo of it — either is enough to make the creatives.</p>
               ) : null}
               <div className="ip-photos">
                 {[...photos.map(({ angle, photo }) => ({ ...photo, angle })), ...(p.attachedPhotos ?? [])].map((ph) => {
@@ -1086,9 +1115,13 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                         {busy === 'design' ? 'Designing…' : missingDesigns.length ? `Make the creative${p.formats.length === 1 ? '' : 's'}` : 'Make them all again'}
                       </button>
                     )}
-                    <span className="hint">
-                      {(missingDesigns.length || p.formats.length)} size{(missingDesigns.length || p.formats.length) === 1 ? '' : 's'} · about ₹9 and half a minute each · made once more when a check fails
-                    </span>
+                    {blockedBy ? (
+                      <span className="hint ip-blocked">{blockedBy}</span>
+                    ) : (
+                      <span className="hint">
+                        {(missingDesigns.length || p.formats.length)} size{(missingDesigns.length || p.formats.length) === 1 ? '' : 's'} · about ₹9 and half a minute each · made once more when a check fails
+                      </span>
+                    )}
                   </div>
                   {!p.copy && <p className="hint">The words are still the draft. Write the copy in 04 first — Nano Banana 2 sets exactly the words it is given.</p>}
                   <div className="ip-scenes">
@@ -1175,21 +1208,25 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                   <div className="ip-actions">
                     {missingPictures.length > 0 && missingPictures.length < aspectsNeeded.length ? (
                       <>
-                        <button type="button" className="btn primary small" disabled={!canCreate || busy !== '' || !p.heroPhoto || !car} onClick={() => void makePictures(missingPictures)}>
+                        <button type="button" className="btn primary small" disabled={!canDesign} onClick={() => void makePictures(missingPictures)}>
                           {busy === 'scene' ? 'Making the pictures…' : `Make the missing ${missingPictures.length === 1 ? 'one' : missingPictures.length}`}
                         </button>
-                        <button type="button" className="btn ghost small" disabled={!canCreate || busy !== '' || !p.heroPhoto || !car} onClick={() => void makePictures()}>
+                        <button type="button" className="btn ghost small" disabled={!canDesign} onClick={() => void makePictures()}>
                           Make them all again
                         </button>
                       </>
                     ) : (
-                      <button type="button" className="btn primary small" disabled={!canCreate || busy !== '' || !p.heroPhoto || !car} onClick={() => void makePictures()}>
+                      <button type="button" className="btn primary small" disabled={!canDesign} onClick={() => void makePictures()}>
                         {busy === 'scene' ? 'Making the pictures…' : missingPictures.length ? `Make the picture${aspectsNeeded.length === 1 ? '' : 's'}` : 'Make them again'}
                       </button>
                     )}
-                    <span className="hint">
-                      {(missingPictures.length || aspectsNeeded.length)} picture{(missingPictures.length || aspectsNeeded.length) === 1 ? '' : 's'} ({(missingPictures.length ? missingPictures : aspectsNeeded).join(', ')}) · about half a minute each
-                    </span>
+                    {blockedBy ? (
+                      <span className="hint ip-blocked">{blockedBy}</span>
+                    ) : (
+                      <span className="hint">
+                        {(missingPictures.length || aspectsNeeded.length)} picture{(missingPictures.length || aspectsNeeded.length) === 1 ? '' : 's'} ({(missingPictures.length ? missingPictures : aspectsNeeded).join(', ')}) · about half a minute each
+                      </span>
+                    )}
                   </div>
                   <div className="ip-scenes">
                     {aspectsNeeded.map((a) => {
@@ -1206,7 +1243,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                             </span>
                           )}
                           {pic && (
-                            <button type="button" className="btn ghost small" disabled={!canCreate || busy !== '' || !p.heroPhoto || !car} onClick={() => void makePictures([a])} title={`Make the ${a} picture again`}>
+                            <button type="button" className="btn ghost small" disabled={!canDesign} onClick={() => void makePictures([a])} title={`Make the ${a} picture again`}>
                               Again
                             </button>
                           )}
@@ -1282,7 +1319,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                         </button>
                       )}
                       {p.pictureMode === 'design' && !madeFor(format) && canCreate && !readOnly && (
-                        <button type="button" className="btn small ghost" disabled={!canDesign} onClick={() => void makeDesigns([format])} title="Nano Banana 2 designs this size">
+                        <button type="button" className="btn small ghost" disabled={!canDesign} onClick={() => void makeDesigns([format])} title={blockedBy ?? 'Nano Banana 2 designs this size'}>
                           {designState[format] === 'working' ? 'Designing…' : 'Design it'}
                         </button>
                       )}

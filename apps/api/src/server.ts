@@ -111,7 +111,8 @@ import {
   PREVIEW_UID,
   type Caller,
 } from './users.js';
-import { listAll, getOne, upsert, patch, patchTotals, remove, type Collection } from './library.js';
+import { listAll, getOne, upsert, patch, patchTotals, remove, addToTotals, type Collection } from './library.js';
+import { CreativeError, drawCreativeScene, writeCreativeCopy, type CopyRequest, type SceneRequest } from './creatives.js';
 import { writeScript, ScriptError, type ScriptScene, type ScriptLanguage } from './script.js';
 import { generateMusicBed } from './lyria.js';
 import {
@@ -566,6 +567,7 @@ const COLLECTIONS: Collection[] = [
   'projects',
   'credentials',
   'models',
+  'imageProjects',
 ];
 
 /**
@@ -588,6 +590,7 @@ function forViewer(name: Collection, doc: Record<string, unknown>): Record<strin
       out.glossary = [];
       return out;
     case 'projects':
+    case 'imageProjects':
       delete out.totalCostInr;
       delete out.campaignRevenueInr;
       return out;
@@ -602,7 +605,7 @@ function forViewer(name: Collection, doc: Record<string, unknown>): Record<strin
 
 /** What a creator is shown: everything a viewer is, and more — but not what a film cost, which is for admins. */
 function forCreator(name: Collection, doc: Record<string, unknown>): Record<string, unknown> | null {
-  if (name !== 'projects') return doc;
+  if (name !== 'projects' && name !== 'imageProjects') return doc;
   const out = { ...doc };
   delete out.totalCostInr;
   return out;
@@ -646,11 +649,11 @@ for (const name of COLLECTIONS) {
         }
       }
     }
-    if (name === 'projects' && existingId) {
+    if ((name === 'projects' || name === 'imageProjects') && existingId) {
       // What a project has cost is a running total the server keeps. The editor saves
       // the whole project, and a copy loaded before the last run finished — or a
       // creator's, who is never sent the total — would write the old figure back over it.
-      const prior = await getOne<Record<string, unknown>>('projects', existingId);
+      const prior = await getOne<Record<string, unknown>>(name, existingId);
       if (prior) body = { ...body, totalCostInr: prior.totalCostInr, generationCount: prior.generationCount };
     }
     return await upsert(name, body);
@@ -4058,6 +4061,86 @@ app.post<{ Params: { id: string }; Body?: { pullBrand?: boolean; cleanOnly?: boo
   if (Object.keys(fields).length) await patch('clients', client.id, { ...fields, updatedAt: Date.now() });
   return { ok: true, notes, pulled };
 });
+
+/* ============================ Project Image ============================ */
+
+/**
+ * The words of a social creative: headline, alternatives, badge, points, call to action,
+ * T&C line, caption and hashtags, written for the engine and kept to the orchestrator's rules.
+ */
+app.post<{ Body: { projectId?: string; request?: CopyRequest } }>('/api/creatives/copy', async (req, reply) => {
+  const key = await googleKey();
+  if (!key) return reply.code(503).send({ code: 'script-no-key', message: 'Add a Google (Gemini) key in APIs & models first.' });
+  const request = req.body?.request;
+  if (!request || typeof request !== 'object' || !request.client?.name) {
+    return reply.code(400).send({ code: 'bad-request', message: 'Pick the client and say what the post is about first.' });
+  }
+  try {
+    const { copy, model, costInr } = await writeCreativeCopy(request, key);
+    const projectId = req.body?.projectId;
+    if (projectId) void addToTotals('imageProjects', projectId, costInr).catch(() => {});
+    return { copy, model };
+  } catch (err) {
+    const e = err as CreativeError;
+    app.log.warn({ code: e.code, message: e.message }, 'creative copy failed');
+    return reply.code(e.status ?? 502).send({ code: e.code ?? 'copy-failed', message: e.message });
+  }
+});
+
+const CREATIVE_ASPECTS = new Set(['1:1', '4:5', '9:16', '16:9']);
+const STORED = /^refs\/[\w-]+\/[^/]+$/;
+/** A photo as a small JPEG, which is what the vehicle check reads. */
+const asJpeg = async (bytes: Buffer): Promise<Buffer> =>
+  sharp(bytes).rotate().resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 86 }).toBuffer();
+
+/**
+ * The picture for a creative at one aspect ratio: the real vehicle, from the library's own
+ * photographs, placed in a scene with room for the words and no writing of its own. Checked
+ * against the first photograph; a clear mismatch is made once more.
+ */
+app.post<{ Body: { projectId?: string; scene?: SceneRequest; photos?: Array<{ storagePath?: string; label?: string }> } }>(
+  '/api/creatives/scene',
+  async (req, reply) => {
+    const key = await googleKey();
+    if (!key) return reply.code(503).send({ code: 'script-no-key', message: 'Add a Google (Gemini) key in APIs & models first.' });
+    const scene = req.body?.scene;
+    if (!scene || !CREATIVE_ASPECTS.has(String(scene.aspect)) || !scene.vehicle?.name) {
+      return reply.code(400).send({ code: 'bad-request', message: 'Pick the vehicle and the sizes first.' });
+    }
+    const picked = (req.body?.photos ?? []).filter((p) => typeof p?.storagePath === 'string' && STORED.test(p.storagePath)).slice(0, 4);
+    const refs: Array<{ bytes: Buffer; mimeType: string; label: string }> = [];
+    for (const [i, p] of picked.entries()) {
+      const o = await readObject(p.storagePath!).catch(() => null);
+      if (!o) continue;
+      const bytes = await asJpeg(o.bytes).catch(() => null);
+      if (bytes) refs.push({ bytes, mimeType: 'image/jpeg', label: p.label?.trim() || (i === 0 ? `the ${scene.vehicle.name}` : `the ${scene.vehicle.name}, another side`) });
+    }
+    if (!refs.length) return reply.code(400).send({ code: 'scene-no-photo', message: 'Pick a photo of the vehicle first — the picture is built from it.' });
+    try {
+      let out = await drawCreativeScene(scene, refs, key);
+      let spent = out.costInr;
+      let check = await checkVehicleFrame(await asJpeg(out.bytes), refs[0]!.bytes, scene.vehicle.name, key);
+      if (check.checked && !check.same) {
+        const again = await drawCreativeScene(scene, refs, key);
+        spent += again.costInr;
+        const second = await checkVehicleFrame(await asJpeg(again.bytes), refs[0]!.bytes, scene.vehicle.name, key);
+        out = again;
+        check = second;
+      }
+      const ext = /jpe?g/i.test(out.mimeType) ? 'jpg' : 'png';
+      const put = await putRef(`creative-scene-${String(scene.aspect).replace(':', 'x')}.${ext}`, out.mimeType, out.bytes);
+      const filename = put.storagePath.split('/').pop()!;
+      const image: StoredImage = { refId: put.refId, storagePath: put.storagePath, url: `/api/refs/${put.refId}/${filename}`, label: `Scene ${scene.aspect}`, filename };
+      const projectId = req.body?.projectId;
+      if (projectId) void addToTotals('imageProjects', projectId, spent).catch(() => {});
+      return { image, check: { same: check.same, checked: check.checked, why: check.why }, model: out.model };
+    } catch (err) {
+      const e = err as CreativeError;
+      app.log.warn({ code: e.code, message: e.message }, 'creative scene failed');
+      return reply.code(e.status && e.status >= 400 ? e.status : 502).send({ code: e.code ?? 'scene-failed', message: e.message });
+    }
+  },
+);
 
 /**
  * Draw the storyboard's frames: one still per scene, from the same photographs

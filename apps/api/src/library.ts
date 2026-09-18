@@ -4,7 +4,7 @@
  * @ava/shared, this just persists it.
  */
 
-import { getFirestore } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { randomUUID } from 'node:crypto';
 import { ensureFirebase } from './store.js';
 
@@ -16,7 +16,8 @@ export type Collection =
   | 'languages'
   | 'projects'
   | 'credentials'
-  | 'models';
+  | 'models'
+  | 'imageProjects';
 
 interface Timestamped {
   id: string;
@@ -70,6 +71,14 @@ export async function patch<T>(name: Collection, id: string, fields: Partial<T>)
  */
 export async function patchTotals<T>(name: Collection, id: string, fields: Partial<T>): Promise<void> {
   await col(name).doc(id).set(stripUndefined(fields), { merge: true });
+}
+
+/** Money spent on a record, added where it is kept — two calls finishing together both count. */
+export async function addToTotals(name: Collection, id: string, inr: number, calls = 1): Promise<void> {
+  if (!id || !(inr > 0)) return;
+  await col(name)
+    .doc(id)
+    .set({ totalCostInr: FieldValue.increment(Math.round(inr * 100) / 100), generationCount: FieldValue.increment(calls) }, { merge: true });
 }
 
 export async function remove(name: Collection, id: string): Promise<void> {

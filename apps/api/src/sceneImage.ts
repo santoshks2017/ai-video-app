@@ -187,7 +187,7 @@ export async function requestImage(
   imageConfigs: Record<string, unknown>[],
   temperature = 0.4,
   section: UsageSection = 'Storyboard drawings',
-): Promise<{ bytes: Buffer; mimeType: string; model: string }> {
+): Promise<{ bytes: Buffer; mimeType: string; model: string; usage?: TokenUsage }> {
   const configs: Record<string, unknown>[] = [
     ...imageConfigs.map((imageConfig) => ({ temperature, responseModalities: ['IMAGE'], imageConfig })),
     { temperature, responseModalities: ['IMAGE'] },
@@ -230,6 +230,7 @@ export async function requestImage(
       bytes: Buffer.from(data, 'base64'),
       mimeType: part.inlineData?.mimeType ?? part.inline_data?.mime_type ?? 'image/png',
       model,
+      usage: json.usageMetadata,
     };
   }
   throw new SceneImageError(

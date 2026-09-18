@@ -16,13 +16,15 @@ export function Tabs() {
   const focusTab = useApp((s) => s.focusTab);
   const closeTab = useApp((s) => s.closeTab);
   const projects = useApp((s) => s.projects);
+  const imageProjects = useApp((s) => s.imageProjects);
   const busyProjects = useApp((s) => s.busyProjects);
 
   const label = (t: Tab): string => {
     if (t.kind === 'section') return SECTION_META[t.section].label;
+    if (t.kind === 'image') return imageProjects.find((p) => p.id === t.projectId)?.name?.trim() || 'Untitled creative';
     return projects.find((p) => p.id === t.projectId)?.name?.trim() || 'Untitled project';
   };
-  const icon = (t: Tab): string => (t.kind === 'section' ? SECTION_META[t.section].icon : '📄');
+  const icon = (t: Tab): string => (t.kind === 'section' ? SECTION_META[t.section].icon : t.kind === 'image' ? '🖼️' : '📄');
 
   return (
     <div className="tabbar">

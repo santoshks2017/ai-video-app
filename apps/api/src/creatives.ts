@@ -210,6 +210,8 @@ export interface SceneRequest {
   note?: string;
   /** Where the words will sit, so the picture keeps it calm. */
   textBand: 'top' | 'left';
+  /** With the words at the top: how far down they reach, as a fraction of the height. */
+  band?: number;
   panel: boolean;
   /** The creative's colours, as a mood for the light. */
   mood?: { panel: string; accent: string };
@@ -221,10 +223,13 @@ export function sceneInstruction(req: SceneRequest, refLabels: string[]): string
   const e = CREATIVE_ENGINE_BY_ID[req.engine];
   const scene = (req.occasion && OCCASION_SCENES[req.occasion]) || e?.scene || 'a clean, premium setting';
   const tall = req.aspect === '9:16' || req.aspect === '4:5';
+  const band = typeof req.band === 'number' && Number.isFinite(req.band) ? Math.round(Math.min(0.6, Math.max(0.25, req.band)) * 100) : null;
   const place =
     req.textBand === 'left'
       ? `Put the ${noun} in the right half of the frame; keep the left half calm and uncluttered — soft background, no busy detail — because a headline will be set there.`
-      : `Put the ${noun} in the ${tall ? 'middle and lower half' : 'lower two-thirds'} of the frame; keep the top ${tall ? 'third' : 'third'} calm and uncluttered — soft sky or plain background — because a headline will be set there.`;
+      : band
+        ? `Keep the top ${band}% of the frame calm and uncluttered — soft sky or plain background — because the headline and its lines will be set there. Put the whole ${noun} below that band, in the lower part of the frame, never reaching up into it.`
+        : `Put the ${noun} in the ${tall ? 'middle and lower half' : 'lower two-thirds'} of the frame; keep the top third calm and uncluttered — soft sky or plain background — because a headline will be set there.`;
   return [
     `Make one photograph for a social media post by an Indian ${noun} dealership. Frame: ${req.aspect}.`,
     '',

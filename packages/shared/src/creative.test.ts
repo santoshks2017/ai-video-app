@@ -21,6 +21,7 @@ import {
   tidyCopy,
   updateLayer,
   validateCreativeDoc,
+  wordsBand,
   type CreativeCopy,
   type CreativeDoc,
   type LayoutInput,
@@ -167,6 +168,74 @@ test('every template lays out every size inside its frame and out of the platfor
       }
     }
   }
+});
+
+test('on a square, portrait or story the dealer panel carries the call to action and the small print', () => {
+  const inside = (l: { y: number; h: number }, box: { y: number; h: number }) => l.y >= box.y - 0.5 && l.y + l.h <= box.y + box.h + 0.5;
+  for (const f of CREATIVE_FORMATS) {
+    for (const t of CREATIVE_TEMPLATES) {
+      const doc = layoutCreative(input({ template: t.id, format: f.id }));
+      const where = `${t.id} · ${f.id}`;
+      const panel = doc.layers.find((l) => l.role === 'panel')!;
+      const cta = doc.layers.find((l) => l.role === 'cta')!;
+      const terms = doc.layers.find((l) => l.role === 'terms')!;
+      const wide = f.width / f.height > 1.3;
+      if (wide) {
+        // A wide size keeps them in its column, clear of the vehicle on the right.
+        assert.ok(cta.y + cta.h <= panel.y, `${where}: the call to action sits above the panel`);
+        assert.ok(cta.x + cta.w <= f.width * 0.6, `${where}: in the left column`);
+        continue;
+      }
+      assert.ok(inside(cta, panel), `${where}: the call to action is in the panel`);
+      assert.ok(inside(terms, panel), `${where}: the small print is in the panel`);
+      assert.ok(cta.x + cta.w <= f.width - 1 && cta.x > f.width / 2, `${where}: on the panel's right`);
+      for (const info of doc.layers.filter((l) => l.role === 'panel-name' || l.role === 'panel-details')) {
+        assert.ok(info.x + info.w <= cta.x, `${where}: ${info.name} stops short of the call to action`);
+        assert.ok(info.y + info.h <= terms.y + 0.5, `${where}: ${info.name} sits above the small print`);
+      }
+    }
+  }
+  // Without a full panel they go back to the foot of the picture.
+  const compact = layoutCreative(input({ panel: { ...input({}).panel, style: 'compact' } }));
+  const cPanel = compact.layers.find((l) => l.role === 'panel')!;
+  assert.ok(compact.layers.filter((l) => l.role === 'cta' || l.role === 'terms').every((l) => l.y + l.h <= cPanel.y));
+  // A greeting that shades only its top shades the foot under those words.
+  const greeting = layoutCreative(input({ template: 'festival', panel: { ...input({}).panel, style: 'none' } }));
+  assert.ok(greeting.layers.some((l) => l.name === 'Shade, foot'));
+  assert.ok(!layoutCreative(input({ template: 'festival' })).layers.some((l) => l.name === 'Shade, foot'), 'not when the panel carries them');
+  // The foot is shaded only for words set there, never just to darken the vehicle.
+  const shadedFoot = (d: CreativeDoc) => d.layers.some((l) => l.name === 'Shade, bottom');
+  assert.ok(!shadedFoot(layoutCreative(input({}))), 'nothing at the foot: no shade');
+  assert.ok(shadedFoot(layoutCreative(input({ panel: { ...input({}).panel, style: 'compact' } }))), 'the call to action at the foot');
+  assert.ok(shadedFoot(layoutCreative(input({ template: 'feature' }))), 'points set low');
+  // Over a picture on a square, the words keep to the upper half or so; without one, the whole frame is theirs.
+  const long = layoutCreative(input({ template: 'festival', copy: LONG }));
+  const reach = Math.max(...words(long).filter((l) => ['kicker', 'headline', 'sub'].includes(l.role ?? '')).map((l) => l.y + l.h));
+  assert.ok(reach <= 1080 * 0.54 + 1, `the words reach ${reach}`);
+});
+
+test('a wide size keeps the whole contact in its panel, and a logo on the right reads on any picture', () => {
+  const doc = layoutCreative(input({ format: 'landscape' }));
+  const details = doc.layers.find((l) => l.role === 'panel-details');
+  assert.ok(details && details.kind === 'text' && details.text.includes('+91 97643 79764'), 'the phone number is there');
+  const name = doc.layers.find((l) => l.role === 'panel-name')!;
+  assert.ok(name.x + name.w <= details!.x, 'the name and the contact side by side');
+  assert.ok(doc.layers.some((l) => l.name === 'Shade, logos'), 'the dealer logo on the right is shaded');
+  const leftOnly = layoutCreative(input({ format: 'landscape', logos: { ...input({}).logos, placement: { brand: 'left', dealer: 'left' } } }));
+  assert.ok(!leftOnly.layers.some((l) => l.name === 'Shade, logos'), 'no shade when both logos are on the shaded side');
+});
+
+test('the band the words take at the top is measured for the picture', () => {
+  for (const f of CREATIVE_FORMATS.filter((x) => x.width / x.height <= 1.3)) {
+    for (const t of CREATIVE_TEMPLATES) {
+      const doc = layoutCreative(input({ template: t.id, format: f.id }));
+      const band = wordsBand(doc);
+      assert.ok(band >= 0.3 && band <= 0.6, `${t.id} · ${f.id}: ${band}`);
+      const headline = doc.layers.find((l) => l.role === 'headline')!;
+      assert.ok(band * f.height >= headline.y + headline.h || band === 0.6, `${t.id} · ${f.id}: the headline is inside the band`);
+    }
+  }
+  assert.equal(wordsBand({ ...layoutCreative(input({})), layers: [] }), 0.33, 'nothing at the top: a third');
 });
 
 test('logos follow the client’s placement, and turn white on dark ground', () => {

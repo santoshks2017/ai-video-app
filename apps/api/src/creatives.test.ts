@@ -60,4 +60,8 @@ test('the picture is asked for with this vehicle, a blank plate, room for the wo
   assert.doesNotMatch(wide, /bottom sixth/);
   assert.match(wide, /showroom/, 'the engine’s own scene when no occasion is named');
   assert.match(sceneInstruction({ aspect: '1:1', engine: 'testdrive', vehicle: { name: 'Royal Enfield Classic 350', kind: 'bike' }, textBand: 'top', panel: true }, ['x']), /Put THIS motorcycle/);
+  const measured = sceneInstruction({ aspect: '1:1', engine: 'festival', vehicle: { name: 'Hyundai Creta' }, textBand: 'top', band: 0.47, panel: true }, ['x']);
+  assert.match(measured, /Keep the top 47% of the frame calm/, 'the band the words take');
+  assert.match(measured, /whole car below that band/);
+  assert.match(sceneInstruction({ aspect: '1:1', engine: 'festival', vehicle: { name: 'Hyundai Creta' }, textBand: 'top', band: 0.95, panel: true }, ['x']), /top 60%/, 'never most of the frame');
 });

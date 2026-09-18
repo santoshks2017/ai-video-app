@@ -42,7 +42,8 @@ function ensureFontSheet(): Promise<void> {
   return fontSheet;
 }
 
-const loadedFaces = new Set<string>();
+/** Each face asked for, as the promise of its arrival — a second caller waits for the same load. */
+const faceLoads = new Map<string, Promise<unknown>>();
 /**
  * Loads every face a creative's words are drawn in, at the weights they use, for the letters
  * they contain — so an Indian script's own face is fetched when its words need it.
@@ -55,16 +56,19 @@ export async function loadCreativeFonts(doc: Pick<CreativeDoc, 'layers'>): Promi
     if (l.kind !== 'text' || !l.text.trim()) continue;
     const face = CREATIVE_FONT_BY_ID[l.font] ?? CREATIVE_FONT_BY_ID.poppins!;
     const style = `${l.italic ? 'italic ' : ''}${l.weight} 32px`;
-    const families = [face.family, 'Noto Sans', ...INDIC_FALLBACK_FAMILIES];
-    for (const family of families) {
+    for (const family of [face.family, 'Noto Sans', ...INDIC_FALLBACK_FAMILIES]) {
       const key = `${style}|${family}|${l.text}`;
-      if (loadedFaces.has(key)) continue;
-      loadedFaces.add(key);
-      jobs.push(document.fonts.load(`${style} "${family}"`, l.text).catch(() => []));
+      let load = faceLoads.get(key);
+      if (!load) {
+        load = document.fonts.load(`${style} "${family}"`, l.text).catch(() => []);
+        faceLoads.set(key, load);
+      }
+      jobs.push(load);
     }
   }
   await Promise.all(jobs);
 }
+
 
 /* ---- pictures ---- */
 
@@ -113,6 +117,10 @@ export interface FittedText {
   height: number;
 }
 const fitCache = new Map<string, FittedText>();
+// Words measured before a face arrived were measured in a stand-in; measure them again.
+if (typeof document !== 'undefined' && 'fonts' in document) {
+  document.fonts.addEventListener('loadingdone', () => fitCache.clear());
+}
 
 function fontOf(l: TextLayer, size: number): string {
   return `${l.italic ? 'italic ' : ''}${l.weight} ${size}px ${creativeFontStack(l.font)}`;
@@ -293,7 +301,7 @@ function drawShapeLayer(ctx: CanvasRenderingContext2D, l: ShapeLayer): void {
   }
 }
 
-function drawTextLayer(ctx: CanvasRenderingContext2D, l: TextLayer): void {
+function drawTextLayer(ctx: CanvasRenderingContext2D, l: TextLayer, scale: number): void {
   const fit = fitText(ctx, l);
   if (!fit.lines.length) return;
   const padX = l.pill?.padX ?? 0;
@@ -315,10 +323,12 @@ function drawTextLayer(ctx: CanvasRenderingContext2D, l: TextLayer): void {
   // The line's box, with its first baseline placed so accents above and descenders below fit.
   const ascent = fit.size * 0.8 + (fit.lineHeight - fit.size) / 2;
   if (l.shadow && !l.pill) {
+    // Shadows are in canvas pixels, which the frame's transform does not scale: scale them here,
+    // so a small card shows the same shadow as the full-size export.
     ctx.shadowColor = l.shadow.color;
-    ctx.shadowBlur = l.shadow.blur;
-    ctx.shadowOffsetX = l.shadow.x;
-    ctx.shadowOffsetY = l.shadow.y;
+    ctx.shadowBlur = l.shadow.blur * scale;
+    ctx.shadowOffsetX = l.shadow.x * scale;
+    ctx.shadowOffsetY = l.shadow.y * scale;
   }
   fit.lines.forEach((line, i) => {
     const lw = ctx.measureText(line).width;
@@ -367,7 +377,7 @@ export function drawLayer(ctx: CanvasRenderingContext2D, l: CreativeLayer, opts:
   if (l.rotation) ctx.rotate((l.rotation * Math.PI) / 180);
   if (l.kind === 'image') drawImageLayer(ctx, l, opts.images.get(l.src), opts.scale);
   else if (l.kind === 'shape') drawShapeLayer(ctx, l);
-  else drawTextLayer(ctx, l);
+  else drawTextLayer(ctx, l, opts.scale);
   ctx.restore();
 }
 

@@ -9,6 +9,7 @@ import type {
   AppUser,
   Role,
   Project,
+  ImageProject,
   VideoModelProfile,
 } from '@ava/shared';
 import { collection, isApiError, session, type SessionUser } from '../lib/client.js';
@@ -35,6 +36,7 @@ const usersApi = collection<AppUser>('users');
 const projectsApi = collection<Project>('projects');
 const credentialsApi = collection<ApiCredential>('credentials');
 const modelsApi = collection<VideoModelProfile>('models');
+const imageProjectsApi = collection<ImageProject>('imageProjects');
 
 export const api = {
   actors: actorsApi,
@@ -46,6 +48,7 @@ export const api = {
   projects: projectsApi,
   credentials: credentialsApi,
   models: modelsApi,
+  imageProjects: imageProjectsApi,
 };
 
 /**
@@ -54,7 +57,8 @@ export const api = {
  */
 export interface Tab {
   id: string;
-  kind: 'section' | 'project';
+  /** An image project opens in its own tab too; it belongs to Projects as well. */
+  kind: 'section' | 'project' | 'image';
   /** Which rail item lights up — a project tab still belongs to Projects. */
   section: Section;
   projectId?: string;
@@ -62,6 +66,7 @@ export interface Tab {
 
 export const sectionTabId = (section: Section): string => `section:${section}`;
 export const projectTabId = (projectId: string): string => `project:${projectId}`;
+export const imageTabId = (projectId: string): string => `image:${projectId}`;
 
 interface AppState {
   /** null = still checking */
@@ -91,6 +96,7 @@ interface AppState {
   languages: LanguageProfile[];
   users: AppUser[];
   projects: Project[];
+  imageProjects: ImageProject[];
   credentials: ApiCredential[];
   models: VideoModelProfile[];
   loading: boolean;
@@ -100,6 +106,8 @@ interface AppState {
   signOut: () => void;
   /** Open the tab for this section or project, or focus it if already open. */
   go: (section: Section, projectId?: string | null) => void;
+  /** Open an image project's tab, or focus it. */
+  goImage: (projectId: string) => void;
   focusTab: (id: string) => void;
   closeTab: (id: string) => void;
   setProjectBusy: (projectId: string, busy: boolean) => void;
@@ -149,6 +157,7 @@ export const useApp = create<AppState>()((set, get) => ({
   languages: [],
   users: [],
   projects: [],
+  imageProjects: [],
   credentials: [],
   models: [],
   loading: false,
@@ -221,6 +230,7 @@ export const useApp = create<AppState>()((set, get) => ({
       languages: [],
       users: [],
       projects: [],
+      imageProjects: [],
       credentials: [],
       models: [],
     });
@@ -230,6 +240,14 @@ export const useApp = create<AppState>()((set, get) => ({
     const tab: Tab = projectId
       ? { id: projectTabId(projectId), kind: 'project', section: 'projects', projectId }
       : { id: sectionTabId(section), kind: 'section', section };
+    set((s) => ({
+      tabs: s.tabs.some((t) => t.id === tab.id) ? s.tabs : [...s.tabs, tab],
+      activeTabId: tab.id,
+    }));
+  },
+
+  goImage: (projectId) => {
+    const tab: Tab = { id: imageTabId(projectId), kind: 'image', section: 'projects', projectId };
     set((s) => ({
       tabs: s.tabs.some((t) => t.id === tab.id) ? s.tabs : [...s.tabs, tab],
       activeTabId: tab.id,
@@ -257,7 +275,7 @@ export const useApp = create<AppState>()((set, get) => ({
   refresh: async () => {
     set({ loading: true });
     const admin = get().can('admin');
-    const [actors, cars, clients, instructions, languages, projects, credentials, models, users] = await Promise.all([
+    const [actors, cars, clients, instructions, languages, projects, credentials, models, users, imageProjects] = await Promise.all([
       actorsApi.list(),
       carsApi.list(),
       clientsApi.list(),
@@ -267,7 +285,8 @@ export const useApp = create<AppState>()((set, get) => ({
       admin ? credentialsApi.list() : Promise.resolve([]),
       modelsApi.list(),
       admin ? usersApi.list() : Promise.resolve([]),
+      imageProjectsApi.list(),
     ]);
-    set({ actors, cars, clients, instructions, languages, projects, credentials, models, users, loading: false });
+    set({ actors, cars, clients, instructions, languages, projects, credentials, models, users, imageProjects, loading: false });
   },
 }));

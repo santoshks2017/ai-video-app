@@ -3,7 +3,6 @@ import { useApp, type Tab } from './state/appStore.js';
 import { Shell, SignIn, SECTION_META, SECTION_NEEDS } from './components/Shell.js';
 import { LockedSection, Onboarding } from './components/Onboarding.js';
 import { Tabs } from './components/Tabs.js';
-import { ProjectsSection } from './sections/Projects.js';
 import { ProjectEditor } from './sections/ProjectEditor.js';
 import { ActorsSection } from './sections/Actors.js';
 import { CarsSection } from './sections/Cars.js';
@@ -14,15 +13,18 @@ import { ModelsSection } from './sections/Models.js';
 import { WhatsNewSection } from './sections/WhatsNew.js';
 import { UsersSection } from './sections/Users.js';
 import { AnalyticsSection } from './sections/Analytics.js';
+import { ImageProjectEditor } from './sections/ImageProjectEditor.js';
+import { ProjectsHome } from './sections/ImageProjects.js';
 
 function TabBody({ tab }: { tab: Tab }) {
   const needs = tab.kind === 'section' ? SECTION_NEEDS[tab.section] : undefined;
   const allowed = useApp((s) => !needs || s.can(needs));
   if (tab.kind === 'project') return <ProjectEditor projectId={tab.projectId!} />;
+  if (tab.kind === 'image') return <ImageProjectEditor projectId={tab.projectId!} />;
   if (!allowed) return <LockedSection section={tab.section} label={SECTION_META[tab.section].label} />;
   switch (tab.section) {
     case 'projects':
-      return <ProjectsSection />;
+      return <ProjectsHome />;
     case 'actors':
       return <ActorsSection />;
     case 'cars':

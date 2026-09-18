@@ -145,12 +145,36 @@ interface Parts {
   layers: CreativeLayer[];
   /** Where words may go: under the logos, above the panel. */
   area: { x: number; y: number; w: number; h: number };
+  /** The call to action and the small print, when the dealer panel carries them. */
+  inPanel: { cta: boolean; terms: boolean };
 }
 
-function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 'bottom' | 'both'): Parts {
-  const { look } = input;
+function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 'bottom' | 'both', wordsLow = false): Parts {
+  const { look, copy } = input;
   const layers: CreativeLayer[] = [];
   const pic = input.picture;
+  const text = input.script === 'indic' ? 'mukta' : 'poppins';
+  const script = input.script ?? 'latin';
+
+  // The dealer panel at the foot: full block, a compact line, or nothing (the contact is in the
+  // caption). A thumbnail is too small for a full block, so it takes the line. On a square,
+  // portrait or story, a full panel also carries the call to action and the small print, so
+  // neither lands on the vehicle; a wide size keeps them in its column, clear of the vehicle.
+  const panelStyle: PanelStyle = input.format === 'thumbnail' && input.panel.style === 'full' ? 'compact' : input.panel.style;
+  const hasPanel = panelStyle !== 'none' && Boolean(input.panel.name || input.panel.details.length);
+  const fullPanel = hasPanel && panelStyle === 'full';
+  const inPanel = { cta: fullPanel && !fr.wide && Boolean(copy.cta.trim()), terms: fullPanel && !fr.wide && Boolean(copy.terms.trim()) };
+  const pad = fr.m;
+  const termsSize = Math.round(fr.S * 0.017);
+  const termsLines = inPanel.terms ? linesFor(copy.terms, termsSize, fr.W - pad * 2, { script, weight: 400, max: 2 }) : 0;
+  const termsH = inPanel.terms ? Math.ceil(termsLines * termsSize * 1.25 + termsSize * 0.2) : 0;
+  const baseH = fullPanel ? Math.round(fr.wide ? fr.H * 0.17 : fr.S * 0.15) : Math.round(fr.S * (fr.wide ? 0.1 : 0.085));
+  const ph = hasPanel ? baseH + (termsH ? termsH + Math.round(fr.S * 0.012) : 0) : 0;
+  const panelTop = hasPanel ? fr.H - fr.bottom - ph : fr.H - fr.bottom - fr.m;
+  const footWords = (!inPanel.cta && Boolean(copy.cta.trim())) || (!inPanel.terms && Boolean(copy.terms.trim()));
+  // The foot is shaded only for words set there; otherwise the shade would only darken the vehicle.
+  const shadeFoot = footWords || wordsLow;
+
   if (pic) {
     const photo = pic.mode === 'photo';
     layers.push(
@@ -172,13 +196,23 @@ function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 
     }
     if (scrim === 'left') {
       layers.push(shape('scrim', 'Shade, left', { x: 0, y: 0, w: Math.round(fr.W * 0.68), h: fr.H }, { gradient: { from: rgba(tint, 0.9), to: rgba(tint, 0), angle: 270 } }));
+      // A logo on the right sits on the picture itself: shade the top so it reads on any picture.
+      const { brand, dealer } = input.logos.placement;
+      if ((brand === 'right' && input.logos.brand) || (dealer === 'right' && input.logos.dealer)) {
+        layers.push(shape('scrim', 'Shade, logos', { x: 0, y: 0, w: fr.W, h: Math.round(fr.H * 0.34) }, { gradient: { from: rgba(tint, 0.85), to: rgba(tint, 0), angle: 0 } }));
+      }
     }
-    if (scrim === 'bottom' || scrim === 'both') {
+    if (scrim === 'bottom' || (scrim === 'both' && shadeFoot)) {
       const h = Math.round(fr.H * (fr.tall ? 0.42 : 0.5));
       layers.push(shape('scrim', 'Shade, bottom', { x: 0, y: fr.H - h, w: fr.W, h }, { gradient: { from: rgba(tint, 0), to: rgba(tint, strong), angle: 0 } }));
     }
     if (scrim === 'full') {
       layers.push(shape('scrim', 'Shade', { x: 0, y: 0, w: fr.W, h: fr.H }, { fill: rgba(tint, 0.55) }));
+    }
+    // A greeting shades only its top; words left at its foot get a low shade of their own.
+    if (scrim === 'top' && footWords && !fr.wide) {
+      const h = Math.round(fr.S * 0.26);
+      layers.push(shape('scrim', 'Shade, foot', { x: 0, y: panelTop - h, w: fr.W, h }, { gradient: { from: rgba(tint, 0), to: rgba(tint, 0.8), angle: 0 } }));
     }
   }
 
@@ -216,31 +250,55 @@ function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 
   }
   const anyLogo = layers.some((l) => l.role === 'brand-logo' || l.role === 'dealer-logo');
 
-  // The dealer panel at the foot: full block, a compact line, or nothing (the contact is in the
-  // caption). A thumbnail is too small for a full block, so it takes the line.
-  const panelStyle: PanelStyle = input.format === 'thumbnail' && input.panel.style === 'full' ? 'compact' : input.panel.style;
-  let panelTop = fr.H - fr.bottom - fr.m;
-  const text = input.script === 'indic' ? 'mukta' : 'poppins';
-  if (panelStyle !== 'none' && (input.panel.name || input.panel.details.length)) {
-    const ph = panelStyle === 'full' ? Math.round(fr.wide ? fr.H * 0.17 : fr.S * 0.15) : Math.round(fr.S * (fr.wide ? 0.1 : 0.085));
-    panelTop = fr.H - fr.bottom - ph;
+  if (hasPanel) {
     const fg = onColour(look.panel);
     layers.push(shape('panel', 'Dealer panel', { x: 0, y: panelTop, w: fr.W, h: ph + fr.bottom }, { fill: look.panel }));
     layers.push(shape('accent', 'Panel accent', { x: 0, y: panelTop, w: fr.W, h: Math.max(4, Math.round(fr.S * 0.008)) }, { fill: look.accent }));
-    const pad = fr.m;
-    if (panelStyle === 'full') {
+    if (fullPanel) {
       const nameSize = Math.round(fr.S * (fr.wide ? 0.05 : 0.036));
       const detailSize = Math.round(fr.S * (fr.wide ? 0.034 : 0.024));
-      const inner = ph - Math.round(fr.S * 0.012);
-      const nameH = Math.round(nameSize * 1.25);
-      const details = input.panel.details.slice(0, fr.wide ? 1 : 2);
-      const detailsH = Math.round(details.length * detailSize * 1.35);
-      const blockH = nameH + detailsH;
-      const y0 = panelTop + Math.round(fr.S * 0.012) + Math.max(0, Math.round((inner - blockH) / 2));
-      layers.push(textLayer('panel-name', 'Dealer name', input.panel.name, { x: pad, y: y0, w: fr.W - pad * 2, h: nameH }, { font: text, size: nameSize, weight: 700, color: fg, maxLines: 1 }));
-      if (details.length) {
+      const inner = baseH - Math.round(fr.S * 0.012);
+      const rowTop = panelTop + Math.round(fr.S * 0.012);
+      // The call to action takes the panel's right side; the name and contact keep the rest.
+      let infoW = fr.W - pad * 2;
+      if (inPanel.cta) {
+        const size = Math.round(fr.S * 0.03);
+        const p = pill(look.accent, size);
+        const want = Math.ceil(copy.cta.trim().length * size * avgGlyph(script, false, 700) + p.padX * 2);
+        const ctaW = Math.min(Math.round(fr.W * 0.44), want);
+        const h = Math.round(size * 1.2 + p.padY * 2);
         layers.push(
-          textLayer('panel-details', 'Contact', details.join('\n'), { x: pad, y: y0 + nameH, w: fr.W - pad * 2, h: detailsH + Math.round(detailSize * 0.3) }, { font: text, size: detailSize, weight: 500, color: fg, opacity: 0.9, lineHeight: 1.3, maxLines: details.length }),
+          textLayer('cta', 'Call to action', copy.cta, { x: fr.W - pad - ctaW, y: rowTop + Math.round((inner - h) / 2), w: ctaW, h }, { font: text, size, weight: 700, color: onColour(look.accent), align: 'right', valign: 'middle', pill: p, maxLines: 1 }),
+        );
+        infoW -= ctaW + Math.round(fr.S * 0.03);
+      }
+      const nameH = Math.round(nameSize * 1.25);
+      const details = input.panel.details.slice(0, 2);
+      const detailsH = Math.round(details.length * detailSize * 1.35);
+      if (fr.wide) {
+        // A wide panel is short: the name on the left, the address and phone on the right.
+        const nameW = Math.round(fr.W * 0.4);
+        layers.push(textLayer('panel-name', 'Dealer name', input.panel.name, { x: pad, y: rowTop + Math.round((inner - nameH) / 2), w: nameW, h: nameH }, { font: text, size: nameSize, weight: 700, color: fg, maxLines: 1 }));
+        if (details.length) {
+          const x = pad + nameW + Math.round(fr.S * 0.04);
+          const h = detailsH + Math.round(detailSize * 0.3);
+          layers.push(
+            textLayer('panel-details', 'Contact', details.join('\n'), { x, y: rowTop + Math.max(0, Math.round((inner - h) / 2)), w: fr.W - pad - x, h }, { font: text, size: detailSize, weight: 500, color: fg, opacity: 0.9, lineHeight: 1.3, align: 'right', maxLines: details.length }),
+          );
+        }
+      } else {
+        const blockH = nameH + detailsH;
+        const y0 = rowTop + Math.max(0, Math.round((inner - blockH) / 2));
+        layers.push(textLayer('panel-name', 'Dealer name', input.panel.name, { x: pad, y: y0, w: infoW, h: nameH }, { font: text, size: nameSize, weight: 700, color: fg, maxLines: 1 }));
+        if (details.length) {
+          layers.push(
+            textLayer('panel-details', 'Contact', details.join('\n'), { x: pad, y: y0 + nameH, w: infoW, h: detailsH + Math.round(detailSize * 0.3) }, { font: text, size: detailSize, weight: 500, color: fg, opacity: 0.9, lineHeight: 1.3, maxLines: details.length }),
+          );
+        }
+      }
+      if (inPanel.terms) {
+        layers.push(
+          textLayer('terms', 'Small print', copy.terms, { x: pad, y: panelTop + baseH, w: fr.W - pad * 2, h: termsH }, { font: text, size: termsSize, weight: 400, color: fg, opacity: 0.72, lineHeight: 1.25, maxLines: 2 }),
         );
       }
     } else {
@@ -251,7 +309,7 @@ function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 
   }
   const areaTop = fr.top + (anyLogo ? logoH + Math.round(fr.S * 0.04) : 0);
   const areaBottom = panelTop - Math.round(fr.S * 0.035);
-  return { layers, area: { x: fr.m, y: areaTop, w: fr.W - fr.m * 2, h: Math.max(fr.S * 0.3, areaBottom - areaTop) } };
+  return { layers, area: { x: fr.m, y: areaTop, w: fr.W - fr.m * 2, h: Math.max(fr.S * 0.3, areaBottom - areaTop) }, inPanel };
 }
 
 /* ---- words ---- */
@@ -335,9 +393,9 @@ function column(out: CreativeLayer[], x: number, y: number, w: number, input: Bl
 const pill = (bg: string, size: number) => ({ color: bg, padX: Math.round(size * 0.9), padY: Math.round(size * 0.45), radius: Math.round(size * 0.9) });
 
 /** The call to action and the small print, at the foot of the area. */
-function footOfArea(out: CreativeLayer[], fr: Frame, area: Parts['area'], copy: CreativeCopy, wd: Words, align: TextLayer['align'], width = area.w): number {
+function footOfArea(out: CreativeLayer[], fr: Frame, parts: Parts, area: Parts['area'], copy: CreativeCopy, wd: Words, align: TextLayer['align'], width = area.w): number {
   let bottom = area.y + area.h;
-  if (copy.terms.trim()) {
+  if (copy.terms.trim() && !parts.inPanel.terms) {
     const size = Math.round(fr.S * (fr.wide ? 0.024 : 0.018));
     const lines = linesFor(copy.terms, size, width, { script: wd.script, weight: 400, max: 2 });
     const h = Math.ceil(lines * size * 1.25 + size * 0.2);
@@ -345,7 +403,7 @@ function footOfArea(out: CreativeLayer[], fr: Frame, area: Parts['area'], copy: 
     out.push(textLayer('terms', 'Small print', copy.terms, { x: area.x, y: bottom, w: width, h }, { font: wd.text, size, weight: 400, color: wd.fg, opacity: 0.8, align, lineHeight: 1.25, maxLines: 2 }));
     bottom -= Math.round(fr.S * 0.015);
   }
-  if (copy.cta.trim()) {
+  if (copy.cta.trim() && !parts.inPanel.cta) {
     const size = Math.round(fr.S * (fr.wide ? 0.042 : 0.034));
     const p = pill(wd.accent, size);
     const h = Math.round(size * 1.2 + p.padY * 2);
@@ -354,6 +412,14 @@ function footOfArea(out: CreativeLayer[], fr: Frame, area: Parts['area'], copy: 
   }
   return bottom;
 }
+
+/**
+ * Where a column of words must stop. Over a picture on a square, portrait or story, the words
+ * keep to the upper part so the vehicle below has the rest; the picture is asked to keep that
+ * band calm (see wordsBand).
+ */
+const columnEnd = (input: LayoutInput, fr: Frame, foot: number): number =>
+  input.picture && !fr.wide ? Math.min(foot, Math.round(fr.H * (fr.tall ? 0.46 : 0.54))) : foot;
 
 /* ---- templates ---- */
 
@@ -365,25 +431,25 @@ function hero(input: LayoutInput, fr: Frame): CreativeLayer[] {
     const out = parts.layers;
     const colW = Math.round(fr.W * 0.5) - fr.m;
     const a = { ...parts.area, w: colW };
-    const foot = footOfArea(out, fr, a, c, wd, 'left', colW);
+    const foot = footOfArea(out, fr, parts, a, c, wd, 'left', colW);
     column(out, a.x, a.y, colW, [
       { role: 'kicker', name: 'Kicker', text: c.kicker, size: Math.round(fr.S * 0.04), weight: 700, font: wd.text, color: wd.accent, gap: Math.round(fr.S * 0.015), maxLines: 1, caps: true, letterSpacing: 0.08 },
       { role: 'headline', name: 'Headline', text: c.headline, size: Math.round(fr.S * 0.1), weight: 800, font: wd.display, color: wd.fg, gap: Math.round(fr.S * 0.025), maxLines: 3, lineHeight: 1.08 },
       { role: 'sub', name: 'Second line', text: c.sub, size: Math.round(fr.S * 0.045), weight: 500, font: wd.text, color: wd.fg, gap: Math.round(fr.S * 0.02), maxLines: foot - a.y < fr.S * 0.55 ? 1 : 2, opacity: 0.92 },
-    ], wd.script, foot - Math.round(fr.S * 0.02));
+    ], wd.script, columnEnd(input, fr, foot - Math.round(fr.S * 0.02)));
     return out;
   }
   const parts = basics(input, fr, 'both');
   const out = parts.layers;
   const a = parts.area;
-  const foot = footOfArea(out, fr, a, c, wd, 'left');
+  const foot = footOfArea(out, fr, parts, a, c, wd, 'left');
   const points = c.points.length ? c.points.map((p) => `•  ${p}`).join('\n') : '';
   column(out, a.x, a.y, a.w, [
     { role: 'kicker', name: 'Kicker', text: c.kicker, size: Math.round(fr.S * 0.034), weight: 700, font: wd.text, color: wd.accent, gap: Math.round(fr.S * 0.012), maxLines: 1, caps: true, letterSpacing: 0.08 },
     { role: 'headline', name: 'Headline', text: c.headline, size: Math.round(fr.S * (fr.tall ? 0.098 : 0.086)), weight: 800, font: wd.display, color: wd.fg, gap: Math.round(fr.S * 0.02), maxLines: 3, lineHeight: 1.08 },
     { role: 'sub', name: 'Second line', text: c.sub, size: Math.round(fr.S * 0.038), weight: 500, font: wd.text, color: wd.fg, gap: Math.round(fr.S * 0.02), maxLines: 3, opacity: 0.92 },
     { role: 'points', name: 'Points', text: points, size: Math.round(fr.S * 0.032), weight: 600, font: wd.text, color: wd.fg, gap: 0, maxLines: 4, lineHeight: 1.4 },
-  ], wd.script, foot - Math.round(fr.S * 0.02));
+  ], wd.script, columnEnd(input, fr, foot - Math.round(fr.S * 0.02)));
   return out;
 }
 
@@ -394,7 +460,7 @@ function offer(input: LayoutInput, fr: Frame): CreativeLayer[] {
   const out = parts.layers;
   const colW = fr.wide ? Math.round(fr.W * 0.52) - fr.m : parts.area.w;
   const a = { ...parts.area, w: colW };
-  const foot = footOfArea(out, fr, a, c, wd, 'left', colW);
+  const foot = footOfArea(out, fr, parts, a, c, wd, 'left', colW);
   const badgeSize = Math.round(fr.S * (fr.wide ? 0.07 : fr.tall ? 0.07 : 0.062));
   const others = c.points.map((p) => `•  ${p}`).join('\n');
   column(out, a.x, a.y, colW, [
@@ -403,7 +469,7 @@ function offer(input: LayoutInput, fr: Frame): CreativeLayer[] {
     { role: 'badge', name: 'Offer badge', text: c.badge, size: badgeSize, weight: 800, font: wd.script === 'indic' ? 'mukta' : 'oswald', color: wd.onAccent, gap: Math.round(fr.S * 0.03), maxLines: 2, lineHeight: 1.05, pill: { color: wd.accent, padX: Math.round(badgeSize * 0.55), padY: Math.round(badgeSize * 0.32), radius: Math.round(badgeSize * 0.25) } },
     { role: 'points', name: 'More offers', text: others, size: Math.round(fr.S * (fr.wide ? 0.038 : 0.032)), weight: 600, font: wd.text, color: wd.fg, gap: Math.round(fr.S * 0.015), maxLines: fr.wide ? 2 : 3, lineHeight: 1.35 },
     { role: 'sub', name: 'Second line', text: c.sub, size: Math.round(fr.S * (fr.wide ? 0.036 : 0.03)), weight: 500, font: wd.text, color: wd.fg, gap: 0, maxLines: 2, opacity: 0.9 },
-  ], wd.script, foot - Math.round(fr.S * 0.02));
+  ], wd.script, columnEnd(input, fr, foot - Math.round(fr.S * 0.02)));
   return out;
 }
 
@@ -415,37 +481,37 @@ function festival(input: LayoutInput, fr: Frame): CreativeLayer[] {
   if (fr.wide) {
     const colW = Math.round(fr.W * 0.5) - fr.m;
     const a = { ...parts.area, w: colW };
-    const foot = footOfArea(out, fr, a, c, wd, 'left', colW);
+    const foot = footOfArea(out, fr, parts, a, c, wd, 'left', colW);
     column(out, a.x, a.y + Math.round(fr.S * 0.03), colW, [
       { role: 'kicker', name: 'Kicker', text: c.kicker, size: Math.round(fr.S * 0.04), weight: 600, font: wd.text, color: wd.accent, gap: Math.round(fr.S * 0.012), maxLines: 1, caps: true, letterSpacing: 0.12 },
       { role: 'headline', name: 'Greeting', text: c.headline, size: Math.round(fr.S * 0.11), weight: 700, font: wd.display, color: wd.fg, gap: Math.round(fr.S * 0.025), maxLines: 2, lineHeight: 1.05 },
       { role: 'sub', name: 'Wish', text: c.sub, size: Math.round(fr.S * 0.045), weight: 500, font: wd.text, color: wd.fg, gap: 0, maxLines: 3, opacity: 0.92, lineHeight: 1.3 },
-    ], wd.script, foot - Math.round(fr.S * 0.02));
+    ], wd.script, columnEnd(input, fr, foot - Math.round(fr.S * 0.02)));
     return out;
   }
   const a = parts.area;
-  const foot = footOfArea(out, fr, a, c, wd, 'center');
+  const foot = footOfArea(out, fr, parts, a, c, wd, 'center');
   column(out, a.x, a.y + Math.round(fr.S * 0.02), a.w, [
     { role: 'kicker', name: 'Kicker', text: c.kicker, size: Math.round(fr.S * 0.034), weight: 600, font: wd.text, color: wd.accent, gap: Math.round(fr.S * 0.012), maxLines: 1, caps: true, letterSpacing: 0.14, align: 'center' },
     { role: 'headline', name: 'Greeting', text: c.headline, size: Math.round(fr.S * (fr.tall ? 0.12 : 0.105)), weight: 700, font: wd.display, color: wd.fg, gap: Math.round(fr.S * 0.02), maxLines: 2, lineHeight: 1.05, align: 'center' },
     { role: 'sub', name: 'Wish', text: c.sub, size: Math.round(fr.S * 0.038), weight: 500, font: wd.text, color: wd.fg, gap: 0, maxLines: 3, opacity: 0.92, align: 'center', lineHeight: 1.3 },
-  ], wd.script, foot - Math.round(fr.S * 0.02));
+  ], wd.script, columnEnd(input, fr, foot - Math.round(fr.S * 0.02)));
   return out;
 }
 
 function feature(input: LayoutInput, fr: Frame): CreativeLayer[] {
   const wd = wordsFor(input);
   const c = input.copy;
-  const parts = basics(input, fr, fr.wide ? 'left' : 'both');
+  const parts = basics(input, fr, fr.wide ? 'left' : 'both', c.points.length > 0);
   const out = parts.layers;
   const colW = fr.wide ? Math.round(fr.W * 0.52) - fr.m : parts.area.w;
   const a = { ...parts.area, w: colW };
-  const foot = footOfArea(out, fr, a, c, wd, 'left', colW);
+  const foot = footOfArea(out, fr, parts, a, c, wd, 'left', colW);
   const top = column(out, a.x, a.y, colW, [
     { role: 'kicker', name: 'Kicker', text: c.kicker, size: Math.round(fr.S * 0.034), weight: 700, font: wd.text, color: wd.accent, gap: Math.round(fr.S * 0.012), maxLines: 1, caps: true, letterSpacing: 0.08 },
     { role: 'headline', name: 'Headline', text: c.headline, size: Math.round(fr.S * (fr.wide ? 0.085 : 0.078)), weight: 800, font: wd.display, color: wd.fg, gap: Math.round(fr.S * 0.018), maxLines: 3, lineHeight: 1.08 },
     { role: 'sub', name: 'Second line', text: fr.wide ? '' : c.sub, size: Math.round(fr.S * 0.034), weight: 500, font: wd.text, color: wd.fg, gap: 0, maxLines: 2, opacity: 0.92 },
-  ], wd.script);
+  ], wd.script, columnEnd(input, fr, c.points.length ? fr.H : foot - Math.round(fr.S * 0.02)));
   if (c.points.length) {
     // The points sit low, over the bottom shade, each marked in the accent colour.
     const size = Math.round(fr.S * (fr.wide ? 0.04 : 0.036));
@@ -468,12 +534,12 @@ function launch(input: LayoutInput, fr: Frame): CreativeLayer[] {
   const colW = fr.wide ? Math.round(fr.W * 0.55) - fr.m : parts.area.w;
   const a = { ...parts.area, w: colW };
   const align: TextLayer['align'] = fr.wide ? 'left' : 'center';
-  const foot = footOfArea(out, fr, a, c, wd, align, colW);
+  const foot = footOfArea(out, fr, parts, a, c, wd, align, colW);
   column(out, a.x, a.y + Math.round(fr.S * 0.02), colW, [
     { role: 'kicker', name: 'Stage', text: c.kicker, size: Math.round(fr.S * 0.04), weight: 800, font: wd.text, color: wd.onAccent, gap: Math.round(fr.S * 0.025), maxLines: 1, caps: true, letterSpacing: 0.14, align, pill: { color: wd.accent, padX: Math.round(fr.S * 0.03), padY: Math.round(fr.S * 0.012), radius: Math.round(fr.S * 0.008) } },
     { role: 'headline', name: 'Headline', text: c.headline, size: Math.round(fr.S * (fr.tall ? 0.11 : 0.095)), weight: 900, font: wd.script === 'indic' ? 'mukta' : 'montserrat', color: wd.fg, gap: Math.round(fr.S * 0.02), maxLines: 3, caps: wd.script === 'latin', lineHeight: 1.02, align, letterSpacing: 0.01 },
     { role: 'sub', name: 'Date', text: c.sub, size: Math.round(fr.S * 0.045), weight: 600, font: wd.text, color: wd.fg, gap: 0, maxLines: 2, align, opacity: 0.95 },
-  ], wd.script, foot - Math.round(fr.S * 0.02));
+  ], wd.script, columnEnd(input, fr, foot - Math.round(fr.S * 0.02)));
   return out;
 }
 
@@ -485,12 +551,12 @@ function delivery(input: LayoutInput, fr: Frame): CreativeLayer[] {
   const colW = fr.wide ? Math.round(fr.W * 0.5) - fr.m : parts.area.w;
   const a = { ...parts.area, w: colW };
   const align: TextLayer['align'] = fr.wide ? 'left' : 'center';
-  const foot = footOfArea(out, fr, a, c, wd, align, colW);
+  const foot = footOfArea(out, fr, parts, a, c, wd, align, colW);
   column(out, a.x, a.y + Math.round(fr.S * 0.015), colW, [
     { role: 'kicker', name: 'Congratulations', text: c.kicker, size: Math.round(fr.S * 0.042), weight: 600, font: wd.script === 'indic' ? 'mukta' : 'dmserif', color: wd.accent, gap: Math.round(fr.S * 0.008), maxLines: 1, align, letterSpacing: 0.02 },
     { role: 'headline', name: 'Customer', text: c.headline, size: Math.round(fr.S * (fr.tall ? 0.1 : 0.09)), weight: 700, font: wd.display, color: wd.fg, gap: Math.round(fr.S * 0.018), maxLines: 2, lineHeight: 1.05, align },
     { role: 'sub', name: 'Welcome', text: c.sub, size: Math.round(fr.S * 0.036), weight: 500, font: wd.text, color: wd.fg, gap: 0, maxLines: 3, opacity: 0.92, align, lineHeight: 1.3 },
-  ], wd.script, foot - Math.round(fr.S * 0.02));
+  ], wd.script, columnEnd(input, fr, foot - Math.round(fr.S * 0.02)));
   return out;
 }
 
@@ -502,6 +568,19 @@ export function layoutCreative(input: LayoutInput): CreativeDoc {
   const f = CREATIVE_FORMAT_BY_ID[input.format];
   const layers = (BUILDERS[input.template] ?? hero)(input, fr);
   return { version: 1, format: input.format, width: f.width, height: f.height, background: input.look.panel, layers };
+}
+
+const TOP_WORDS = new Set<LayerRole | undefined>(['kicker', 'headline', 'sub', 'badge', 'points']);
+/**
+ * How far down the frame a creative's words reach from the top, as a fraction of its height —
+ * so the picture made for it can keep that band calm. Words set low (a points list over the foot
+ * shade, the panel) are not counted.
+ */
+export function wordsBand(doc: CreativeDoc): number {
+  const top = doc.layers.filter((l): l is TextLayer => l.kind === 'text' && !l.hidden && Boolean(l.text.trim()) && TOP_WORDS.has(l.role) && l.y < doc.height * 0.6);
+  if (!top.length) return 0.33;
+  const reach = Math.max(...top.map((l) => l.y + l.h)) / doc.height;
+  return Math.min(0.6, Math.max(0.3, Math.ceil(reach * 20) / 20));
 }
 
 /**

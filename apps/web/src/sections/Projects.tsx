@@ -10,6 +10,7 @@ import {
   type Project,
   type ProjectStage,
 } from '@ava/shared';
+import { ProjectKindSwitch } from './projectKind.js';
 import { useApp, api } from '../state/appStore.js';
 import { Field, Empty, useReadOnly } from '../components/ui.js';
 import { isApiError } from '../lib/client.js';
@@ -307,6 +308,7 @@ export function ProjectsSection() {
         <div className="head">
           <div className="head-left">
             <h2>Projects</h2>
+            <ProjectKindSwitch />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="step">

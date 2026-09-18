@@ -282,7 +282,7 @@ export function layerHit(l: Pick<CreativeLayer, 'x' | 'y' | 'w' | 'h' | 'rotatio
 
 /* ---- checks before a document is kept ---- */
 
-const COLOUR = /^(#[0-9a-f]{3,8}|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+\s*)?\))$/i;
+const COLOUR = /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*(,\s*[\d.]+\s*)?\))$/i;
 export const isCreativeColour = (v: unknown): v is string => typeof v === 'string' && COLOUR.test(v.trim());
 const num = (v: unknown, lo: number, hi: number): boolean => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
 export const CREATIVE_MAX_LAYERS = 60;

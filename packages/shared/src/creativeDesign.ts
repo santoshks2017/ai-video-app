@@ -7,7 +7,7 @@
  * are read back and compared: a wrong price, a dropped asterisk or an invented line is caught
  * before anyone downloads the creative.
  */
-import type { CreativeDoc } from './creative.js';
+import { CREATIVE_FORMAT_BY_ID, isAdFormat, type CreativeDoc, type CreativeFormatId } from './creative.js';
 import type { CreativeCopy } from './creativeCopy.js';
 
 /** The words the model sets on the picture. The panel's words — contact, small print — are the app's. */
@@ -21,14 +21,19 @@ export interface DesignWords {
   cta: string;
 }
 
-/** The words for the model from the copy. */
-export function designWordsOf(copy: CreativeCopy, panelCarriesCta: boolean): DesignWords {
+/**
+ * The words for the model from the copy. A banner is seen small, so it carries fewer: no list
+ * of points, and on a rectangle no second line either.
+ */
+export function designWordsOf(copy: CreativeCopy, panelCarriesCta: boolean, format?: CreativeFormatId): DesignWords {
+  const ad = format !== undefined && isAdFormat(format);
+  const roomy = format !== undefined && CREATIVE_FORMAT_BY_ID[format].height >= CREATIVE_FORMAT_BY_ID[format].width * 1.5;
   return {
     kicker: copy.kicker.trim(),
     headline: copy.headline.trim(),
-    sub: copy.sub.trim(),
+    sub: ad && !roomy ? '' : copy.sub.trim(),
     badge: copy.badge.trim(),
-    points: copy.points.map((p) => p.trim()).filter(Boolean),
+    points: ad ? [] : copy.points.map((p) => p.trim()).filter(Boolean),
     cta: panelCarriesCta ? '' : copy.cta.trim(),
   };
 }

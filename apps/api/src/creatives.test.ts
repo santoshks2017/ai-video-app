@@ -104,6 +104,12 @@ test('Nano Banana 2 is asked for the whole creative: this vehicle, these words e
   assert.match(hindi, /in Hindi, in its own script: set every conjunct and vowel sign correctly/);
   assert.match(hindi, /"नवरात्रि की शुभकामनाएँ"/);
 
+  const banner = designInstruction({ ...req, format: 'cd-300x600', zones: { logoBand: 0.09, stripTop: 0.95, logoTone: 'dark', textSide: 'top' } }, ['x']);
+  assert.match(banner, /a banner for CarDekho, India's car marketplace .*shown at just 300×600 pixels .*very few words, very large and bold/);
+  assert.match(banner, /Draw it at aspect 9:16/);
+  assert.match(banner, /The bottom 5% carries a line of small print afterwards/);
+  assert.match(banner, /The left and right 7% may be trimmed/, '300×600 is cut from 9:16');
+  assert.match(banner, /easy to read at 300×600 pixels/);
   const r = reviseInstruction(req, 'make the headline gold', 2);
   assert.match(r, /<IMAGE_REF_0> is a finished social media advertisement\.\n<IMAGE_REF_1>, <IMAGE_REF_2> are photographs of the Hyundai Creta/);
   assert.match(r, /Make this one change to the advertisement: "make the headline gold"/);

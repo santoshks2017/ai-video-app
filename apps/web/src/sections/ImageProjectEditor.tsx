@@ -57,7 +57,11 @@ import { downloadBlob, exportCreative, fileNameOf } from '../components/creative
 import { zipFiles } from '../components/creative/zip.js';
 
 const ANGLES: CarAngle[] = ['front', 'side', 'rear', 'interior'];
-const ASPECT_TEXT_BAND: Record<PictureAspect, 'top' | 'left'> = { '1:1': 'top', '4:5': 'top', '9:16': 'top', '16:9': 'left' };
+const ASPECT_TEXT_BAND: Record<PictureAspect, 'top' | 'left'> = { '1:1': 'top', '4:5': 'top', '9:16': 'top', '16:9': 'left', '5:4': 'top', '21:9': 'left' };
+const SOCIAL_FORMATS = CREATIVE_FORMATS.filter((f) => f.group === 'social');
+const AD_FORMATS = CREATIVE_FORMATS.filter((f) => f.group === 'cardekho');
+/** Whether Nano Banana 2 designs this size whole, words and all, rather than drawing its picture. */
+const designsWhole = (format: CreativeFormatId): boolean => CREATIVE_FORMAT_BY_ID[format].design === 'whole';
 
 /* ---- what the page needs from the client and the car ---- */
 
@@ -284,8 +288,11 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const pictureFor = (format: CreativeFormatId): LayoutInput['picture'] => {
     if (!p) return undefined;
     const design = p.designs?.[format];
-    if (p.pictureMode === 'design' && design) return { src: refUrl(design.image.storagePath), storagePath: design.image.storagePath, mode: 'design' };
+    if (p.pictureMode === 'design' && design && designsWhole(format)) return { src: refUrl(design.image.storagePath), storagePath: design.image.storagePath, mode: 'design' };
     const aspect = CREATIVE_FORMAT_BY_ID[format].pictureAspect;
+    const drawn = p.pictures?.[aspect];
+    // A strip wider than Nano Banana 2 draws: its picture, with the words laid on it.
+    if (p.pictureMode === 'design' && !designsWhole(format) && drawn) return { src: refUrl(drawn.image.storagePath), storagePath: drawn.image.storagePath, mode: 'scene' };
     const scene = p.pictures?.[aspect];
     if (p.pictureMode === 'scene' && scene) return { src: refUrl(scene.image.storagePath), storagePath: scene.image.storagePath, mode: 'scene' };
     if (p.pictureMode === 'upload' && p.upload) return { src: refUrl(p.upload.storagePath), storagePath: p.upload.storagePath, mode: 'upload' };
@@ -409,7 +416,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       ...(occasion ? { occasion } : {}),
       vehicle: { name: car ? `${car.brand} ${car.model}` : '', ...(p.carColour ? { colour: p.carColour } : {}), kind: car?.kind === 'bike' ? 'bike' : 'car' },
       ...(p.sceneNote?.trim() ? { note: p.sceneNote.trim() } : {}),
-      words: designWordsOf(copy, panelCarries(input).cta),
+      words: designWordsOf(copy, panelCarries(input).cta, format),
       language: { name: language.name, script: language.script },
       look: { panel: look.panel, accent: look.accent },
       zones,
@@ -450,7 +457,10 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       return next;
     });
 
-  /** Nano Banana 2 designs the creatives: the sizes asked for, or every size. */
+  /**
+   * Nano Banana 2 makes the creatives — the sizes asked for, or every size. Most it designs
+   * whole; a strip wider than it draws gets its picture, one for all the strips of a shape.
+   */
   const makeDesigns = async (only?: CreativeFormatId[]): Promise<void> => {
     if (!car || !p.heroPhoto) return setError('Pick the vehicle and the photo to build on first.');
     const formats = only ?? p.formats;
@@ -458,9 +468,12 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     setBusy('design');
     setError('');
     const refs = carRefList();
+    const whole = formats.filter(designsWhole);
+    const strips = formats.filter((f) => !designsWhole(f));
+    const stripAspects = pictureAspectsFor(strips);
     setDesignState((s) => ({ ...s, ...Object.fromEntries(formats.map((f) => [f, 'working'])) }));
-    await Promise.all(
-      formats.map(async (format) => {
+    await Promise.all([
+      ...whole.map(async (format) => {
         const r = await drawCreativeDesign(p.id, designBrief(format), refs);
         if (isApiError(r)) {
           settle(format, true);
@@ -470,7 +483,34 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
         settle(format, false);
         set((cur) => adoptDesign(cur, format, designed(r)));
       }),
-    );
+      ...stripAspects.map(async (aspect) => {
+        const mine = strips.filter((f) => CREATIVE_FORMAT_BY_ID[f].pictureAspect === aspect);
+        const r = await drawCreativeScene(
+          p.id,
+          {
+            aspect,
+            engine: engineId,
+            ...(occasion ? { occasion } : {}),
+            vehicle: { name: `${car.brand} ${car.model}`, colour: p.carColour, kind: car.kind === 'bike' ? 'bike' : 'car' },
+            note: p.sceneNote,
+            textBand: ASPECT_TEXT_BAND[aspect],
+            panel: false,
+            mood: { panel: look.panel, accent: look.accent },
+          },
+          refs,
+        );
+        for (const f of mine) settle(f, isApiError(r));
+        if (isApiError(r)) return setError(r.message);
+        const pic: ScenePicture = { image: r.image, check: r.check, model: r.model, at: Date.now() };
+        // Sizes someone changed keep their changes on the new picture.
+        set((cur) => ({
+          pictures: { ...(cur.pictures ?? {}), [aspect]: pic },
+          creatives: cur.creatives.map((c) =>
+            mine.includes(c.format) ? { ...c, doc: swapPicture(c.doc, { src: refUrl(r.image.storagePath), storagePath: r.image.storagePath }), approved: false, png: undefined, updatedAt: Date.now() } : c,
+          ),
+        }));
+      }),
+    ]);
     setBusy('');
     await refresh();
   };
@@ -545,7 +585,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     let png: StoredImage | undefined;
     try {
       const blob = await exportCreative(doc, 'image/png');
-      const file = new File([blob], fileNameOf(`${p.name}-${CREATIVE_FORMAT_BY_ID[format].label}`, 'png'), { type: 'image/png' });
+      const file = new File([blob], fileNameOf(sizeName(format), 'png'), { type: 'image/png' });
       const up = await uploadRef(file, `${p.name} · ${CREATIVE_FORMAT_BY_ID[format].label}`, 'extra');
       if (!isApiError(up)) png = { refId: up.refId, storagePath: up.storagePath, filename: up.filename, label: up.label };
     } catch {
@@ -568,18 +608,24 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const download = async (doc: CreativeDoc, format: CreativeFormatId, type: 'image/png' | 'image/jpeg'): Promise<void> => {
     try {
       const blob = await exportCreative(doc, type);
-      downloadBlob(blob, fileNameOf(`${p.name}-${CREATIVE_FORMAT_BY_ID[format].label}`, type === 'image/png' ? 'png' : 'jpg'));
+      downloadBlob(blob, fileNameOf(sizeName(format), type === 'image/png' ? 'png' : 'jpg'));
     } catch (e) {
       setError((e as Error).message);
     }
   };
+  /** A file's name: the project, the size's name and its pixels — the pixels are how an ad slot is matched. */
+  const sizeName = (format: CreativeFormatId): string => {
+    const f = CREATIVE_FORMAT_BY_ID[format];
+    return `${p.name}-${f.label}-${f.width}x${f.height}`;
+  };
+
   /** The post's words for the platform: the caption, its hashtags and the search line. */
   const captionText = [copy.caption, copy.hashtags.join(' '), copy.seo].filter((s) => s.trim()).join('\n\n');
   const downloadAll = async (): Promise<void> => {
     setDownloading(true);
     try {
       const files = await Promise.all(
-        creatives.map(async (c) => ({ name: fileNameOf(`${p.name}-${CREATIVE_FORMAT_BY_ID[c.format].label}`, 'png'), blob: await exportCreative(c.doc, 'image/png') })),
+        creatives.map(async (c) => ({ name: fileNameOf(sizeName(c.format), 'png'), blob: await exportCreative(c.doc, 'image/png') })),
       );
       // The caption travels with the pictures, ready to paste.
       if (captionText) files.push({ name: 'caption.txt', blob: new Blob([captionText], { type: 'text/plain' }) });
@@ -614,7 +660,8 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
 
   const aspectsNeeded = pictureAspectsFor(p.formats);
   const missingPictures = aspectsNeeded.filter((a) => !p.pictures?.[a]);
-  const missingDesigns = p.formats.filter((f) => !p.designs?.[f]);
+  const madeFor = (f: CreativeFormatId): boolean => (designsWhole(f) ? Boolean(p.designs?.[f]) : Boolean(p.pictures?.[CREATIVE_FORMAT_BY_ID[f].pictureAspect]));
+  const missingDesigns = p.formats.filter((f) => !madeFor(f));
   const designsMade = p.formats.length - missingDesigns.length;
   const canDesign = canCreate && busy === '' && Boolean(p.heroPhoto) && Boolean(car);
   const fieldsShown = [...engine.fields, ...(second?.fields ?? []).filter((f) => !engine.fields.some((g) => g.id === f.id))];
@@ -820,8 +867,32 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
             </Section>
 
             <Section num="03" title="Sizes and look" defaultOpen step={`${p.formats.length} size${p.formats.length === 1 ? '' : 's'}`}>
-              <div className="ip-formats">
-                {CREATIVE_FORMATS.map((f) => {
+              {(
+                [
+                  ['Social', SOCIAL_FORMATS],
+                  ['CarDekho ad set', AD_FORMATS],
+                ] as const
+              ).map(([group, list]) => {
+                const all = list.every((f) => p.formats.includes(f.id));
+                return (
+              <div key={group} className="ip-formats">
+                <div className="ip-format-group">
+                  <span>{group}</span>
+                  <button
+                    type="button"
+                    className="btn ghost small"
+                    onClick={() =>
+                      set((cur) => {
+                        const ids = list.map((f) => f.id as CreativeFormatId);
+                        const next = all ? cur.formats.filter((id) => !ids.includes(id)) : [...cur.formats, ...ids.filter((id) => !cur.formats.includes(id))];
+                        return { formats: CREATIVE_FORMATS.map((x) => x.id).filter((id) => next.includes(id)) };
+                      })
+                    }
+                  >
+                    {all ? 'Clear these' : `All ${list.length}`}
+                  </button>
+                </div>
+                {list.map((f) => {
                   const on = p.formats.includes(f.id);
                   return (
                     <label key={f.id} className={`ip-format${on ? ' on' : ''}`}>
@@ -841,6 +912,8 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                   );
                 })}
               </div>
+                );
+              })}
               <Field label="Colours">
                 <div className="seg">
                   {(
@@ -1021,8 +1094,31 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                   <div className="ip-scenes">
                     {p.formats.map((format) => {
                       const f = CREATIVE_FORMAT_BY_ID[format];
-                      const d = p.designs?.[format];
                       const state = designState[format];
+                      if (!designsWhole(format)) {
+                        const pic = p.pictures?.[f.pictureAspect];
+                        return (
+                          <div key={format} className="ip-scene ip-design">
+                            <div className="ip-scene-img" style={{ aspectRatio: f.pictureAspect.replace(':', ' / ') }}>
+                              {state === 'working' ? <span>Drawing…</span> : pic ? <img src={refUrl(pic.image.storagePath)} alt={`${f.label}, picture`} crossOrigin="anonymous" /> : <span>{state === 'failed' ? 'Failed' : `${f.width}×${f.height}`}</span>}
+                            </div>
+                            <span className="ip-check" title="Wider than Nano Banana 2 draws: it makes the picture, and the words are laid on it — every one exact and editable.">
+                              {f.width}×{f.height} · picture, words on top
+                            </span>
+                            {pic?.check && (
+                              <span className={`ip-check ${pic.check.checked ? (pic.check.same ? 'ok' : 'bad') : ''}`} title={pic.check.why}>
+                                {pic.check.checked ? (pic.check.same ? 'Same vehicle ✓' : 'Vehicle may differ') : 'Vehicle not checked'}
+                              </span>
+                            )}
+                            {pic && (
+                              <button type="button" className="btn ghost small" disabled={!canDesign} onClick={() => void makeDesigns([format])} title={`Draw the ${f.label} picture again`}>
+                                Again
+                              </button>
+                            )}
+                          </div>
+                        );
+                      }
+                      const d = p.designs?.[format];
                       const stale = d ? !sameDesignWords(d.words, designBrief(format).words) : false;
                       const words = d?.checks.words;
                       return (
@@ -1157,13 +1253,13 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                       <b>{f.label}</b>
                       <small>
                         {f.width}×{f.height}
-                        {p.pictureMode === 'design' ? (p.designs?.[format] ? ' · Nano Banana 2' : ' · draft') : ''}
+                        {p.pictureMode === 'design' ? (madeFor(format) ? ' · Nano Banana 2' : ' · draft') : ''}
                         {kept ? ' · edited' : ''}
                         {kept?.approved ? ' · approved' : ''}
                       </small>
                     </div>
                     <button type="button" className="ip-creative-canvas" onClick={() => setEditing({ format, doc })} title="Open in the editor">
-                      <CreativeCanvas doc={doc} width={f.width > f.height ? 460 : f.width === f.height ? 380 : 300} />
+                      <CreativeCanvas doc={doc} width={Math.min(f.width, f.width > f.height ? 460 : f.width === f.height ? 380 : 300)} />
                     </button>
                     <div className="ip-actions">
                       <button type="button" className="btn small primary" onClick={() => setEditing({ format, doc })}>
@@ -1185,13 +1281,13 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                           Reset
                         </button>
                       )}
-                      {p.pictureMode === 'design' && !p.designs?.[format] && canCreate && !readOnly && (
+                      {p.pictureMode === 'design' && !madeFor(format) && canCreate && !readOnly && (
                         <button type="button" className="btn small ghost" disabled={!canDesign} onClick={() => void makeDesigns([format])} title="Nano Banana 2 designs this size">
                           {designState[format] === 'working' ? 'Designing…' : 'Design it'}
                         </button>
                       )}
                     </div>
-                    {p.pictureMode === 'design' && p.designs?.[format] && canCreate && !readOnly && (
+                    {p.pictureMode === 'design' && designsWhole(format) && p.designs?.[format] && canCreate && !readOnly && (
                       <form
                         className="ip-ask"
                         onSubmit={(e) => {

@@ -27,6 +27,7 @@ import {
   layoutCreative,
   occasionIn,
   pictureAspectsFor,
+  pictureTrim,
   reorderLayer,
   tidyCopy,
   updateLayer,
@@ -39,7 +40,18 @@ import {
 
 test('every size is the platform’s own pixels, and pictures are drawn once per aspect', () => {
   const px = Object.fromEntries(CREATIVE_FORMATS.map((f) => [f.id, `${f.width}x${f.height}`]));
-  assert.deepEqual(px, { 'ig-square': '1080x1080', 'ig-portrait': '1080x1350', story: '1080x1920', landscape: '1200x628', thumbnail: '1280x720' });
+  assert.deepEqual(px, {
+    'ig-square': '1080x1080',
+    'ig-portrait': '1080x1350',
+    story: '1080x1920',
+    landscape: '1200x628',
+    thumbnail: '1280x720',
+    'cd-970x90': '970x90',
+    'cd-720x90': '720x90',
+    'cd-300x250': '300x250',
+    'cd-300x600': '300x600',
+    'cd-310x100': '310x100',
+  });
   assert.deepEqual(pictureAspectsFor(['ig-square', 'landscape', 'thumbnail', 'story']), ['1:1', '16:9', '9:16'], 'the 1.91:1 post is cut from the thumbnail’s 16:9');
 });
 
@@ -146,11 +158,12 @@ const input = (over: Partial<LayoutInput>): LayoutInput => ({
 });
 
 const words = (d: CreativeDoc) => d.layers.filter((l) => l.kind === 'text');
+const SOCIAL = CREATIVE_FORMATS.filter((f) => f.group === 'social');
 const overlaps = (a: { y: number; h: number }, b: { y: number; h: number }) => a.y < b.y + b.h && b.y < a.y + a.h;
 
 test('every template lays out every size inside its frame and out of the platform’s bands', () => {
   for (const t of CREATIVE_TEMPLATES) {
-    for (const f of CREATIVE_FORMATS) {
+    for (const f of SOCIAL) {
       for (const copy of [COPY, LONG]) {
         for (const style of ['full', 'compact', 'none'] as const) {
           const doc = layoutCreative(input({ template: t.id, format: f.id, copy, panel: { ...input({}).panel, style } }));
@@ -182,7 +195,7 @@ test('every template lays out every size inside its frame and out of the platfor
 
 test('on a square, portrait or story the dealer panel carries the call to action and the small print', () => {
   const inside = (l: { y: number; h: number }, box: { y: number; h: number }) => l.y >= box.y - 0.5 && l.y + l.h <= box.y + box.h + 0.5;
-  for (const f of CREATIVE_FORMATS) {
+  for (const f of SOCIAL) {
     for (const t of CREATIVE_TEMPLATES) {
       const doc = layoutCreative(input({ template: t.id, format: f.id }));
       const where = `${t.id} · ${f.id}`;
@@ -236,7 +249,7 @@ test('a wide size keeps the whole contact in its panel, and a logo on the right 
 });
 
 test('the band the words take at the top is measured for the picture', () => {
-  for (const f of CREATIVE_FORMATS.filter((x) => x.width / x.height <= 1.3)) {
+  for (const f of SOCIAL.filter((x) => x.width / x.height <= 1.3)) {
     for (const t of CREATIVE_TEMPLATES) {
       const doc = layoutCreative(input({ template: t.id, format: f.id }));
       const band = wordsBand(doc);
@@ -328,7 +341,7 @@ test('the words read back off a design are checked against the copy, as they are
 });
 
 test('a design carries only what must be exact: the logos, the panel and the small print', () => {
-  for (const f of CREATIVE_FORMATS) {
+  for (const f of SOCIAL) {
     const doc = layoutDesigned(input({ format: f.id, picture: { src: '/api/refs/d/design.png', storagePath: 'refs/d/design.png', mode: 'design' } }));
     const where = f.id;
     assert.equal(validateCreativeDoc(doc), null, where);
@@ -365,4 +378,51 @@ test('a new picture keeps every change made to a creative', () => {
   assert.ok(hasWordLayers(layoutCreative(input({}))), 'a layout sets them as layers');
   const none = swapPicture({ ...doc, layers: doc.layers.slice(1) }, { src: '/x.png' });
   assert.equal(none.layers[0]!.role, 'background', 'a picture is put under a creative that had none');
+});
+
+/* ---- the CarDekho ad set ---- */
+
+test('the CarDekho ad set: five banners at their own pixels, words never too small to read', () => {
+  const ads = CREATIVE_FORMATS.filter((f) => f.group === 'cardekho');
+  assert.deepEqual(ads.map((f) => `${f.width}x${f.height}`), ['970x90', '720x90', '300x250', '300x600', '310x100']);
+  assert.deepEqual(ads.map((f) => f.design), ['picture', 'picture', 'whole', 'whole', 'picture'], 'Nano Banana 2 draws no wider than 21:9');
+  assert.deepEqual(pictureAspectsFor(ads.map((f) => f.id)), ['21:9', '5:4', '9:16'], 'the three strips share one picture');
+  const offer = { ...COPY, badge: 'Benefits up to ₹50,000*', cta: 'Book a test drive', terms: '*T&C apply. Offer valid till 31 October.' };
+  for (const f of ads) {
+    for (const copy of [offer, LONG]) {
+      for (const picture of [undefined, { src: '/api/refs/s/scene.png', mode: 'scene' as const }, { src: '/api/refs/p/front.jpg', mode: 'photo' as const }, { src: '/api/refs/d/design.png', mode: 'design' as const }]) {
+        const where = `${f.id} · ${copy === LONG ? 'long' : 'offer'} · ${picture?.mode ?? 'no picture'}`;
+        const doc = picture?.mode === 'design' ? layoutDesigned(input({ format: f.id, copy, picture })) : layoutCreative(input({ format: f.id, copy, picture }));
+        assert.equal(validateCreativeDoc(doc), null, where);
+        assert.equal(doc.width, f.width);
+        assert.ok(!doc.layers.some((l) => l.role === 'panel'), `${where}: no dealer panel on a banner`);
+        for (const l of doc.layers) {
+          assert.ok(l.x >= -0.5 && l.y >= -0.5 && l.x + l.w <= f.width + 0.5 && l.y + l.h <= f.height + 0.5, `${where}: ${l.name} is outside the frame (${l.x},${l.y} ${l.w}×${l.h})`);
+        }
+        for (const l of words(doc)) {
+          assert.ok(l.kind === 'text' && (l.minSize ?? l.size * 0.5) >= 8, `${where}: ${l.name} could shrink below 8px`);
+        }
+        assert.ok(doc.layers.some((l) => l.role === 'dealer-logo'), `${where}: the logo`);
+        const terms = doc.layers.find((l) => l.role === 'terms');
+        assert.ok(terms && terms.kind === 'text' && terms.text.length <= 48, `${where}: the small print, short`);
+        if (picture?.mode === 'design') {
+          assert.ok(!doc.layers.some((l) => l.role === 'headline' || l.role === 'cta'), `${where}: the design carries the words`);
+        } else {
+          assert.ok(doc.layers.some((l) => l.role === 'headline'), `${where}: the headline`);
+          assert.ok(doc.layers.some((l) => l.role === 'cta'), `${where}: the button`);
+          const cta = doc.layers.find((l) => l.role === 'cta')!;
+          const head = doc.layers.find((l) => l.role === 'headline')!;
+          const clash = cta.x < head.x + head.w && head.x < cta.x + cta.w && cta.y < head.y + head.h && head.y < cta.y + cta.h;
+          assert.ok(!clash, `${where}: the headline runs into the button`);
+        }
+      }
+    }
+  }
+  // What Nano Banana 2 is asked to set on a banner: few words.
+  const rect = designWordsOf({ ...COPY, sub: 'A second line', points: ['One', 'Two'] }, false, 'cd-300x250');
+  assert.deepEqual([rect.sub, rect.points], ['', []]);
+  const half = designWordsOf({ ...COPY, sub: 'A second line', points: ['One', 'Two'] }, false, 'cd-300x600');
+  assert.deepEqual([half.sub, half.points], ['A second line', []]);
+  assert.deepEqual(pictureTrim('cd-300x600').sides, 'left-right');
+  assert.ok(Math.abs(pictureTrim('landscape').each - 0.035) < 0.002);
 });

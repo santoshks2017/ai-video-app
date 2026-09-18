@@ -3206,6 +3206,8 @@ fieldset.lock.inline { display: contents; }
 .ip-format b { display: block; font-size: 13px; font-weight: 600; }
 .ip-format small { font-size: 11px; color: var(--ink-faint); }
 .ip-format-shape { display: block; max-width: 30px; max-height: 30px; width: 30px; border: 1.5px solid var(--ink-muted); border-radius: 3px; justify-self: center; }
+.ip-format-shape { min-height: 4px; }
+.ip-format-group { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); padding: 2px 2px 0; }
 
 .ip-looks { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; margin-bottom: 12px; }
 .ip-look {

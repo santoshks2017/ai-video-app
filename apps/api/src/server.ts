@@ -4106,7 +4106,7 @@ app.post<{ Body: { projectId?: string; request?: CopyRequest } }>('/api/creative
   }
 });
 
-const CREATIVE_ASPECTS = new Set(['1:1', '4:5', '9:16', '16:9']);
+const CREATIVE_ASPECTS = new Set(['1:1', '4:5', '9:16', '16:9', '5:4', '21:9']);
 const STORED = /^refs\/[\w-]+\/[^/]+$/;
 /** A photo as a small JPEG, which is what the vehicle check reads. */
 const asJpeg = async (bytes: Buffer): Promise<Buffer> =>

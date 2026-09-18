@@ -7,9 +7,24 @@
  * writing of its own.
  */
 
-export type CreativeFormatId = 'ig-square' | 'ig-portrait' | 'story' | 'landscape' | 'thumbnail';
-/** The aspect ratios the image model draws a picture at. 1.91:1 is cut from 16:9. */
-export type PictureAspect = '1:1' | '4:5' | '9:16' | '16:9';
+export type CreativeFormatId =
+  | 'ig-square'
+  | 'ig-portrait'
+  | 'story'
+  | 'landscape'
+  | 'thumbnail'
+  // The CarDekho ad set: display banners for the dealer's ad slots on CarDekho.
+  | 'cd-970x90'
+  | 'cd-720x90'
+  | 'cd-300x250'
+  | 'cd-300x600'
+  | 'cd-310x100';
+/**
+ * The aspect ratios the image model draws a picture at — Nano Banana 2 goes no wider than
+ * 21:9. 1.91:1 is cut from 16:9, 300×250 from 5:4, 300×600 from 9:16.
+ */
+export type PictureAspect = '1:1' | '4:5' | '9:16' | '16:9' | '5:4' | '21:9';
+export const PICTURE_ASPECT_RATIO: Record<PictureAspect, number> = { '1:1': 1, '4:5': 4 / 5, '9:16': 9 / 16, '16:9': 16 / 9, '5:4': 5 / 4, '21:9': 21 / 9 };
 
 export interface CreativeFormat {
   id: CreativeFormatId;
@@ -25,17 +40,42 @@ export interface CreativeFormat {
    */
   safeTop: number;
   safeBottom: number;
+  group: 'social' | 'cardekho';
+  /**
+   * How Nano Banana 2 makes it: whole, words and all; or — for a strip wider than any shape
+   * it draws — a picture of the car, with the words laid on it by the app.
+   */
+  design: 'whole' | 'picture';
 }
 
+const social = { safeTop: 0, safeBottom: 0, group: 'social', design: 'whole' } as const;
+const cardekho = { safeTop: 0, safeBottom: 0, group: 'cardekho' } as const;
 export const CREATIVE_FORMATS: CreativeFormat[] = [
-  { id: 'ig-square', label: 'Instagram square', platforms: 'Instagram and Facebook feed', width: 1080, height: 1080, pictureAspect: '1:1', safeTop: 0, safeBottom: 0 },
-  { id: 'ig-portrait', label: 'Instagram portrait', platforms: 'Instagram feed, the tallest a feed post shows', width: 1080, height: 1350, pictureAspect: '4:5', safeTop: 0, safeBottom: 0 },
-  { id: 'story', label: 'Story · Reel · WhatsApp', platforms: 'Stories, reel covers and WhatsApp status', width: 1080, height: 1920, pictureAspect: '9:16', safeTop: 0.07, safeBottom: 0.1 },
-  { id: 'landscape', label: 'Facebook · LinkedIn', platforms: 'Link posts and the LinkedIn feed', width: 1200, height: 628, pictureAspect: '16:9', safeTop: 0, safeBottom: 0 },
-  { id: 'thumbnail', label: 'YouTube thumbnail', platforms: 'YouTube and X', width: 1280, height: 720, pictureAspect: '16:9', safeTop: 0, safeBottom: 0 },
+  { ...social, id: 'ig-square', label: 'Instagram square', platforms: 'Instagram and Facebook feed', width: 1080, height: 1080, pictureAspect: '1:1' },
+  { ...social, id: 'ig-portrait', label: 'Instagram portrait', platforms: 'Instagram feed, the tallest a feed post shows', width: 1080, height: 1350, pictureAspect: '4:5' },
+  { ...social, id: 'story', label: 'Story · Reel · WhatsApp', platforms: 'Stories, reel covers and WhatsApp status', width: 1080, height: 1920, pictureAspect: '9:16', safeTop: 0.07, safeBottom: 0.1 },
+  { ...social, id: 'landscape', label: 'Facebook · LinkedIn', platforms: 'Link posts and the LinkedIn feed', width: 1200, height: 628, pictureAspect: '16:9' },
+  { ...social, id: 'thumbnail', label: 'YouTube thumbnail', platforms: 'YouTube and X', width: 1280, height: 720, pictureAspect: '16:9' },
+  { ...cardekho, id: 'cd-970x90', label: 'CarDekho leaderboard', platforms: 'A leaderboard ad slot across the top of a CarDekho page', width: 970, height: 90, pictureAspect: '21:9', design: 'picture' },
+  { ...cardekho, id: 'cd-720x90', label: 'CarDekho banner', platforms: 'A banner ad slot on CarDekho', width: 720, height: 90, pictureAspect: '21:9', design: 'picture' },
+  { ...cardekho, id: 'cd-300x250', label: 'CarDekho rectangle', platforms: 'A rectangle ad slot beside the content on CarDekho', width: 300, height: 250, pictureAspect: '5:4', design: 'whole' },
+  { ...cardekho, id: 'cd-300x600', label: 'CarDekho half page', platforms: 'A half-page ad slot beside the content on CarDekho', width: 300, height: 600, pictureAspect: '9:16', design: 'whole' },
+  { ...cardekho, id: 'cd-310x100', label: 'CarDekho small banner', platforms: 'A small banner ad slot on CarDekho', width: 310, height: 100, pictureAspect: '21:9', design: 'picture' },
 ];
 export const CREATIVE_FORMAT_BY_ID = Object.fromEntries(CREATIVE_FORMATS.map((f) => [f.id, f])) as Record<CreativeFormatId, CreativeFormat>;
 export const isCreativeFormat = (v: unknown): v is CreativeFormatId => typeof v === 'string' && v in CREATIVE_FORMAT_BY_ID;
+/** A size in the CarDekho ad set: a display banner, clicked rather than read. */
+export const isAdFormat = (id: CreativeFormatId): boolean => CREATIVE_FORMAT_BY_ID[id]?.group === 'cardekho';
+/**
+ * How much of a picture drawn at the size's aspect is cut off to fit it, and from which
+ * sides, as a fraction of the picture on each of those sides.
+ */
+export function pictureTrim(id: CreativeFormatId): { sides: 'top-bottom' | 'left-right'; each: number } {
+  const f = CREATIVE_FORMAT_BY_ID[id];
+  const frame = f.width / f.height;
+  const drawn = PICTURE_ASPECT_RATIO[f.pictureAspect];
+  return frame >= drawn ? { sides: 'top-bottom', each: (1 - drawn / frame) / 2 } : { sides: 'left-right', each: (1 - frame / drawn) / 2 };
+}
 /** The picture aspects a set of sizes needs, each once. */
 export const pictureAspectsFor = (formats: CreativeFormatId[]): PictureAspect[] => [
   ...new Set(formats.filter(isCreativeFormat).map((f) => CREATIVE_FORMAT_BY_ID[f].pictureAspect)),

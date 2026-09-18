@@ -10,6 +10,7 @@
 import {
   CREATIVE_FORMAT_BY_ID,
   creativeUid,
+  isAdFormat,
   type CreativeDoc,
   type CreativeFormatId,
   type CreativeLayer,
@@ -152,6 +153,8 @@ const panelStyleOn = (input: LayoutInput): PanelStyle => (input.format === 'thum
  * small print, so neither lands on the vehicle. A wide size keeps them in its column.
  */
 function inPanelOf(input: LayoutInput, fr: Frame): { cta: boolean; terms: boolean } {
+  // A banner has no dealer panel: it is clicked, not read.
+  if (isAdFormat(input.format)) return { cta: false, terms: false };
   const style = panelStyleOn(input);
   const full = style === 'full' && Boolean(input.panel.name || input.panel.details.length);
   return { cta: full && !fr.wide && Boolean(input.copy.cta.trim()), terms: full && !fr.wide && Boolean(input.copy.terms.trim()) };
@@ -579,10 +582,209 @@ function delivery(input: LayoutInput, fr: Frame): CreativeLayer[] {
   return out;
 }
 
+/* ---- the CarDekho ad set: display banners ---- */
+
+/** The logo a banner carries: the dealer's, or the maker's when the dealer has none. White on dark ground. */
+function adLogos(input: LayoutInput, dark: boolean, both: boolean): CreativeLogoArt[] {
+  const pick = (a?: CreativeLogoArt): CreativeLogoArt | undefined => (a ? (dark && a.white ? { src: a.white.src, storagePath: a.white.storagePath } : a) : undefined);
+  const { placement } = input.logos;
+  const dealer = placement.dealer !== 'off' ? pick(input.logos.dealer) : undefined;
+  const brand = placement.brand !== 'off' ? pick(input.logos.brand) : undefined;
+  if (both) return [brand, dealer].filter((x): x is CreativeLogoArt => Boolean(x));
+  return [dealer ?? brand].filter((x): x is CreativeLogoArt => Boolean(x));
+}
+
+/** The small print a banner has room for: its first sentence, "*T&C apply." */
+const adTerms = (terms: string): string => {
+  const t = terms.trim();
+  if (!t) return '';
+  const first = t.split(/(?<=[.!])\s+/)[0] ?? t;
+  return first.length <= 48 ? first : '*T&C apply.';
+};
+
+/** A banner's picture in its place: a scene covers it; a photo shows whole, on a blurred copy of itself. */
+function adPicture(pic: NonNullable<LayoutInput['picture']>, box: { x: number; y: number; w: number; h: number }, focusX: number, focusY: number): ImageLayer {
+  const photo = pic.mode === 'photo' || pic.mode === 'upload';
+  return image('background', 'Picture', box, { src: pic.src, storagePath: pic.storagePath, fit: photo ? 'contain' : 'cover', backdrop: photo ? 'blur' : undefined, focusX, focusY });
+}
+
+/**
+ * A display banner for a CarDekho ad slot. It is shown at its own pixels beside a page's
+ * content, so its words are few and never smaller than a screen reads; it has no dealer panel —
+ * a banner is clicked, not read; and its shape decides the arrangement: a strip runs logo,
+ * words, car and button side by side, a rectangle or a half page stacks them.
+ */
+function layoutAd(input: LayoutInput): CreativeDoc {
+  const f = CREATIVE_FORMAT_BY_ID[input.format];
+  const W = f.width;
+  const H = f.height;
+  const { look, copy } = input;
+  const pic = input.picture;
+  const dark = !isLightColour(look.panel);
+  const fg = onColour(look.panel);
+  const onAccent = onColour(look.accent);
+  const font = input.script === 'indic' ? 'mukta' : 'poppins';
+  const terms = adTerms(copy.terms);
+  const out: CreativeLayer[] = [];
+  const doc = (): CreativeDoc => ({ version: 1, format: input.format, width: W, height: H, background: look.panel, layers: out });
+  const shadow = { color: 'rgba(0,0,0,0.35)', blur: 3, x: 0, y: 1 };
+  const ctaPill = (size: number) => ({ color: look.accent, padX: Math.round(size * 0.8), padY: Math.round(size * 0.4), radius: Math.round(size * 0.9) });
+  const ctaWidth = (text: string, size: number) => Math.ceil(text.length * size * avgGlyph('latin', false, 700) + ctaPill(size).padX * 2);
+  const logoRow = (arts: CreativeLogoArt[], y: number, h: number, maxW: number, align: 'left' | 'spread') => {
+    arts.forEach((a, i) => {
+      const x = align === 'spread' && i === 1 ? W - Math.round(W * 0.06) - maxW : Math.round(W * 0.06) + (align === 'left' ? i * (maxW + 8) : 0);
+      out.push(image(i === 0 && arts.length > 1 ? 'brand-logo' : 'dealer-logo', i === 0 && arts.length > 1 ? 'Brand logo' : 'Logo', { x, y, w: maxW, h }, { src: a.src, storagePath: a.storagePath, fit: 'contain', focusX: align === 'spread' && i === 1 ? 1 : 0, focusY: 0.5 }));
+    });
+  };
+
+  // A design Nano Banana 2 made whole: only the logos and the small print go on it.
+  if (pic?.mode === 'design') {
+    out.push(image('background', 'Design', { x: 0, y: 0, w: W, h: H }, { src: pic.src, storagePath: pic.storagePath, fit: 'cover', focusX: 0.5, focusY: 0.5 }));
+    const pad = Math.round(Math.min(W, H) * 0.05);
+    const tall = H / W > 1.5;
+    const logoH = Math.round(tall ? H * 0.06 : H * 0.12);
+    logoRow(adLogos(input, dark, tall), pad, logoH, Math.round(W * (tall ? 0.36 : 0.34)), tall ? 'spread' : 'left');
+    if (terms) {
+      const size = 9;
+      const h = Math.ceil(size * 1.3);
+      out.push(shape('scrim', 'Shade, foot', { x: 0, y: H - h - pad * 2, w: W, h: h + pad * 2 }, { gradient: { from: rgba(look.panel, 0), to: rgba(look.panel, 0.75), angle: 0 } }));
+      out.push(textLayer('terms', 'Small print', terms, { x: pad, y: H - pad - h, w: W - pad * 2, h }, { font, size, minSize: 8, weight: 500, color: fg, opacity: 0.85, maxLines: 1 }));
+    }
+    return doc();
+  }
+
+  const ratio = W / H;
+  if (ratio >= 5) {
+    // A leaderboard: logo · words · the car · the button, across one line.
+    const pad = Math.round(H * 0.12);
+    const logos = adLogos(input, dark, false);
+    let x = pad;
+    if (logos.length) {
+      const lw = Math.round(H * (W >= 900 ? 1.4 : 1.1));
+      out.push(image('dealer-logo', 'Logo', { x, y: Math.round(H * 0.25), w: lw, h: Math.round(H * 0.5) }, { src: logos[0]!.src, storagePath: logos[0]!.storagePath, fit: 'contain', focusX: 0, focusY: 0.5 }));
+      x += lw + pad;
+    }
+    const ctaSize = Math.max(12, Math.round(H * (W >= 900 ? 0.18 : 0.16)));
+    const ctaW = copy.cta.trim() ? Math.min(Math.round(W * 0.22), ctaWidth(copy.cta.trim(), ctaSize)) : 0;
+    const ctaH = Math.round(ctaSize * 1.2 + ctaPill(ctaSize).padY * 2);
+    const picW = pic ? Math.round(Math.min(H * (W >= 900 ? 2.33 : 1.7), W * 0.24)) : 0;
+    const picX = W - pad - ctaW - (ctaW ? pad : 0) - picW;
+    if (pic) {
+      out.push(adPicture(pic, { x: picX, y: 0, w: picW, h: H }, 0.72, 0.6));
+      out.push(shape('scrim', 'Shade, picture', { x: picX, y: 0, w: Math.round(picW * 0.4), h: H }, { gradient: { from: rgba(look.panel, 1), to: rgba(look.panel, 0), angle: 270 } }));
+    }
+    if (ctaW) out.push(textLayer('cta', 'Call to action', copy.cta, { x: W - pad - ctaW, y: Math.round((H - ctaH) / 2), w: ctaW, h: ctaH }, { font, size: ctaSize, minSize: 11, weight: 700, color: onAccent, align: 'center', valign: 'middle', pill: ctaPill(ctaSize), maxLines: 1 }));
+    const tw = Math.max(40, (pic ? picX : W - pad - ctaW - pad) - pad - x);
+    const second = copy.badge.trim() || copy.sub.trim();
+    const secondSize = Math.max(11, Math.round(H * 0.16));
+    const termsH = terms ? 11 : 0;
+    const secondH = second ? Math.round(secondSize * 1.25) : 0;
+    const headH = H - pad * 2 - secondH - termsH;
+    out.push(textLayer('headline', 'Headline', copy.headline, { x, y: pad, w: tw, h: headH }, { font, size: Math.max(14, Math.round(H * 0.28)), minSize: 13, weight: 800, color: fg, lineHeight: 1.08, maxLines: 2, valign: 'bottom', shadow }));
+    if (second) out.push(textLayer(copy.badge.trim() ? 'badge' : 'sub', copy.badge.trim() ? 'Offer' : 'Second line', second, { x, y: pad + headH, w: tw, h: secondH }, { font, size: secondSize, minSize: 10, weight: copy.badge.trim() ? 800 : 500, color: copy.badge.trim() ? look.accent : fg, maxLines: 1 }));
+    if (terms) out.push(textLayer('terms', 'Small print', terms, { x, y: H - pad - termsH, w: tw, h: termsH }, { font, size: 9, minSize: 8, weight: 500, color: fg, opacity: 0.75, maxLines: 1 }));
+    return doc();
+  }
+
+  if (ratio >= 2) {
+    // A small banner: the car on the left; the logo, the words and the button on the right.
+    const pad = Math.round(H * 0.08);
+    const picW = pic ? Math.round(W * 0.42) : 0;
+    if (pic) {
+      out.push(adPicture(pic, { x: 0, y: 0, w: picW, h: H }, 0.78, 0.6));
+      out.push(shape('scrim', 'Shade, picture', { x: Math.round(picW * 0.6), y: 0, w: picW - Math.round(picW * 0.6), h: H }, { gradient: { from: rgba(look.panel, 0), to: rgba(look.panel, 1), angle: 270 } }));
+      if (terms) out.push(textLayer('terms', 'Small print', terms, { x: 4, y: H - 14, w: picW - 8, h: 11 }, { font, size: 8, minSize: 8, weight: 500, color: '#ffffff', opacity: 0.9, maxLines: 1, shadow: { color: 'rgba(0,0,0,0.6)', blur: 3, x: 0, y: 1 } }));
+    }
+    const x = picW + pad;
+    const tw = W - x - pad;
+    const logos = adLogos(input, dark, false);
+    let y = pad;
+    if (logos.length) {
+      out.push(image('dealer-logo', 'Logo', { x, y, w: Math.min(tw, Math.round(H * 0.8)), h: Math.round(H * 0.18) }, { src: logos[0]!.src, storagePath: logos[0]!.storagePath, fit: 'contain', focusX: 0, focusY: 0.5 }));
+      y += Math.round(H * 0.18) + 4;
+    }
+    const ctaSize = 11;
+    const ctaH = Math.round(ctaSize * 1.2 + ctaPill(ctaSize).padY * 2);
+    const ctaY = H - pad - (copy.cta.trim() ? ctaH : 0);
+    out.push(textLayer('headline', 'Headline', copy.headline, { x, y, w: tw, h: Math.max(16, ctaY - 4 - y) }, { font, size: Math.max(13, Math.round(H * 0.17)), minSize: 11, weight: 800, color: fg, lineHeight: 1.08, maxLines: 2, shadow }));
+    if (copy.cta.trim()) out.push(textLayer('cta', 'Call to action', copy.cta, { x, y: ctaY, w: Math.min(tw, ctaWidth(copy.cta.trim(), ctaSize)), h: ctaH }, { font, size: ctaSize, minSize: 9, weight: 700, color: onAccent, valign: 'middle', pill: ctaPill(ctaSize), maxLines: 1 }));
+    if (!pic && terms) out.push(textLayer('terms', 'Small print', terms, { x, y: H - 12, w: tw, h: 11 }, { font, size: 8, minSize: 8, weight: 500, color: fg, opacity: 0.75, maxLines: 1 }));
+    return doc();
+  }
+
+  const pad = Math.round(W * 0.05);
+  const ctaSize = Math.max(12, Math.round(W * 0.045));
+  const ctaH = Math.round(ctaSize * 1.2 + ctaPill(ctaSize).padY * 2);
+  const ctaW = copy.cta.trim() ? Math.min(W - pad * 2, ctaWidth(copy.cta.trim(), ctaSize)) : 0;
+  const termsH = terms ? 11 : 0;
+
+  if (H / W < 1.5) {
+    // A rectangle: the picture above, the words and the button on the ground below.
+    const picH = Math.round(H * 0.56);
+    if (pic) {
+      out.push(adPicture(pic, { x: 0, y: 0, w: W, h: picH }, 0.5, 0.62));
+      out.push(shape('scrim', 'Shade, top', { x: 0, y: 0, w: W, h: Math.round(picH * 0.4) }, { gradient: { from: rgba(look.panel, 0.7), to: rgba(look.panel, 0), angle: 0 } }));
+      out.push(shape('scrim', 'Shade, picture', { x: 0, y: Math.round(picH * 0.7), w: W, h: picH - Math.round(picH * 0.7) }, { gradient: { from: rgba(look.panel, 0), to: rgba(look.panel, 1), angle: 0 } }));
+    }
+    // The logo sits on the picture, which may be as light as a studio photograph: it gets a
+    // tile of the creative's own colour, so it reads on anything.
+    const logos = adLogos(input, dark, false);
+    if (logos.length && pic) {
+      const lh = Math.round(H * 0.12);
+      out.push(shape('accent', 'Logo tile', { x: pad - 6, y: pad - 5, w: Math.round(W * 0.34) + 12, h: lh + 10 }, { fill: rgba(look.panel, 0.88), radius: 6 }));
+    }
+    logoRow(logos, pad, Math.round(H * 0.12), Math.round(W * 0.34), 'left');
+    const second = copy.badge.trim() || copy.sub.trim();
+    const secondSize = 12;
+    const secondH = second ? Math.round(secondSize * 1.3) : 0;
+    const bottom = H - pad - Math.max(ctaW ? ctaH : 0, termsH);
+    const y0 = picH - Math.round(H * 0.04);
+    const headH = Math.max(18, bottom - 6 - secondH - y0);
+    out.push(textLayer('headline', 'Headline', copy.headline, { x: pad, y: y0, w: W - pad * 2, h: headH }, { font, size: Math.max(16, Math.round(W * 0.07)), minSize: 13, weight: 800, color: fg, lineHeight: 1.08, maxLines: 2, valign: 'bottom', shadow }));
+    if (second) out.push(textLayer(copy.badge.trim() ? 'badge' : 'sub', copy.badge.trim() ? 'Offer' : 'Second line', second, { x: pad, y: y0 + headH, w: W - pad * 2, h: secondH }, { font, size: secondSize, minSize: 10, weight: copy.badge.trim() ? 800 : 500, color: copy.badge.trim() ? look.accent : fg, maxLines: 1 }));
+    if (ctaW) out.push(textLayer('cta', 'Call to action', copy.cta, { x: W - pad - ctaW, y: H - pad - ctaH, w: ctaW, h: ctaH }, { font, size: ctaSize, minSize: 10, weight: 700, color: onAccent, align: 'right', valign: 'middle', pill: ctaPill(ctaSize), maxLines: 1 }));
+    if (terms) out.push(textLayer('terms', 'Small print', terms, { x: pad, y: H - pad - termsH, w: W - pad * 2 - (ctaW ? ctaW + 6 : 0), h: termsH }, { font, size: 9, minSize: 8, weight: 500, color: fg, opacity: 0.75, maxLines: 1 }));
+    return doc();
+  }
+
+  // A half page: logos, the words, the car, the offer and the button, stacked.
+  const logoH = Math.round(H * 0.06);
+  logoRow(adLogos(input, dark, true), pad, logoH, Math.round(W * 0.36), 'spread');
+  let y = pad + logoH + Math.round(H * 0.03);
+  const column = (role: LayerRole, name: string, text: string, size: number, weight: number, lines: number, extra: Partial<TextLayer> = {}) => {
+    if (!text.trim()) return;
+    const n = linesFor(text, size, W - pad * 2, { script: input.script ?? 'latin', caps: extra.caps, weight, max: lines });
+    const h = Math.ceil(n * size * (extra.lineHeight ?? 1.12) + size * 0.2);
+    out.push(textLayer(role, name, text, { x: pad, y, w: W - pad * 2, h }, { font, size, minSize: Math.max(10, Math.round(size * 0.7)), weight, color: fg, align: 'center', maxLines: lines, shadow, ...extra }));
+    y += h + 6;
+  };
+  column('kicker', 'Kicker', copy.kicker, 12, 700, 1, { caps: true, letterSpacing: 0.08, color: look.accent, shadow: undefined });
+  column('headline', 'Headline', copy.headline, Math.max(20, Math.round(W * 0.09)), 800, 3, { lineHeight: 1.06 });
+  column('sub', 'Second line', copy.sub, 13, 500, 2, { opacity: 0.92 });
+  const footTop = H - pad - termsH - (ctaW ? ctaH + 8 : 0);
+  const badgeSize = Math.max(14, Math.round(W * 0.06));
+  const badgeH = copy.badge.trim() ? Math.round(badgeSize * 1.2 + badgeSize * 0.7) : 0;
+  const picTop = y;
+  const picBottom = footTop - (badgeH ? badgeH + 8 : 0);
+  if (pic && picBottom - picTop > 60) {
+    out.push(adPicture(pic, { x: 0, y: picTop, w: W, h: picBottom - picTop }, 0.5, 0.7));
+    out.push(shape('scrim', 'Shade, picture', { x: 0, y: picTop, w: W, h: Math.round((picBottom - picTop) * 0.25) }, { gradient: { from: rgba(look.panel, 1), to: rgba(look.panel, 0), angle: 0 } }));
+    out.push(shape('scrim', 'Shade, picture', { x: 0, y: picBottom - Math.round((picBottom - picTop) * 0.25), w: W, h: Math.round((picBottom - picTop) * 0.25) }, { gradient: { from: rgba(look.panel, 0), to: rgba(look.panel, 1), angle: 0 } }));
+  }
+  if (badgeH) {
+    out.push(textLayer('badge', 'Offer', copy.badge, { x: pad, y: picBottom + 4, w: W - pad * 2, h: badgeH }, { font: input.script === 'indic' ? 'mukta' : 'oswald', size: badgeSize, minSize: 12, weight: 800, color: onAccent, align: 'center', valign: 'middle', maxLines: 1, pill: { color: look.accent, padX: Math.round(badgeSize * 0.5), padY: Math.round(badgeSize * 0.3), radius: Math.round(badgeSize * 0.25) } }));
+  }
+  if (ctaW) out.push(textLayer('cta', 'Call to action', copy.cta, { x: Math.round((W - ctaW) / 2), y: H - pad - termsH - ctaH - (terms ? 6 : 0), w: ctaW, h: ctaH }, { font, size: ctaSize, minSize: 10, weight: 700, color: onAccent, align: 'center', valign: 'middle', pill: ctaPill(ctaSize), maxLines: 1 }));
+  if (terms) out.push(textLayer('terms', 'Small print', terms, { x: pad, y: H - pad - termsH, w: W - pad * 2, h: termsH }, { font, size: 9, minSize: 8, weight: 500, color: fg, opacity: 0.75, align: 'center', maxLines: 1 }));
+  return doc();
+}
+
 const BUILDERS: Record<CreativeTemplateId, (input: LayoutInput, fr: Frame) => CreativeLayer[]> = { hero, offer, festival, feature, launch, delivery };
 
 /** A creative laid out for one size from the copy, the look and the client's logos. */
 export function layoutCreative(input: LayoutInput): CreativeDoc {
+  // A banner is laid out for its slot, whatever kind of post it carries.
+  if (isAdFormat(input.format)) return layoutAd(input);
   const fr = frameOf(input.format);
   const f = CREATIVE_FORMAT_BY_ID[input.format];
   const layers = (BUILDERS[input.template] ?? hero)(input, fr);
@@ -608,6 +810,7 @@ export function wordsBand(doc: CreativeDoc): number {
  * action is the panel's where the panel carries it, and otherwise the design's own.
  */
 export function layoutDesigned(input: LayoutInput): CreativeDoc {
+  if (isAdFormat(input.format)) return layoutAd({ ...input, picture: input.picture ? { ...input.picture, mode: 'design' } : undefined });
   const fr = frameOf(input.format);
   const f = CREATIVE_FORMAT_BY_ID[input.format];
   const design: LayoutInput = { ...input, picture: input.picture ? { ...input.picture, mode: 'design' } : undefined };

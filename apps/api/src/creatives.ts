@@ -13,6 +13,8 @@ import {
   CREATIVE_ENGINE_BY_ID,
   CREATIVE_FORMAT_BY_ID,
   DEFAULT_USD_TO_INR,
+  isAdFormat,
+  pictureTrim,
   contactBlock,
   emptyCopy,
   isCreativeEngine,
@@ -343,12 +345,18 @@ function layoutBrief(req: DesignRequest, noun: string): string[] {
   }
   if (z.stripTop < 1) {
     out.push(
-      `Everything below ${pct(z.stripTop)}% of the height is covered afterwards by a solid strip with the dealership's details: put no words there, and keep the ${noun}'s wheels above it.`,
+      isAdFormat(req.format)
+        ? `The bottom ${100 - pct(z.stripTop)}% carries a line of small print afterwards: keep it plain, with no words.`
+        : `Everything below ${pct(z.stripTop)}% of the height is covered afterwards by a solid strip with the dealership's details: put no words there, and keep the ${noun}'s wheels above it.`,
     );
   } else if (f.safeBottom > 0) {
     out.push(`Keep every word out of the bottom ${pct(f.safeBottom) + 2}% — the platform's own controls cover it.`);
   }
-  if (f.width / f.height > 1.85) out.push(`The top and bottom 5% may be trimmed: keep every word and the whole ${noun} clear of them.`);
+  // A size not drawn at its own shape is cut from the picture: nothing that matters may sit where it is cut.
+  const trim = pictureTrim(req.format);
+  if (trim.each > 0.015) {
+    out.push(`The ${trim.sides === 'top-bottom' ? 'top and bottom' : 'left and right'} ${Math.ceil(trim.each * 100) + 1}% may be trimmed: keep every word and the whole ${noun} clear of them.`);
+  }
   out.push('Leave comfortable margins: no word closer than 5% to any edge of the frame.');
   return out;
 }
@@ -361,8 +369,11 @@ export function designInstruction(req: DesignRequest, refLabels: string[]): stri
   const second = req.secondary ? CREATIVE_ENGINE_BY_ID[req.secondary] : undefined;
   const template = req.template ?? e?.template ?? 'hero';
   const scene = (req.occasion && OCCASION_SCENES[req.occasion]) || e?.scene || 'a clean, premium setting';
+  const ad = isAdFormat(req.format);
   return [
-    `Design one finished social media advertisement for an Indian ${noun} dealership: a ${f.label} post (${f.platforms}), ${f.width}×${f.height} pixels, aspect ${f.pictureAspect}.`,
+    ad
+      ? `Design one finished display advertisement for an Indian ${noun} dealership: a banner for CarDekho, India's car marketplace (${f.platforms}). It is shown at just ${f.width}×${f.height} pixels on a web page, so it carries very few words, very large and bold, and one clear button. Draw it at aspect ${f.pictureAspect}.`
+      : `Design one finished social media advertisement for an Indian ${noun} dealership: a ${f.label} post (${f.platforms}), ${f.width}×${f.height} pixels, aspect ${f.pictureAspect}.`,
     e ? `It is a ${e.label} post${second ? `, blended with ${second.label}` : ''}. ${e.purpose}` : '',
     e?.avoid.length ? `Avoid: ${e.avoid.join('; ')}.` : '',
     '',
@@ -386,7 +397,7 @@ export function designInstruction(req: DesignRequest, refLabels: string[]): stri
       : '',
     '',
     '## Typography and colour',
-    `${TYPE_MOOD[template]}. Type is large, crisp and easy to read on a phone, with strong contrast against what is behind it — a soft shade or a clean band behind the words where the picture is busy. The headline takes at most two lines.`,
+    `${TYPE_MOOD[template]}. Type is large, crisp and easy to read ${ad ? `at ${f.width}×${f.height} pixels` : 'on a phone'}, with strong contrast against what is behind it — a soft shade or a clean band behind the words where the picture is busy. The headline takes at most two lines.`,
     `The creative's colours are ${req.look.panel} and ${req.look.accent}: use ${req.look.accent} for the badge, the button and small accents.`,
     '',
     '## Layout',

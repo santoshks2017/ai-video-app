@@ -29,7 +29,18 @@ export function ProjectsHome() {
 }
 
 /** Sizes by a word, for a card. */
-const SHORT: Record<CreativeFormatId, string> = { 'ig-square': 'Square', 'ig-portrait': 'Portrait', story: 'Story', landscape: 'Landscape', thumbnail: 'Thumbnail' };
+const SHORT: Record<CreativeFormatId, string> = {
+  'ig-square': 'Square',
+  'ig-portrait': 'Portrait',
+  story: 'Story',
+  landscape: 'Landscape',
+  thumbnail: 'Thumbnail',
+  'cd-970x90': '970×90',
+  'cd-720x90': '720×90',
+  'cd-300x250': '300×250',
+  'cd-300x600': '300×600',
+  'cd-310x100': '310×100',
+};
 
 /** The image projects: one post each, in every size it goes out in. */
 export function ImageProjectsSection() {

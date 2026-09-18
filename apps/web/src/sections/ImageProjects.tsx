@@ -73,6 +73,8 @@ export function ImageProjectsSection() {
   const thumbOf = (p: ImageProject): string | null => {
     const saved = p.creatives.find((c) => c.approved && c.png) ?? p.creatives.find((c) => c.png);
     if (saved?.png) return refUrl(saved.png.storagePath);
+    const design = Object.values(p.designs ?? {}).find(Boolean);
+    if (design) return refUrl(design.image.storagePath);
     const pic = Object.values(p.pictures ?? {}).find(Boolean);
     if (pic) return refUrl(pic.image.storagePath);
     return p.heroPhoto ? refUrl(p.heroPhoto.storagePath) : null;

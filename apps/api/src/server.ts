@@ -112,7 +112,17 @@ import {
   type Caller,
 } from './users.js';
 import { listAll, getOne, upsert, patch, patchTotals, remove, addToTotals, type Collection } from './library.js';
-import { CreativeError, drawCreativeScene, writeCreativeCopy, type CopyRequest, type SceneRequest } from './creatives.js';
+import {
+  CreativeError,
+  drawCreativeDesign,
+  drawCreativeScene,
+  readCreativeWords,
+  reviseCreativeDesign,
+  writeCreativeCopy,
+  type CopyRequest,
+  type DesignRequest,
+  type SceneRequest,
+} from './creatives.js';
 import { writeScript, ScriptError, type ScriptScene, type ScriptLanguage } from './script.js';
 import { generateMusicBed } from './lyria.js';
 import {
@@ -151,6 +161,15 @@ import {
   validateEditLook,
   type EditLayer,
   type EditLook,
+  UNREAD_WORDS,
+  compareWords,
+  isCreativeColour,
+  isCreativeEngine,
+  isCreativeFormat,
+  isCreativeTemplate,
+  verdictWeight,
+  type DesignWords,
+  type WordsVerdict,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title, syncColours } from './carSync.js';
 import { seePhotos, seeDealerPhotos, findPeople } from './vision.js';
@@ -4138,6 +4157,177 @@ app.post<{ Body: { projectId?: string; scene?: SceneRequest; photos?: Array<{ st
       const e = err as CreativeError;
       app.log.warn({ code: e.code, message: e.message }, 'creative scene failed');
       return reply.code(e.status && e.status >= 400 ? e.status : 502).send({ code: e.code ?? 'scene-failed', message: e.message });
+    }
+  },
+);
+
+/* ---- Nano Banana 2 designs the whole creative ---- */
+
+const text = (v: unknown, max: number): string => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const unit = (v: unknown, lo: number, hi: number, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
+
+/** A design request as sent, cut to what the instruction may carry; null when it cannot be made. */
+function cleanDesign(raw: unknown): DesignRequest | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const d = raw as Record<string, any>;
+  if (!isCreativeFormat(d.format) || !isCreativeEngine(d.engine)) return null;
+  const name = text(d.vehicle?.name, 80);
+  if (!name) return null;
+  const w = (d.words ?? {}) as Record<string, unknown>;
+  const words: DesignWords = {
+    kicker: text(w.kicker, 80),
+    headline: text(w.headline, 160),
+    sub: text(w.sub, 200),
+    badge: text(w.badge, 80),
+    points: (Array.isArray(w.points) ? w.points : []).map((x) => text(x, 120)).filter(Boolean).slice(0, 6),
+    cta: text(w.cta, 60),
+  };
+  if (!words.headline && !words.kicker && !words.sub) return null;
+  const z = (d.zones ?? {}) as Record<string, unknown>;
+  return {
+    format: d.format,
+    engine: d.engine,
+    ...(isCreativeEngine(d.secondary) ? { secondary: d.secondary } : {}),
+    ...(isCreativeTemplate(d.template) ? { template: d.template } : {}),
+    ...(text(d.occasion, 60) ? { occasion: text(d.occasion, 60) } : {}),
+    vehicle: { name, ...(text(d.vehicle?.colour, 60) ? { colour: text(d.vehicle?.colour, 60) } : {}), kind: d.vehicle?.kind === 'bike' ? 'bike' : 'car' },
+    ...(text(d.note, 300) ? { note: text(d.note, 300) } : {}),
+    words,
+    language: { name: text(d.language?.name, 40) || 'English', script: d.language?.script === 'indic' ? 'indic' : 'latin' },
+    look: {
+      panel: isCreativeColour(d.look?.panel) ? d.look.panel : '#0F1E33',
+      accent: isCreativeColour(d.look?.accent) ? d.look.accent : '#E8590C',
+    },
+    zones: {
+      logoBand: unit(z.logoBand, 0, 0.5, 0),
+      stripTop: unit(z.stripTop, 0.5, 1, 1),
+      logoTone: z.logoTone === 'light' ? 'light' : 'dark',
+      textSide: z.textSide === 'left' ? 'left' : 'top',
+    },
+  };
+}
+
+/** The vehicle's photographs, as JPEGs for the model, first photo first. */
+async function carRefs(photos: unknown, name: string, max: number): Promise<Array<{ bytes: Buffer; mimeType: string; label: string }>> {
+  const picked = (Array.isArray(photos) ? photos : [])
+    .filter((p): p is { storagePath: string; label?: string } => typeof p?.storagePath === 'string' && STORED.test(p.storagePath))
+    .slice(0, max);
+  const refs: Array<{ bytes: Buffer; mimeType: string; label: string }> = [];
+  for (const [i, p] of picked.entries()) {
+    const o = await readObject(p.storagePath).catch(() => null);
+    if (!o) continue;
+    const bytes = await asJpeg(o.bytes).catch(() => null);
+    if (bytes) refs.push({ bytes, mimeType: 'image/jpeg', label: text(p.label, 120) || (i === 0 ? `the ${name}` : `the ${name}, another side`) });
+  }
+  return refs;
+}
+
+/** Large enough that the small words on a story can still be read back. */
+const asReadable = async (bytes: Buffer): Promise<Buffer> =>
+  sharp(bytes).rotate().resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
+
+/** What a design is checked for: the vehicle against its photograph, and every word against the copy. */
+async function checkDesign(
+  bytes: Buffer,
+  design: DesignRequest,
+  reference: Buffer | undefined,
+  key: string,
+): Promise<{ vehicle: { same: boolean; checked: boolean; why?: string }; words: WordsVerdict; costInr: number }> {
+  const [vehicle, read] = await Promise.all([
+    reference ? checkVehicleFrame(await asJpeg(bytes), reference, design.vehicle.name, key) : Promise.resolve({ same: true, checked: false, why: '' }),
+    readCreativeWords(await asReadable(bytes), key),
+  ]);
+  // The maker's badge and the model's name, as they are on the vehicle itself.
+  const badge = [design.vehicle.name, ...design.vehicle.name.split(/\s+/)];
+  return {
+    vehicle: { same: vehicle.same, checked: vehicle.checked, ...(vehicle.why ? { why: vehicle.why } : {}) },
+    words: read ? compareWords(design.words, read.texts, badge) : UNREAD_WORDS,
+    costInr: read?.costInr ?? 0,
+  };
+}
+
+async function storeDesign(format: string, out: { bytes: Buffer; mimeType: string }): Promise<{ image: StoredImage; width?: number; height?: number }> {
+  const ext = /jpe?g/i.test(out.mimeType) ? 'jpg' : 'png';
+  const put = await putRef(`creative-${format}.${ext}`, out.mimeType, out.bytes);
+  const filename = put.storagePath.split('/').pop()!;
+  const meta = await sharp(out.bytes).metadata().catch(() => ({ width: undefined, height: undefined }));
+  return {
+    image: { refId: put.refId, storagePath: put.storagePath, url: `/api/refs/${put.refId}/${filename}`, label: `Design ${format}`, filename },
+    width: meta.width,
+    height: meta.height,
+  };
+}
+
+/**
+ * A whole creative for one size, designed by Nano Banana 2: the real vehicle from its
+ * photographs, in a scene, with the copy set into it. The vehicle is checked against the first
+ * photograph and every word read back against the copy; when either check fails it is made
+ * once more, and the better of the two is kept. The verdicts go back with it either way.
+ */
+app.post<{ Body: { projectId?: string; design?: unknown; photos?: unknown } }>('/api/creatives/design', async (req, reply) => {
+  const key = await googleKey();
+  if (!key) return reply.code(503).send({ code: 'script-no-key', message: 'Add a Google (Gemini) key in APIs & models first.' });
+  const design = cleanDesign(req.body?.design);
+  if (!design) return reply.code(400).send({ code: 'bad-request', message: 'Pick the vehicle and the sizes, and give the creative its words first.' });
+  const refs = await carRefs(req.body?.photos, design.vehicle.name, 4);
+  if (!refs.length) return reply.code(400).send({ code: 'design-no-photo', message: 'Pick a photo of the vehicle first — the creative is built from it.' });
+  try {
+    const attempt = async () => {
+      const out = await drawCreativeDesign(design, refs, key);
+      const checks = await checkDesign(out.bytes, design, refs[0]!.bytes, key);
+      return { out, checks, spent: out.costInr + checks.costInr, weight: verdictWeight(checks.vehicle, checks.words) };
+    };
+    let best = await attempt();
+    let spent = best.spent;
+    if (best.weight > 0) {
+      const again = await attempt().catch(() => null);
+      if (again) {
+        spent += again.spent;
+        if (again.weight < best.weight) best = again;
+      }
+    }
+    const stored = await storeDesign(design.format, best.out);
+    const projectId = req.body?.projectId;
+    if (typeof projectId === 'string' && projectId) void addToTotals('imageProjects', projectId, spent).catch(() => {});
+    return { ...stored, words: design.words, checks: { vehicle: best.checks.vehicle, words: best.checks.words }, model: best.out.model };
+  } catch (err) {
+    const e = err as CreativeError;
+    app.log.warn({ code: e.code, message: e.message }, 'creative design failed');
+    return reply.code(e.status && e.status >= 400 ? e.status : 502).send({ code: e.code ?? 'design-failed', message: e.message });
+  }
+});
+
+/**
+ * One change to a creative Nano Banana 2 made — "make the headline gold", "move the car
+ * left" — with everything else kept as it was. Checked like a new one; not made twice.
+ */
+app.post<{ Body: { projectId?: string; design?: unknown; image?: { storagePath?: unknown }; change?: unknown; photos?: unknown } }>(
+  '/api/creatives/revise',
+  async (req, reply) => {
+    const key = await googleKey();
+    if (!key) return reply.code(503).send({ code: 'script-no-key', message: 'Add a Google (Gemini) key in APIs & models first.' });
+    const design = cleanDesign(req.body?.design);
+    const change = text(req.body?.change, 400);
+    const path = req.body?.image?.storagePath;
+    if (!design || !change || typeof path !== 'string' || !STORED.test(path)) {
+      return reply.code(400).send({ code: 'bad-request', message: 'Say what to change on this creative.' });
+    }
+    const current = await readObject(path).catch(() => null);
+    if (!current) return reply.code(404).send({ code: 'not-found', message: 'That creative is no longer stored. Make it again.' });
+    const refs = await carRefs(req.body?.photos, design.vehicle.name, 3);
+    try {
+      const png = await sharp(current.bytes).png().toBuffer();
+      const out = await reviseCreativeDesign(design, change, { bytes: png, mimeType: 'image/png' }, refs, key);
+      const checks = await checkDesign(out.bytes, design, refs[0]?.bytes, key);
+      const stored = await storeDesign(design.format, out);
+      const projectId = req.body?.projectId;
+      if (typeof projectId === 'string' && projectId) void addToTotals('imageProjects', projectId, out.costInr + checks.costInr).catch(() => {});
+      return { ...stored, words: design.words, checks: { vehicle: checks.vehicle, words: checks.words }, model: out.model, revision: change };
+    } catch (err) {
+      const e = err as CreativeError;
+      app.log.warn({ code: e.code, message: e.message }, 'creative revision failed');
+      return reply.code(e.status && e.status >= 400 ? e.status : 502).send({ code: e.code ?? 'revise-failed', message: e.message });
     }
   },
 );

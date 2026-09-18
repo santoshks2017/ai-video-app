@@ -10,10 +10,18 @@ import {
   classifyCreative,
   creativeLook,
   creativeUid,
+  designWordsOf,
+  designZonesOf,
   emptyCopy,
   factRows,
   formatInr,
+  hasWordLayers,
+  isLightColour,
   layoutCreative,
+  layoutDesigned,
+  panelCarries,
+  sameDesignWords,
+  swapPicture,
   wordsBand,
   logoLayout,
   occasionIn,
@@ -28,6 +36,7 @@ import {
   type CreativeEngineId,
   type CreativeFormatId,
   type CreativeLogoArt,
+  type DesignedCreative,
   type ImageCreative,
   type ImageProject,
   type LayoutInput,
@@ -40,7 +49,7 @@ import {
 import { api, imageTabId, useApp } from '../state/appStore.js';
 import { isApiError, uploadRef } from '../lib/client.js';
 import { refUrl } from '../lib/api.js';
-import { drawCreativeScene, writeCreativeCopy, type CopyRequest } from '../lib/creatives.js';
+import { drawCreativeDesign, drawCreativeScene, reviseCreativeDesign, writeCreativeCopy, type CopyRequest, type DesignRequest, type DesignResult } from '../lib/creatives.js';
 import { Banner, Confirm, Field, ImageUpload, Lock, Section, useReadOnly } from '../components/ui.js';
 import { CreativeCanvas } from '../components/creative/CreativeCanvas.js';
 import { CreativeEditor, type EditorPicture } from '../components/creative/CreativeEditor.js';
@@ -193,9 +202,13 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const dirty = useRef(false);
   const removed = useRef(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
-  const [busy, setBusy] = useState<'' | 'copy' | 'scene'>('');
+  const [busy, setBusy] = useState<'' | 'copy' | 'scene' | 'design'>('');
   const [error, setError] = useState('');
   const [sceneState, setSceneState] = useState<Partial<Record<PictureAspect, 'working' | 'failed'>>>({});
+  /** Sizes Nano Banana 2 is designing or changing now, or failed on. */
+  const [designState, setDesignState] = useState<Partial<Record<CreativeFormatId, 'working' | 'failed'>>>({});
+  /** A change being asked for, size by size. */
+  const [changes, setChanges] = useState<Partial<Record<CreativeFormatId, string>>>({});
   /** The size open in the editor, with the document as it was when it opened. */
   const [editing, setEditing] = useState<{ format: CreativeFormatId; doc: CreativeDoc } | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -264,9 +277,14 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     return tidyCopy(draftCopy(p, client, car), { client: copyClientOf(client), model: car?.model, validity: p.facts.validity, native: language.script === 'indic' });
   }, [p, client, car, language.script]);
 
-  /** The picture a size is built on: its scene, the photo as it is, or the upload. */
+  /**
+   * The picture a size is built on: what Nano Banana 2 designed for it, its scene, the photo as
+   * it is, or the upload. A size not designed yet shows a draft laid out on the photo.
+   */
   const pictureFor = (format: CreativeFormatId): LayoutInput['picture'] => {
     if (!p) return undefined;
+    const design = p.designs?.[format];
+    if (p.pictureMode === 'design' && design) return { src: refUrl(design.image.storagePath), storagePath: design.image.storagePath, mode: 'design' };
     const aspect = CREATIVE_FORMAT_BY_ID[format].pictureAspect;
     const scene = p.pictures?.[aspect];
     if (p.pictureMode === 'scene' && scene) return { src: refUrl(scene.image.storagePath), storagePath: scene.image.storagePath, mode: 'scene' };
@@ -275,17 +293,20 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     return undefined;
   };
 
-  const autoDoc = (format: CreativeFormatId): CreativeDoc =>
-    layoutCreative({
-      format,
-      template: p?.templateId ?? engine.template,
-      copy,
-      look,
-      picture: pictureFor(format),
-      logos: { dealer: art(client?.logo, client?.logoWhite), brand: art(client?.brandLogo, client?.brandLogoWhite), placement: logoLayout(client?.logoPlacement) },
-      panel: panelOf(client, p?.panelStyle ?? 'full'),
-      script: language.script,
-    });
+  const inputFor = (format: CreativeFormatId): LayoutInput => ({
+    format,
+    template: p?.templateId ?? engine.template,
+    copy,
+    look,
+    picture: pictureFor(format),
+    logos: { dealer: art(client?.logo, client?.logoWhite), brand: art(client?.brandLogo, client?.brandLogoWhite), placement: logoLayout(client?.logoPlacement) },
+    panel: panelOf(client, p?.panelStyle ?? 'full'),
+    script: language.script,
+  });
+  const autoDoc = (format: CreativeFormatId): CreativeDoc => {
+    const input = inputFor(format);
+    return input.picture?.mode === 'design' ? layoutDesigned(input) : layoutCreative(input);
+  };
 
   const creatives = useMemo(
     () =>
@@ -360,6 +381,120 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     return shown ? wordsBand(shown.doc) : undefined;
   };
 
+  /** The vehicle's photographs for the model: the chosen one first, then its other sides. */
+  const carRefList = (): Array<{ storagePath: string; label: string }> => {
+    if (!car || !p.heroPhoto) return [];
+    const hero = p.heroPhoto;
+    const others = photos.filter((x) => x.photo.storagePath !== hero.storagePath);
+    return [
+      { storagePath: hero.storagePath, label: `the ${car.brand} ${car.model}${hero.angle ? `, ${hero.angle}` : ''}` },
+      // The vehicle's other sides; the cabin only when the picture is of the cabin.
+      ...ANGLES.filter((a) => a !== 'interior' || hero.angle === 'interior')
+        .map((a) => others.find((x) => x.angle === a && a !== hero.angle))
+        .filter((x): x is { angle: CarAngle; photo: StoredImage } => Boolean(x))
+        .slice(0, 3)
+        .map((x) => ({ storagePath: x.photo.storagePath, label: `the ${car.brand} ${car.model}, ${x.angle}` })),
+    ];
+  };
+
+  /** What Nano Banana 2 is asked to design for one size: the words, the look, and where the app's logos and panel go. */
+  const designBrief = (format: CreativeFormatId): DesignRequest => {
+    const input = inputFor(format);
+    const zones = designZonesOf(layoutDesigned({ ...input, picture: { src: '', mode: 'design' } }), isLightColour(look.panel) ? 'light' : 'dark');
+    return {
+      format,
+      engine: engineId,
+      ...(p.engine?.secondary ? { secondary: p.engine.secondary } : {}),
+      ...(p.templateId ? { template: p.templateId } : {}),
+      ...(occasion ? { occasion } : {}),
+      vehicle: { name: car ? `${car.brand} ${car.model}` : '', ...(p.carColour ? { colour: p.carColour } : {}), kind: car?.kind === 'bike' ? 'bike' : 'car' },
+      ...(p.sceneNote?.trim() ? { note: p.sceneNote.trim() } : {}),
+      words: designWordsOf(copy, panelCarries(input).cta),
+      language: { name: language.name, script: language.script },
+      look: { panel: look.panel, accent: look.accent },
+      zones,
+    };
+  };
+
+  /**
+   * A new design for a size someone already changed: their changes stay, on the new picture.
+   * A draft they changed before there was any design had its words as layers, which the design
+   * now carries itself — that one is laid out afresh. Either way it is approved again.
+   */
+  const adoptDesign = (cur: ImageProject, format: CreativeFormatId, d: DesignedCreative): Partial<ImageProject> => {
+    const kept = cur.creatives.find((c) => c.format === format);
+    const creatives = !kept
+      ? cur.creatives
+      : hasWordLayers(kept.doc)
+        ? cur.creatives.filter((c) => c.format !== format)
+        : cur.creatives.map((c) =>
+            c.format === format ? { ...c, doc: swapPicture(c.doc, { src: refUrl(d.image.storagePath), storagePath: d.image.storagePath }), approved: false, png: undefined, updatedAt: Date.now() } : c,
+          );
+    return { designs: { ...(cur.designs ?? {}), [format]: d }, pictureMode: 'design', creatives };
+  };
+
+  const designed = (r: DesignResult, revision?: string): DesignedCreative => ({
+    image: r.image,
+    words: r.words,
+    checks: r.checks,
+    model: r.model,
+    ...(r.width ? { width: r.width, height: r.height } : {}),
+    ...(revision ? { revision } : {}),
+    at: Date.now(),
+  });
+  const settle = (format: CreativeFormatId, failed: boolean) =>
+    setDesignState((s) => {
+      const next = { ...s };
+      if (failed) next[format] = 'failed';
+      else delete next[format];
+      return next;
+    });
+
+  /** Nano Banana 2 designs the creatives: the sizes asked for, or every size. */
+  const makeDesigns = async (only?: CreativeFormatId[]): Promise<void> => {
+    if (!car || !p.heroPhoto) return setError('Pick the vehicle and the photo to build on first.');
+    const formats = only ?? p.formats;
+    if (!formats.length) return;
+    setBusy('design');
+    setError('');
+    const refs = carRefList();
+    setDesignState((s) => ({ ...s, ...Object.fromEntries(formats.map((f) => [f, 'working'])) }));
+    await Promise.all(
+      formats.map(async (format) => {
+        const r = await drawCreativeDesign(p.id, designBrief(format), refs);
+        if (isApiError(r)) {
+          settle(format, true);
+          setError(r.message);
+          return;
+        }
+        settle(format, false);
+        set((cur) => adoptDesign(cur, format, designed(r)));
+      }),
+    );
+    setBusy('');
+    await refresh();
+  };
+
+  /** One change to a size Nano Banana 2 designed, everything else kept. */
+  const reviseDesign = async (format: CreativeFormatId): Promise<void> => {
+    const d = p.designs?.[format];
+    const change = changes[format]?.trim();
+    if (!d || !change) return;
+    setDesignState((s) => ({ ...s, [format]: 'working' }));
+    setError('');
+    // Checked against the words it carries, so a change of colour is not taken for a change of words.
+    const r = await reviseCreativeDesign(p.id, { ...designBrief(format), words: d.words }, { storagePath: d.image.storagePath }, change, carRefList().slice(0, 3));
+    if (isApiError(r)) {
+      settle(format, true);
+      setError(r.message);
+      return;
+    }
+    settle(format, false);
+    setChanges((c) => ({ ...c, [format]: '' }));
+    set((cur) => adoptDesign(cur, format, designed(r, change)));
+    await refresh();
+  };
+
   /** Pictures for the sizes' shapes: the ones asked for, or every shape the sizes need. */
   const makePictures = async (only?: PictureAspect[]): Promise<void> => {
     if (!car || !p.heroPhoto) return setError('Pick the vehicle and the photo to build on first.');
@@ -367,16 +502,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     if (!aspects.length) return;
     setBusy('scene');
     setError('');
-    const others = photos.filter((x) => x.photo.storagePath !== p.heroPhoto!.storagePath);
-    const refs = [
-      { storagePath: p.heroPhoto.storagePath, label: `the ${car.brand} ${car.model}${p.heroPhoto.angle ? `, ${p.heroPhoto.angle}` : ''}` },
-      // The vehicle's other sides; the cabin only when the picture is of the cabin.
-      ...ANGLES.filter((a) => a !== 'interior' || p.heroPhoto!.angle === 'interior')
-        .map((a) => others.find((x) => x.angle === a && a !== p.heroPhoto!.angle))
-        .filter((x): x is { angle: CarAngle; photo: StoredImage } => Boolean(x))
-        .slice(0, 3)
-        .map((x) => ({ storagePath: x.photo.storagePath, label: `the ${car.brand} ${car.model}, ${x.angle}` })),
-    ];
+    const refs = carRefList();
     setSceneState(Object.fromEntries(aspects.map((a) => [a, 'working'])));
     await Promise.all(
       aspects.map(async (aspect) => {
@@ -476,6 +602,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   /* ---- the editor ---- */
 
   const editorLibrary: EditorPicture[] = [
+    ...Object.entries(p.designs ?? {}).map(([f, d]) => ({ label: `Nano Banana 2 · ${CREATIVE_FORMAT_BY_ID[f as CreativeFormatId]?.label ?? f}`, src: refUrl(d!.image.storagePath), storagePath: d!.image.storagePath })),
     ...Object.entries(p.pictures ?? {}).map(([a, pic]) => ({ label: `Scene ${a}`, src: refUrl(pic!.image.storagePath), storagePath: pic!.image.storagePath })),
     ...(p.upload ? [{ label: 'Your upload', src: refUrl(p.upload.storagePath), storagePath: p.upload.storagePath }] : []),
     ...photos.map(({ angle, photo }) => ({ label: `${car?.model ?? 'Car'} · ${angle}`, src: refUrl(photo.storagePath), storagePath: photo.storagePath })),
@@ -487,6 +614,9 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
 
   const aspectsNeeded = pictureAspectsFor(p.formats);
   const missingPictures = aspectsNeeded.filter((a) => !p.pictures?.[a]);
+  const missingDesigns = p.formats.filter((f) => !p.designs?.[f]);
+  const designsMade = p.formats.length - missingDesigns.length;
+  const canDesign = canCreate && busy === '' && Boolean(p.heroPhoto) && Boolean(car);
   const fieldsShown = [...engine.fields, ...(second?.fields ?? []).filter((f) => !engine.fields.some((g) => g.id === f.id))];
   const missing = engine.mandatory.filter((id) => !(p.facts[id] ?? '').trim());
 
@@ -832,15 +962,28 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
 
             <Section
               num="05"
-              title="Picture"
+              title={p.pictureMode === 'design' ? 'Make the creatives' : 'Picture'}
               defaultOpen
-              step={p.pictureMode === 'scene' ? `${aspectsNeeded.filter((a) => p.pictures?.[a]).length} of ${aspectsNeeded.length} made` : p.pictureMode === 'photo' ? 'Photo as it is' : 'Your upload'}
-              note="A scene puts the real car in a setting for the occasion, one picture per shape of size. It carries no words — they are the layers you edit."
+              step={
+                p.pictureMode === 'design'
+                  ? `Nano Banana 2 · ${designsMade} of ${p.formats.length} made`
+                  : p.pictureMode === 'scene'
+                    ? `${aspectsNeeded.filter((a) => p.pictures?.[a]).length} of ${aspectsNeeded.length} made`
+                    : p.pictureMode === 'photo'
+                      ? 'Photo as it is'
+                      : 'Your upload'
+              }
+              note={
+                p.pictureMode === 'design'
+                  ? 'Nano Banana 2 designs each size whole: the real car from its photos, a scene for the post, and your copy set into it. The logos and the dealer panel go on top exactly as they are, and every word is read back and checked against the copy.'
+                  : 'A scene puts the real car in a setting for the occasion, one picture per shape of size. It carries no words — they are the layers you edit.'
+              }
             >
               <div className="seg">
                 {(
                   [
-                    ['scene', 'Scene'],
+                    ['design', 'Nano Banana 2'],
+                    ['scene', 'Scene, words on top'],
                     ['photo', 'Photo as it is'],
                     ['upload', 'Upload'],
                   ] as const
@@ -850,6 +993,84 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                   </button>
                 ))}
               </div>
+              {p.pictureMode === 'design' && (
+                <>
+                  <Field label="The scene" hint={`Left empty: ${occasion ? `dressed for ${occasion}` : engine.scene}.`}>
+                    <input value={p.sceneNote ?? ''} onChange={(e) => set({ sceneNote: e.target.value })} placeholder="At the showroom entrance at dusk" />
+                  </Field>
+                  <div className="ip-actions">
+                    {missingDesigns.length > 0 && missingDesigns.length < p.formats.length ? (
+                      <>
+                        <button type="button" className="btn primary small" disabled={!canDesign} onClick={() => void makeDesigns(missingDesigns)}>
+                          {busy === 'design' ? 'Designing…' : `Make the missing ${missingDesigns.length === 1 ? 'one' : missingDesigns.length}`}
+                        </button>
+                        <button type="button" className="btn ghost small" disabled={!canDesign} onClick={() => void makeDesigns()}>
+                          Make them all again
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="btn primary small" disabled={!canDesign || !p.formats.length} onClick={() => void makeDesigns()}>
+                        {busy === 'design' ? 'Designing…' : missingDesigns.length ? `Make the creative${p.formats.length === 1 ? '' : 's'}` : 'Make them all again'}
+                      </button>
+                    )}
+                    <span className="hint">
+                      {(missingDesigns.length || p.formats.length)} size{(missingDesigns.length || p.formats.length) === 1 ? '' : 's'} · about ₹9 and half a minute each · made once more when a check fails
+                    </span>
+                  </div>
+                  {!p.copy && <p className="hint">The words are still the draft. Write the copy in 04 first — Nano Banana 2 sets exactly the words it is given.</p>}
+                  <div className="ip-scenes">
+                    {p.formats.map((format) => {
+                      const f = CREATIVE_FORMAT_BY_ID[format];
+                      const d = p.designs?.[format];
+                      const state = designState[format];
+                      const stale = d ? !sameDesignWords(d.words, designBrief(format).words) : false;
+                      const words = d?.checks.words;
+                      return (
+                        <div key={format} className="ip-scene ip-design">
+                          <div className="ip-scene-img" style={{ aspectRatio: `${f.width} / ${f.height}` }}>
+                            {state === 'working' ? (
+                              <span>Designing…</span>
+                            ) : d ? (
+                              <img src={refUrl(d.image.storagePath)} alt={`${f.label}, designed`} crossOrigin="anonymous" />
+                            ) : (
+                              <span>{state === 'failed' ? 'Failed' : f.label}</span>
+                            )}
+                          </div>
+                          {d && (
+                            <>
+                              <span className={`ip-check ${d.checks.vehicle.checked ? (d.checks.vehicle.same ? 'ok' : 'bad') : ''}`} title={d.checks.vehicle.why}>
+                                {d.checks.vehicle.checked ? (d.checks.vehicle.same ? 'Same vehicle ✓' : 'Vehicle may differ') : 'Vehicle not checked'}
+                              </span>
+                              <span className={`ip-check ${words?.checked ? (words.ok ? 'ok' : 'bad') : ''}`}>
+                                {words?.checked ? (words.ok ? 'Words ✓' : `Words: ${words.missing.length + words.extra.length} to check`) : 'Words not checked'}
+                              </span>
+                              {words?.checked && !words.ok && (
+                                <ul className="ip-check-list">
+                                  {words.missing.map((m) => (
+                                    <li key={`m${m}`}>Not as written: “{m}”</li>
+                                  ))}
+                                  {words.extra.map((x) => (
+                                    <li key={`x${x}`}>Not asked for: “{x}”</li>
+                                  ))}
+                                </ul>
+                              )}
+                              {stale && <span className="ip-check bad">The copy changed since</span>}
+                              {d.revision && (
+                                <span className="ip-check" title={d.revision}>
+                                  Changed: “{d.revision.length > 40 ? `${d.revision.slice(0, 40)}…` : d.revision}”
+                                </span>
+                              )}
+                              <button type="button" className="btn ghost small" disabled={!canDesign} onClick={() => void makeDesigns([format])} title={`Design the ${f.label} again`}>
+                                Again
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
               {p.pictureMode === 'scene' && (
                 <>
                   <Field label="The scene" hint={`Left empty: ${occasion ? `dressed for ${occasion}` : engine.scene}.`}>
@@ -936,6 +1157,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                       <b>{f.label}</b>
                       <small>
                         {f.width}×{f.height}
+                        {p.pictureMode === 'design' ? (p.designs?.[format] ? ' · Nano Banana 2' : ' · draft') : ''}
                         {kept ? ' · edited' : ''}
                         {kept?.approved ? ' · approved' : ''}
                       </small>
@@ -963,7 +1185,32 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                           Reset
                         </button>
                       )}
+                      {p.pictureMode === 'design' && !p.designs?.[format] && canCreate && !readOnly && (
+                        <button type="button" className="btn small ghost" disabled={!canDesign} onClick={() => void makeDesigns([format])} title="Nano Banana 2 designs this size">
+                          {designState[format] === 'working' ? 'Designing…' : 'Design it'}
+                        </button>
+                      )}
                     </div>
+                    {p.pictureMode === 'design' && p.designs?.[format] && canCreate && !readOnly && (
+                      <form
+                        className="ip-ask"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void reviseDesign(format);
+                        }}
+                      >
+                        <input
+                          value={changes[format] ?? ''}
+                          onChange={(e) => setChanges((c) => ({ ...c, [format]: e.target.value }))}
+                          placeholder="Ask Nano Banana 2 for a change — “make the headline gold”"
+                          aria-label={`A change to the ${f.label}`}
+                          maxLength={400}
+                        />
+                        <button type="submit" className="btn small" disabled={!changes[format]?.trim() || designState[format] === 'working' || busy !== ''}>
+                          {designState[format] === 'working' ? 'Changing…' : 'Ask'}
+                        </button>
+                      </form>
+                    )}
                   </div>
                 );
               })}

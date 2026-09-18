@@ -2,13 +2,16 @@
  * Project Image on the server: the words of a creative from the Google text model, and its
  * picture from the image model — with the real car, from the library's own photographs.
  *
- * The server never draws a finished creative. The browser lays it out and draws it, so the
- * words stay exact and editable; the picture the model makes carries no writing at all.
+ * Two ways to a creative. Nano Banana 2 can design the whole of it — the car, the scene and the
+ * words set into it — with the words read back and checked against the copy, and the logos and
+ * dealer panel laid over it by the browser. Or it draws a scene with no writing at all, and the
+ * browser sets every word on it as a layer that stays editable.
  */
 import {
   COPY_LIMITS,
   COPY_LIMITS_NATIVE,
   CREATIVE_ENGINE_BY_ID,
+  CREATIVE_FORMAT_BY_ID,
   DEFAULT_USD_TO_INR,
   contactBlock,
   emptyCopy,
@@ -18,10 +21,14 @@ import {
   type CopyClient,
   type CreativeCopy,
   type CreativeEngineId,
+  type CreativeFormatId,
+  type CreativeTemplateId,
+  type DesignWords,
+  type DesignZones,
   type PictureAspect,
   type TokenUsage,
 } from '@ava/shared';
-import { requestImage, resolveSheetImageModel, type ImagePart } from './sceneImage.js';
+import { requestImage, resolveNanoBanana2, resolveSheetImageModel, type ImagePart } from './sceneImage.js';
 import { resolveTextModel } from './script.js';
 import { recordUsage } from './spendLog.js';
 
@@ -269,4 +276,209 @@ export async function drawCreativeScene(
   ];
   const out = await requestImage(model, parts, apiKey, [{ aspectRatio: req.aspect, imageSize: '2K' }, { aspectRatio: req.aspect }], 0.5, 'Creative images');
   return { bytes: out.bytes, mimeType: out.mimeType, model: out.model, costInr: inr(out.model, out.usage) };
+}
+
+/* ============================== the design ============================== */
+
+/**
+ * A whole creative from Nano Banana 2: the real car in a scene, and the words set into it as a
+ * designed advertisement. The logos and the dealer panel are the app's, laid over it after —
+ * so the model is told where they go, and to keep those places clear.
+ */
+export interface DesignRequest {
+  format: CreativeFormatId;
+  engine: CreativeEngineId;
+  secondary?: CreativeEngineId;
+  /** The layout's character, which sets the typography. Unset: the engine's own. */
+  template?: CreativeTemplateId;
+  occasion?: string;
+  vehicle: { name: string; colour?: string; kind?: 'car' | 'bike' };
+  /** Designer's direction for the scene. */
+  note?: string;
+  words: DesignWords;
+  language: { name: string; script: 'latin' | 'indic' };
+  look: { panel: string; accent: string };
+  zones: DesignZones;
+}
+
+const TYPE_MOOD: Record<CreativeTemplateId, string> = {
+  hero: 'Confident and premium: a clean, bold modern sans-serif headline, generous space around it',
+  offer: 'A bold retail offer: a heavy, condensed headline, and a price badge that pops',
+  festival: 'Warm and festive: an elegant serif greeting with a festive glow — emotion before promotion',
+  feature: 'Clean, modern and a little technical: a bold sans-serif headline and tidy points',
+  launch: 'Dark and dramatic, like a film poster: tall, bold capitals and cinematic light',
+  delivery: 'Warm and celebratory: an elegant serif with a personal, joyful touch',
+};
+
+const pct = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 100);
+const quoted = (s: string): string => `"${s.replace(/"/g, '”')}"`;
+
+/** The words a design is asked to set, each with its part in the hierarchy. */
+function wordsBrief(w: DesignWords): string[] {
+  const out: string[] = [];
+  if (w.kicker) out.push(`- Small line above the headline: ${quoted(w.kicker)}`);
+  if (w.headline) out.push(`- Headline — the largest, boldest words on the creative: ${quoted(w.headline)}`);
+  if (w.sub) out.push(`- Second line, under the headline, much smaller: ${quoted(w.sub)}`);
+  if (w.badge) out.push(`- Offer badge — a bold tag or sticker shape in the accent colour that stands out: ${quoted(w.badge)}`);
+  if (w.points.length) out.push(`- Points, as a short list with ticks or bullets, one per line: ${w.points.map(quoted).join(' / ')}`);
+  if (w.cta) out.push(`- Button — a rounded pill in the accent colour: ${quoted(w.cta)}`);
+  return out;
+}
+
+/** Where the words, the car and the app's own overlays go, for this size. */
+function layoutBrief(req: DesignRequest, noun: string): string[] {
+  const f = CREATIVE_FORMAT_BY_ID[req.format];
+  const z = req.zones;
+  const out: string[] = [
+    z.textSide === 'left'
+      ? `Put the words in the left half of the frame and the whole ${noun} in the right half. No word may touch or cover the ${noun}.`
+      : `Put the words in the upper part of the frame${z.logoBand > 0 ? ', below the logo row' : ''}, and the whole ${noun} below them. No word may touch or cover the ${noun}.`,
+  ];
+  if (z.logoBand > 0) {
+    out.push(
+      `The top ${pct(z.logoBand)}% of the frame is the logo row: logos are placed in its left and right corners afterwards. Keep both of those corners plain, ${z.logoTone} background — no words, no detail, nothing bright.`,
+    );
+  } else if (f.safeTop > 0) {
+    out.push(`Keep every word out of the top ${pct(f.safeTop) + 2}% — the platform's own controls cover it.`);
+  }
+  if (z.stripTop < 1) {
+    out.push(
+      `Everything below ${pct(z.stripTop)}% of the height is covered afterwards by a solid strip with the dealership's details: put no words there, and keep the ${noun}'s wheels above it.`,
+    );
+  } else if (f.safeBottom > 0) {
+    out.push(`Keep every word out of the bottom ${pct(f.safeBottom) + 2}% — the platform's own controls cover it.`);
+  }
+  if (f.width / f.height > 1.85) out.push(`The top and bottom 5% may be trimmed: keep every word and the whole ${noun} clear of them.`);
+  out.push('Leave comfortable margins: no word closer than 5% to any edge of the frame.');
+  return out;
+}
+
+/** The instruction for a whole creative: this vehicle, this scene, these words and nothing else, room for the logos and panel. */
+export function designInstruction(req: DesignRequest, refLabels: string[]): string {
+  const noun = req.vehicle.kind === 'bike' ? 'motorcycle' : 'car';
+  const f = CREATIVE_FORMAT_BY_ID[req.format];
+  const e = CREATIVE_ENGINE_BY_ID[req.engine];
+  const second = req.secondary ? CREATIVE_ENGINE_BY_ID[req.secondary] : undefined;
+  const template = req.template ?? e?.template ?? 'hero';
+  const scene = (req.occasion && OCCASION_SCENES[req.occasion]) || e?.scene || 'a clean, premium setting';
+  return [
+    `Design one finished social media advertisement for an Indian ${noun} dealership: a ${f.label} post (${f.platforms}), ${f.width}×${f.height} pixels, aspect ${f.pictureAspect}.`,
+    e ? `It is a ${e.label} post${second ? `, blended with ${second.label}` : ''}. ${e.purpose}` : '',
+    e?.avoid.length ? `Avoid: ${e.avoid.join('; ')}.` : '',
+    '',
+    '## References',
+    ...refLabels.map((l, i) => `<IMAGE_REF_${i}> — ${l}`),
+    '',
+    `## The ${noun}`,
+    `<IMAGE_REF_0> is the ${req.vehicle.name}${req.vehicle.colour ? ` in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the creative: the same model generation, body shape, grille, headlamps, tail-lamps, badges, alloy wheels, colour and trim as in the reference photographs${refLabels.length > 1 ? ', which show its other sides' : ''}. Build it only from these photographs — never from what the name brings to mind, and never an older or different model.`,
+    `The ${noun} is whole and uncropped, sharp, the hero of the picture, on the ground with correct contact shadows and true reflections in the paint and glass.`,
+    `NUMBER PLATES ARE PLAIN WHITE AND BLANK — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is a plain white plate with nothing on it: no letters, no numbers, no state code, no dealer name. Writing on a plate in the reference photographs is not part of the ${noun}; never copy it.`,
+    '',
+    '## The scene',
+    `${scene}.${req.note?.trim() ? ` ${req.note.trim()}` : ''} Photorealistic, like a professional automotive campaign photograph — real light, real materials — with the words designed into it as a polished advertisement. No people in the foreground.`,
+    '',
+    '## The words — set exactly these, and nothing else',
+    'Spell every word exactly as written between the quotes: the same letters and capitals, the ₹ sign, the commas in numbers, and every asterisk (*).',
+    ...wordsBrief(req.words),
+    `No other text anywhere: no extra slogans, dates, prices or numbers, no phone number, website, address, hashtags, logos, brand names or watermarks, and no writing on signs, screens or banners in the scene. The only other lettering allowed is the manufacturer's own badge on the ${noun}, exactly as in the photographs.`,
+    req.language.script === 'indic'
+      ? `The words are in ${req.language.name}, in its own script: set every conjunct and vowel sign correctly. Model names, brand names and ₹ amounts stay in Latin letters and digits, exactly as written.`
+      : '',
+    '',
+    '## Typography and colour',
+    `${TYPE_MOOD[template]}. Type is large, crisp and easy to read on a phone, with strong contrast against what is behind it — a soft shade or a clean band behind the words where the picture is busy. The headline takes at most two lines.`,
+    `The creative's colours are ${req.look.panel} and ${req.look.accent}: use ${req.look.accent} for the badge, the button and small accents.`,
+    '',
+    '## Layout',
+    ...layoutBrief(req, noun),
+  ]
+    .filter((l) => l !== '')
+    .join('\n');
+}
+
+/** The instruction for one change to a creative Nano Banana 2 already made. */
+export function reviseInstruction(req: DesignRequest, change: string, carRefs: number): string {
+  const noun = req.vehicle.kind === 'bike' ? 'motorcycle' : 'car';
+  return [
+    '<IMAGE_REF_0> is a finished social media advertisement.',
+    carRefs ? `${Array.from({ length: carRefs }, (_, i) => `<IMAGE_REF_${i + 1}>`).join(', ')} ${carRefs === 1 ? 'is a photograph' : 'are photographs'} of the ${req.vehicle.name} in it.` : '',
+    '',
+    `Make this one change to the advertisement: ${quoted(change.trim())}`,
+    '',
+    `Keep everything else exactly as it is: the same ${noun} (as in the photographs), the same scene, layout, colours and typography, and every word exactly as written — unless the change asks for different words.`,
+    `Number plates stay plain white and blank. Add no other text, logos or watermarks.`,
+    ...layoutBrief(req, noun),
+    `Frame: ${CREATIVE_FORMAT_BY_ID[req.format].pictureAspect}.`,
+  ]
+    .filter((l) => l !== '')
+    .join('\n');
+}
+
+const designConfigs = (req: DesignRequest) => {
+  const aspectRatio = CREATIVE_FORMAT_BY_ID[req.format].pictureAspect;
+  return [{ aspectRatio, imageSize: '2K' }, { aspectRatio }];
+};
+
+export async function drawCreativeDesign(
+  req: DesignRequest,
+  refs: Array<{ bytes: Buffer; mimeType: string; label: string }>,
+  apiKey: string,
+): Promise<{ bytes: Buffer; mimeType: string; model: string; costInr: number }> {
+  if (!refs.length) throw new CreativeError('design-no-photo', 'Pick a photo of the vehicle first — the creative is built from it.', 400);
+  const model = await resolveNanoBanana2(apiKey);
+  const parts: ImagePart[] = [
+    { text: designInstruction(req, refs.map((r) => r.label)) },
+    ...refs.map((r) => ({ inline_data: { mime_type: r.mimeType, data: r.bytes.toString('base64') } })),
+  ];
+  const out = await requestImage(model, parts, apiKey, designConfigs(req), 0.6, 'Creative images');
+  return { bytes: out.bytes, mimeType: out.mimeType, model: out.model, costInr: inr(out.model, out.usage) };
+}
+
+export async function reviseCreativeDesign(
+  req: DesignRequest,
+  change: string,
+  current: { bytes: Buffer; mimeType: string },
+  refs: Array<{ bytes: Buffer; mimeType: string }>,
+  apiKey: string,
+): Promise<{ bytes: Buffer; mimeType: string; model: string; costInr: number }> {
+  const model = await resolveNanoBanana2(apiKey);
+  const parts: ImagePart[] = [
+    { text: reviseInstruction(req, change, refs.length) },
+    { inline_data: { mime_type: current.mimeType, data: current.bytes.toString('base64') } },
+    ...refs.map((r) => ({ inline_data: { mime_type: r.mimeType, data: r.bytes.toString('base64') } })),
+  ];
+  const out = await requestImage(model, parts, apiKey, designConfigs(req), 0.4, 'Creative images');
+  return { bytes: out.bytes, mimeType: out.mimeType, model: out.model, costInr: inr(out.model, out.usage) };
+}
+
+/**
+ * Every piece of writing on a creative, read back as it is — not as it should be. Null when
+ * it could not be read; the creative is then shown as not checked, never as passed.
+ */
+export async function readCreativeWords(image: Buffer, apiKey: string): Promise<{ texts: string[]; costInr: number } | null> {
+  const instruction = [
+    'Read every piece of text on this advertisement exactly as it is written: the same spelling, capitals, symbols (₹, *, %), numbers and punctuation. Do not correct anything.',
+    'Each separate block of text is one string — a headline over two lines is one block, a button is one block, a badge is one block, each point of a list is one block.',
+    'Include lettering anywhere in the picture: on the vehicle, its number plates, signs, screens and the background.',
+    'Answer JSON only: {"texts": ["..."]} — an empty list when there is no text.',
+  ].join('\n');
+  try {
+    const model = await resolveTextModel(apiKey, 'transform');
+    const res = await fetch(`${GEMINI}/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: instruction }, { inline_data: { mime_type: 'image/jpeg', data: image.toString('base64') } }] }],
+        generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+      }),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[]; usageMetadata?: TokenUsage };
+    recordUsage('Creative checks', model, json.usageMetadata);
+    const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+    const parsed = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { texts?: unknown };
+    return { texts: strs(parsed.texts), costInr: inr(model, json.usageMetadata) };
+  } catch {
+    return null;
+  }
 }

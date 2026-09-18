@@ -9,6 +9,16 @@ import {
   CREATIVE_TEMPLATES,
   applyCopyToCreative,
   classifyCreative,
+  compareWords,
+  designWordsOf,
+  designZonesOf,
+  hasWordLayers,
+  layoutDesigned,
+  normWords,
+  panelCarries,
+  sameDesignWords,
+  swapPicture,
+  verdictWeight,
   creativeLook,
   duplicateLayer,
   emptyCopy,
@@ -288,4 +298,71 @@ test('layers are edited as new documents, and checked before they are kept', () 
   assert.match(String(bad({ kind: 'video' })), /kind this editor does not know/);
   assert.match(String(validateCreativeDoc({ ...doc, layers: [{ ...doc.layers[0]!, kind: 'image', src: `data:image/png;base64,${'A'.repeat(500)}` }] })), /uploaded first/);
   assert.equal(validateCreativeDoc(doc), null);
+});
+
+/* ---- Nano Banana 2 designs ---- */
+
+test('the words read back off a design are checked against the copy, as they are written', () => {
+  const words = designWordsOf({ ...emptyCopy(), kicker: 'Navratri offer', headline: 'Celebrate Navratri in the Creta', sub: 'Festive benefits for nine nights.', badge: 'Benefits up to ₹50,000*', points: ['Exchange bonus up to ₹20,000*'], cta: 'Book a test drive' }, false);
+  const read = ['NAVRATRI OFFER', 'Celebrate Navratri', 'in the Creta', 'Festive benefits for nine nights', 'Benefits up to ₹50,000*', 'Exchange bonus up to ₹20,000*', 'Book a test drive', 'HYUNDAI', 'CRETA', 'H'];
+  const ok = compareWords(words, read, ['Hyundai Creta', 'Hyundai', 'Creta']);
+  assert.deepEqual(ok, { checked: true, ok: true, missing: [], extra: [] }, 'capitals, line breaks and the car’s own badges are fine');
+
+  const dropped = compareWords(words, read.map((s) => s.replace('₹50,000*', '₹50,000')), ['Hyundai', 'Creta']);
+  assert.equal(dropped.ok, false);
+  assert.deepEqual(dropped.missing, ['Benefits up to ₹50,000*'], 'a dropped asterisk is a missing claim');
+
+  const wrong = compareWords(words, read.map((s) => s.replace('₹20,000*', '₹2,00,00*')), ['Hyundai', 'Creta']);
+  assert.deepEqual(wrong.missing, ['Exchange bonus up to ₹20,000*'], 'a misgrouped amount is caught');
+
+  const invented = compareWords(words, [...read, 'Call 98765 43210', 'MH 12 AB 1234'], ['Hyundai', 'Creta']);
+  assert.deepEqual(invented.extra, ['Call 98765 43210', 'MH 12 AB 1234'], 'a phone number or plate it made up is extra');
+
+  assert.equal(normWords('शुभ नवरात्रि!'), 'शुभनवरात्रि', 'an Indian script keeps its vowel signs');
+  assert.equal(normWords('Only ₹9,999/month.'), 'only₹9,999month');
+  assert.equal(designWordsOf({ ...emptyCopy(), headline: 'x', cta: 'Book now' }, true).cta, '', 'the panel’s call to action is not the model’s');
+  assert.ok(sameDesignWords(words, { ...words }));
+  assert.ok(!sameDesignWords(words, { ...words, headline: 'Another' }));
+  assert.equal(verdictWeight({ same: false, checked: true }, dropped), 5);
+  assert.equal(verdictWeight({ same: true, checked: true }, ok), 0);
+});
+
+test('a design carries only what must be exact: the logos, the panel and the small print', () => {
+  for (const f of CREATIVE_FORMATS) {
+    const doc = layoutDesigned(input({ format: f.id, picture: { src: '/api/refs/d/design.png', storagePath: 'refs/d/design.png', mode: 'design' } }));
+    const where = f.id;
+    assert.equal(validateCreativeDoc(doc), null, where);
+    const pic = doc.layers[0]!;
+    assert.ok(pic.kind === 'image' && pic.role === 'background' && pic.fit === 'cover' && pic.w === f.width && pic.h === f.height, `${where}: the design fills the frame`);
+    assert.ok(!doc.layers.some((l) => l.role === 'headline' || l.role === 'kicker' || l.role === 'sub' || l.role === 'badge' || l.role === 'points'), `${where}: the words are the design's`);
+    assert.ok(!doc.layers.some((l) => l.role === 'scrim' && l.name !== 'Shade, foot'), `${where}: no shades over the design`);
+    assert.ok(doc.layers.some((l) => l.role === 'dealer-logo') && doc.layers.some((l) => l.role === 'panel'), `${where}: logos and panel`);
+    const carries = panelCarries(input({ format: f.id }));
+    assert.equal(doc.layers.some((l) => l.role === 'cta'), carries.cta, `${where}: the panel's call to action, or the design's`);
+    assert.ok(doc.layers.some((l) => l.role === 'terms'), `${where}: the small print is the app's`);
+    const zones = designZonesOf(doc, 'dark');
+    const panel = doc.layers.find((l) => l.role === 'panel')!;
+    assert.ok(zones.logoBand > 0 && zones.logoBand < 0.35, `${where}: the logo row ${zones.logoBand}`);
+    assert.ok(zones.stripTop <= panel.y / f.height + 0.001 && zones.stripTop > 0.6, `${where}: the strip ${zones.stripTop}`);
+    assert.equal(zones.textSide, f.width / f.height > 1.3 ? 'left' : 'top');
+  }
+  const bare = layoutDesigned(input({ picture: { src: '/x.png', mode: 'design' }, logos: { placement: { brand: 'off', dealer: 'off' } }, panel: { style: 'none', name: '', details: [] } }));
+  const z = designZonesOf(bare, 'light');
+  assert.equal(z.logoBand, 0, 'no logos, no logo row');
+  assert.ok(z.stripTop < 1, 'the small print at the foot is still kept clear');
+  assert.ok(bare.layers.some((l) => l.name === 'Shade, foot'), 'and shaded');
+});
+
+test('a new picture keeps every change made to a creative', () => {
+  const doc = layoutDesigned(input({ picture: { src: '/api/refs/a/one.png', storagePath: 'refs/a/one.png', mode: 'design' } }));
+  const moved = updateLayer(doc, doc.layers.find((l) => l.role === 'dealer-logo')!.id, { x: 12 });
+  const swapped = swapPicture(moved, { src: '/api/refs/b/two.png', storagePath: 'refs/b/two.png' });
+  const pic = swapped.layers[0]!;
+  assert.ok(pic.kind === 'image' && pic.src === '/api/refs/b/two.png' && pic.storagePath === 'refs/b/two.png');
+  assert.equal(swapped.layers.find((l) => l.role === 'dealer-logo')!.x, 12, 'the moved logo stays moved');
+  assert.equal(swapped.layers.length, moved.layers.length);
+  assert.ok(!hasWordLayers(doc), 'a design carries its words in the picture');
+  assert.ok(hasWordLayers(layoutCreative(input({}))), 'a layout sets them as layers');
+  const none = swapPicture({ ...doc, layers: doc.layers.slice(1) }, { src: '/x.png' });
+  assert.equal(none.layers[0]!.role, 'background', 'a picture is put under a creative that had none');
 });

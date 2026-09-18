@@ -41,4 +41,5 @@ export * from './creative.js';
 export * from './creativeEngines.js';
 export * from './creativeCopy.js';
 export * from './creativeLayout.js';
+export * from './creativeDesign.js';
 export * from './imageProject.js';

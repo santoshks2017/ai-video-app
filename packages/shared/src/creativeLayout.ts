@@ -51,8 +51,11 @@ export interface LayoutInput {
   template: CreativeTemplateId;
   copy: CreativeCopy;
   look: OverlayTheme;
-  /** The picture the creative is built on. Unset: the look's colours alone. */
-  picture?: { src: string; storagePath?: string; mode: 'scene' | 'photo' | 'upload' };
+  /**
+   * The picture the creative is built on. Unset: the look's colours alone. A design is a
+   * finished creative Nano Banana 2 made, words and all; only the logos and panel go on it.
+   */
+  picture?: { src: string; storagePath?: string; mode: 'scene' | 'photo' | 'upload' | 'design' };
   logos: { dealer?: CreativeLogoArt; brand?: CreativeLogoArt; placement: { dealer: LogoSide; brand: LogoSide } };
   panel: { style: PanelStyle; name: string; details: string[] };
   /** Words in an Indian script need faces that carry them. */
@@ -141,6 +144,21 @@ function image(role: LayerRole, name: string, box: { x: number; y: number; w: nu
 
 /* ---- the parts every template shares ---- */
 
+/** The panel's style on this size: a thumbnail is too small for a full block, so it takes the line. */
+const panelStyleOn = (input: LayoutInput): PanelStyle => (input.format === 'thumbnail' && input.panel.style === 'full' ? 'compact' : input.panel.style);
+
+/**
+ * What a full dealer panel carries on a square, portrait or story: the call to action and the
+ * small print, so neither lands on the vehicle. A wide size keeps them in its column.
+ */
+function inPanelOf(input: LayoutInput, fr: Frame): { cta: boolean; terms: boolean } {
+  const style = panelStyleOn(input);
+  const full = style === 'full' && Boolean(input.panel.name || input.panel.details.length);
+  return { cta: full && !fr.wide && Boolean(input.copy.cta.trim()), terms: full && !fr.wide && Boolean(input.copy.terms.trim()) };
+}
+/** Whether this size's dealer panel carries the call to action and the small print. */
+export const panelCarries = (input: LayoutInput): { cta: boolean; terms: boolean } => inPanelOf(input, frameOf(input.format));
+
 interface Parts {
   layers: CreativeLayer[];
   /** Where words may go: under the logos, above the panel. */
@@ -149,7 +167,7 @@ interface Parts {
   inPanel: { cta: boolean; terms: boolean };
 }
 
-function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 'bottom' | 'both', wordsLow = false): Parts {
+function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 'bottom' | 'both' | 'none', wordsLow = false): Parts {
   const { look, copy } = input;
   const layers: CreativeLayer[] = [];
   const pic = input.picture;
@@ -160,10 +178,10 @@ function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 
   // caption). A thumbnail is too small for a full block, so it takes the line. On a square,
   // portrait or story, a full panel also carries the call to action and the small print, so
   // neither lands on the vehicle; a wide size keeps them in its column, clear of the vehicle.
-  const panelStyle: PanelStyle = input.format === 'thumbnail' && input.panel.style === 'full' ? 'compact' : input.panel.style;
+  const panelStyle = panelStyleOn(input);
   const hasPanel = panelStyle !== 'none' && Boolean(input.panel.name || input.panel.details.length);
   const fullPanel = hasPanel && panelStyle === 'full';
-  const inPanel = { cta: fullPanel && !fr.wide && Boolean(copy.cta.trim()), terms: fullPanel && !fr.wide && Boolean(copy.terms.trim()) };
+  const inPanel = inPanelOf(input, fr);
   const pad = fr.m;
   const termsSize = Math.round(fr.S * 0.017);
   const termsLines = inPanel.terms ? linesFor(copy.terms, termsSize, fr.W - pad * 2, { script, weight: 400, max: 2 }) : 0;
@@ -178,12 +196,12 @@ function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 
   if (pic) {
     const photo = pic.mode === 'photo';
     layers.push(
-      image('background', 'Picture', { x: 0, y: 0, w: fr.W, h: fr.H }, {
+      image('background', pic.mode === 'design' ? 'Design' : 'Picture', { x: 0, y: 0, w: fr.W, h: fr.H }, {
         src: pic.src,
         storagePath: pic.storagePath,
         fit: photo ? 'contain' : 'cover',
         backdrop: photo ? 'blur' : undefined,
-        focusY: photo ? 0.5 : 0.55,
+        focusY: photo || pic.mode === 'design' ? 0.5 : 0.55,
       }),
     );
   }
@@ -209,8 +227,9 @@ function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 
     if (scrim === 'full') {
       layers.push(shape('scrim', 'Shade', { x: 0, y: 0, w: fr.W, h: fr.H }, { fill: rgba(tint, 0.55) }));
     }
-    // A greeting shades only its top; words left at its foot get a low shade of their own.
-    if (scrim === 'top' && footWords && !fr.wide) {
+    // A greeting shades only its top; words left at its foot get a low shade of their own. So
+    // does the small print at the foot of a design, which is otherwise not shaded at all.
+    if ((scrim === 'top' && footWords && !fr.wide) || (scrim === 'none' && !inPanel.terms && Boolean(copy.terms.trim()))) {
       const h = Math.round(fr.S * 0.26);
       layers.push(shape('scrim', 'Shade, foot', { x: 0, y: panelTop - h, w: fr.W, h }, { gradient: { from: rgba(tint, 0), to: rgba(tint, 0.8), angle: 0 } }));
     }
@@ -582,6 +601,38 @@ export function wordsBand(doc: CreativeDoc): number {
   const reach = Math.max(...top.map((l) => l.y + l.h)) / doc.height;
   return Math.min(0.6, Math.max(0.3, Math.ceil(reach * 20) / 20));
 }
+
+/**
+ * A creative on a design Nano Banana 2 made: the design fills the frame, and the app puts only
+ * what must be exact on it — the logos, the dealer panel, and the small print. The call to
+ * action is the panel's where the panel carries it, and otherwise the design's own.
+ */
+export function layoutDesigned(input: LayoutInput): CreativeDoc {
+  const fr = frameOf(input.format);
+  const f = CREATIVE_FORMAT_BY_ID[input.format];
+  const design: LayoutInput = { ...input, picture: input.picture ? { ...input.picture, mode: 'design' } : undefined };
+  const parts = basics(design, fr, 'none');
+  const out = parts.layers;
+  const area = fr.wide ? { ...parts.area, w: Math.round(fr.W * 0.5) - fr.m } : parts.area;
+  footOfArea(out, fr, parts, area, { ...input.copy, cta: '' }, wordsFor(design), fr.wide ? 'left' : 'center', area.w);
+  return { version: 1, format: input.format, width: f.width, height: f.height, background: input.look.panel, layers: out };
+}
+
+/**
+ * A new picture under a creative someone has already changed: the picture layer takes it, and
+ * every other layer — theirs and the app's — stays as it is.
+ */
+export function swapPicture(doc: CreativeDoc, picture: { src: string; storagePath?: string }): CreativeDoc {
+  const at = doc.layers.findIndex((l) => l.kind === 'image' && l.role === 'background');
+  if (at < 0) {
+    const layer: ImageLayer = { id: creativeUid(), kind: 'image', name: 'Design', role: 'background', rotation: 0, opacity: 1, x: 0, y: 0, w: doc.width, h: doc.height, fit: 'cover', focusX: 0.5, focusY: 0.5, zoom: 1, src: picture.src, storagePath: picture.storagePath };
+    return { ...doc, layers: [layer, ...doc.layers] };
+  }
+  return { ...doc, layers: doc.layers.map((l, i) => (i === at && l.kind === 'image' ? { ...l, src: picture.src, storagePath: picture.storagePath } : l)) };
+}
+
+/** Whether a creative sets its own words as layers — a layout — rather than carrying them in a design. */
+export const hasWordLayers = (doc: CreativeDoc): boolean => doc.layers.some((l) => l.kind === 'text' && TOP_WORDS.has(l.role));
 
 /**
  * New words from the copy, written into a creative someone has already changed: every layer

@@ -88,6 +88,26 @@ export async function resolveSheetImageModel(apiKey: string): Promise<string> {
   return (cachedSheetModel = await resolveImageModel(apiKey));
 }
 
+let cachedNanoBanana2 = '';
+/**
+ * Nano Banana 2 (Gemini 3.1 Flash Image) by the name this key knows it by — the released
+ * model before a preview of it. Social creatives are made with it and nothing else: asked for
+ * by name, so a key without it says so instead of quietly drawing with another model.
+ */
+export async function resolveNanoBanana2(apiKey: string): Promise<string> {
+  if (cachedNanoBanana2) return cachedNanoBanana2;
+  const hits = (await imageModels(apiKey)).filter((n) => /^gemini-3\.1-flash-image/.test(n));
+  const pick = hits.filter((n) => !/preview|exp/.test(n)).sort()[0] ?? hits.filter((n) => !/exp/.test(n)).sort().at(-1) ?? hits.sort().at(-1);
+  if (!pick) {
+    throw new SceneImageError(
+      'no-nano-banana-2',
+      'Nano Banana 2 (Gemini 3.1 Flash Image) is not available on this Google key. Enable it for the key in Google AI Studio, then try again.',
+      503,
+    );
+  }
+  return (cachedNanoBanana2 = pick);
+}
+
 export interface SceneImageRef {
   data: string;
   mimeType: string;

@@ -1,4 +1,15 @@
-import type { CopyClient, CreativeCopy, CreativeEngineId, PictureAspect, StoredImage } from '@ava/shared';
+import type {
+  CopyClient,
+  CreativeCopy,
+  CreativeEngineId,
+  CreativeFormatId,
+  CreativeTemplateId,
+  DesignWords,
+  DesignZones,
+  DesignedCreative,
+  PictureAspect,
+  StoredImage,
+} from '@ava/shared';
 import { post } from './client.js';
 
 /** What the copy writer is told: the engine, the brief and its facts, the client and the car, the language. */
@@ -35,3 +46,26 @@ export const drawCreativeScene = (projectId: string, scene: SceneRequest, photos
     scene,
     photos,
   });
+
+/** A whole creative for one size, designed by Nano Banana 2 — see the server's DesignRequest. */
+export interface DesignRequest {
+  format: CreativeFormatId;
+  engine: CreativeEngineId;
+  secondary?: CreativeEngineId;
+  template?: CreativeTemplateId;
+  occasion?: string;
+  vehicle: { name: string; colour?: string; kind?: 'car' | 'bike' };
+  note?: string;
+  words: DesignWords;
+  language: { name: string; script: 'latin' | 'indic' };
+  look: { panel: string; accent: string };
+  zones: DesignZones;
+}
+
+export type DesignResult = Pick<DesignedCreative, 'image' | 'words' | 'checks' | 'model' | 'width' | 'height' | 'revision'>;
+
+export const drawCreativeDesign = (projectId: string, design: DesignRequest, photos: Array<{ storagePath: string; label: string }>) =>
+  post<DesignResult>('/api/creatives/design', { projectId, design, photos });
+
+export const reviseCreativeDesign = (projectId: string, design: DesignRequest, image: { storagePath: string }, change: string, photos: Array<{ storagePath: string; label: string }>) =>
+  post<DesignResult>('/api/creatives/revise', { projectId, design, image, change, photos });

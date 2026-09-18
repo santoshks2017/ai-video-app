@@ -7,6 +7,7 @@
  */
 import type { CreativeDoc, CreativeFormatId, PictureAspect } from './creative.js';
 import type { CreativeCopy, CreativeLookChoice } from './creativeCopy.js';
+import type { DesignWords, WordsVerdict } from './creativeDesign.js';
 import type { CreativeEngineId, CreativeTemplateId } from './creativeEngines.js';
 import type { PanelStyle } from './creativeLayout.js';
 import type { ProjectStage, StoredImage } from './library.js';
@@ -30,7 +31,30 @@ export interface ImageCreative {
   updatedAt: number;
 }
 
-export type PictureMode = 'scene' | 'photo' | 'upload';
+/** A finished creative Nano Banana 2 designed for one size, with what the checks found. */
+export interface DesignedCreative {
+  image: StoredImage;
+  /** The words it was asked to set — to tell when the copy has moved on since. */
+  words: DesignWords;
+  checks: {
+    vehicle: { same: boolean; checked: boolean; why?: string };
+    words: WordsVerdict;
+  };
+  model: string;
+  /** Its pixels, as it came back. */
+  width?: number;
+  height?: number;
+  /** The change last asked for, when it was revised rather than made afresh. */
+  revision?: string;
+  at: number;
+}
+
+/**
+ * Where a creative's picture comes from. `design`: Nano Banana 2 designs the whole creative,
+ * words included, and the app lays the logos and panel on it. The rest are pictures with the
+ * words laid over them as layers: a scene, the photo as it is, or an upload.
+ */
+export type PictureMode = 'design' | 'scene' | 'photo' | 'upload';
 
 export interface ImageProject {
   id: string;
@@ -63,6 +87,8 @@ export interface ImageProject {
   /** More direction for the scene. */
   sceneNote?: string;
   pictures?: Partial<Record<PictureAspect, ScenePicture>>;
+  /** What Nano Banana 2 designed, size by size. */
+  designs?: Partial<Record<CreativeFormatId, DesignedCreative>>;
   upload?: StoredImage;
   /** The sizes opened in the editor and changed. The rest are laid out from the brief each time. */
   creatives: ImageCreative[];
@@ -82,7 +108,7 @@ export function emptyImageProject(): Omit<ImageProject, 'id' | 'createdAt' | 'up
     formats: ['ig-square', 'ig-portrait', 'story'],
     look: { source: 'theme', themeId: 'midnight' },
     panelStyle: 'full',
-    pictureMode: 'scene',
+    pictureMode: 'design',
     creatives: [],
   };
 }

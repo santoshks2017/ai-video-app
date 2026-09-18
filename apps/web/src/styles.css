@@ -3225,6 +3225,12 @@ fieldset.lock.inline { display: contents; }
 .ip-scene-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ip-check { font-size: 10.5px; color: var(--ink-faint); }
 .ip-scene .btn { justify-self: start; }
+.ip-design .ip-scene-img { background: #0b0f17; }
+.ip-design .ip-scene-img img { object-fit: contain; }
+.ip-check-list { margin: 0; padding-left: 16px; font-size: 11px; color: var(--bad); display: grid; gap: 2px; }
+.ip-check-list li { overflow-wrap: anywhere; }
+.ip-ask { display: flex; gap: 6px; margin-top: 8px; }
+.ip-ask input { flex: 1; min-width: 0; font-size: 12px; }
 .ip-check.ok { color: var(--good); }
 .ip-check.bad { color: var(--bad); font-weight: 600; }
 .ip-upload { max-width: 100%; max-height: 220px; border-radius: var(--radius-sm); display: block; margin: 8px 0; }

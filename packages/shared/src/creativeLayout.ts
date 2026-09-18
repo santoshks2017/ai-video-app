@@ -9,6 +9,7 @@
  */
 import {
   CREATIVE_FORMAT_BY_ID,
+  PICTURE_ASPECT_RATIO,
   creativeUid,
   isAdFormat,
   type CreativeDoc,
@@ -595,7 +596,7 @@ function adLogos(input: LayoutInput, dark: boolean, both: boolean): CreativeLogo
 }
 
 /** The small print a banner has room for: its first sentence, "*T&C apply." */
-const adTerms = (terms: string): string => {
+export const adTerms = (terms: string): string => {
   const t = terms.trim();
   if (!t) return '';
   const first = t.split(/(?<=[.!])\s+/)[0] ?? t;
@@ -805,20 +806,56 @@ export function wordsBand(doc: CreativeDoc): number {
 }
 
 /**
- * A creative on a design Nano Banana 2 made: the design fills the frame, and the app puts only
- * what must be exact on it — the logos, the dealer panel, and the small print. The call to
- * action is the panel's where the panel carries it, and otherwise the design's own.
+ * A creative Nano Banana 2 designed whole — words, dealer strip and small print included — with
+ * the client's logos laid back on it exactly. The logos were already in place on the canvas it
+ * designed on (see designSkeleton), so they land where it left room for them, pixel for pixel.
  */
 export function layoutDesigned(input: LayoutInput): CreativeDoc {
-  if (isAdFormat(input.format)) return layoutAd({ ...input, picture: input.picture ? { ...input.picture, mode: 'design' } : undefined });
-  const fr = frameOf(input.format);
-  const f = CREATIVE_FORMAT_BY_ID[input.format];
   const design: LayoutInput = { ...input, picture: input.picture ? { ...input.picture, mode: 'design' } : undefined };
-  const parts = basics(design, fr, 'none');
-  const out = parts.layers;
-  const area = fr.wide ? { ...parts.area, w: Math.round(fr.W * 0.5) - fr.m } : parts.area;
-  footOfArea(out, fr, parts, area, { ...input.copy, cta: '' }, wordsFor(design), fr.wide ? 'left' : 'center', area.w);
-  return { version: 1, format: input.format, width: f.width, height: f.height, background: input.look.panel, layers: out };
+  let doc: CreativeDoc;
+  if (isAdFormat(input.format)) doc = layoutAd(design);
+  else {
+    const fr = frameOf(input.format);
+    const f = CREATIVE_FORMAT_BY_ID[input.format];
+    doc = { version: 1, format: input.format, width: f.width, height: f.height, background: input.look.panel, layers: basics(design, fr, 'none').layers };
+  }
+  return { ...doc, layers: doc.layers.filter((l) => l.role === 'background' || l.role === 'dealer-logo' || l.role === 'brand-logo') };
+}
+
+/**
+ * The shape Nano Banana 2 draws a size at, and where the size's own frame sits in it: a size
+ * not drawn at its own shape is the middle of a picture a little taller or wider.
+ */
+export function designCanvasOf(format: CreativeFormatId): { width: number; height: number; dx: number; dy: number } {
+  const f = CREATIVE_FORMAT_BY_ID[format];
+  const drawn = PICTURE_ASPECT_RATIO[f.pictureAspect];
+  if (f.width / f.height >= drawn) {
+    const height = Math.round(f.width / drawn);
+    return { width: f.width, height, dx: 0, dy: Math.round((height - f.height) / 2) };
+  }
+  const width = Math.round(f.height * drawn);
+  return { width, height: f.height, dx: Math.round((width - f.width) / 2), dy: 0 };
+}
+
+/** The ground of a design canvas: the grey Nano Banana 2 is told to design over entirely. */
+export const DESIGN_GROUND = '#808080';
+
+/**
+ * The canvas Nano Banana 2 designs on: the size's shape, plain grey, with the client's logos
+ * already in their final places — so it designs around the real logos instead of drawing its
+ * own, and leaves them where the app lays the exact files back on.
+ */
+export function designSkeleton(input: LayoutInput): CreativeDoc {
+  const c = designCanvasOf(input.format);
+  const logos = layoutDesigned({ ...input, picture: { src: '', mode: 'design' } }).layers.filter((l) => l.role !== 'background');
+  return {
+    version: 1,
+    format: input.format,
+    width: c.width,
+    height: c.height,
+    background: DESIGN_GROUND,
+    layers: logos.map((l) => ({ ...l, x: l.x + c.dx, y: l.y + c.dy })),
+  };
 }
 
 /**

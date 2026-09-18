@@ -7,7 +7,7 @@
  */
 import type { CreativeDoc, CreativeFormatId, PictureAspect } from './creative.js';
 import type { CreativeCopy, CreativeLookChoice } from './creativeCopy.js';
-import type { DesignWords, WordsVerdict } from './creativeDesign.js';
+import type { DesignWords, LogosVerdict, WordsVerdict } from './creativeDesign.js';
 import type { CreativeEngineId, CreativeTemplateId } from './creativeEngines.js';
 import type { PanelStyle } from './creativeLayout.js';
 import type { ProjectStage, StoredImage } from './library.js';
@@ -39,7 +39,11 @@ export interface DesignedCreative {
   checks: {
     vehicle: { same: boolean; checked: boolean; why?: string };
     words: WordsVerdict;
+    /** Whether the client's logos stayed where they were put, and no other logo was added. */
+    logos?: LogosVerdict;
   };
+  /** The canvas it was designed on, with the logos in place — what a change is checked against. */
+  skeleton?: StoredImage;
   model: string;
   /** Its pixels, as it came back. */
   width?: number;

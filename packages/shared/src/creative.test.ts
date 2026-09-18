@@ -9,7 +9,11 @@ import {
   CREATIVE_TEMPLATES,
   applyCopyToCreative,
   classifyCreative,
+  DESIGN_GROUND,
+  PICTURE_ASPECT_RATIO,
   compareWords,
+  designCanvasOf,
+  designSkeleton,
   designWordsOf,
   designZonesOf,
   hasWordLayers,
@@ -316,7 +320,10 @@ test('layers are edited as new documents, and checked before they are kept', () 
 /* ---- Nano Banana 2 designs ---- */
 
 test('the words read back off a design are checked against the copy, as they are written', () => {
-  const words = designWordsOf({ ...emptyCopy(), kicker: 'Navratri offer', headline: 'Celebrate Navratri in the Creta', sub: 'Festive benefits for nine nights.', badge: 'Benefits up to ₹50,000*', points: ['Exchange bonus up to ₹20,000*'], cta: 'Book a test drive' }, false);
+  const words = designWordsOf(
+    { ...emptyCopy(), kicker: 'Navratri offer', headline: 'Celebrate Navratri in the Creta', sub: 'Festive benefits for nine nights.', badge: 'Benefits up to ₹50,000*', points: ['Exchange bonus up to ₹20,000*'], cta: 'Book a test drive' },
+    input({ panel: { style: 'none', name: '', details: [] } }),
+  );
   const read = ['NAVRATRI OFFER', 'Celebrate Navratri', 'in the Creta', 'Festive benefits for nine nights', 'Benefits up to ₹50,000*', 'Exchange bonus up to ₹20,000*', 'Book a test drive', 'HYUNDAI', 'CRETA', 'H'];
   const ok = compareWords(words, read, ['Hyundai Creta', 'Hyundai', 'Creta']);
   assert.deepEqual(ok, { checked: true, ok: true, missing: [], extra: [] }, 'capitals, line breaks and the car’s own badges are fine');
@@ -333,37 +340,50 @@ test('the words read back off a design are checked against the copy, as they are
 
   assert.equal(normWords('शुभ नवरात्रि!'), 'शुभनवरात्रि', 'an Indian script keeps its vowel signs');
   assert.equal(normWords('Only ₹9,999/month.'), 'only₹9,999month');
-  assert.equal(designWordsOf({ ...emptyCopy(), headline: 'x', cta: 'Book now' }, true).cta, '', 'the panel’s call to action is not the model’s');
+  // With a full strip, the model sets the dealership's name, contact, button and small print too — and they are checked.
+  const full = designWordsOf({ ...emptyCopy(), headline: 'x', cta: 'Book now', terms: '*T&C apply.' }, input({}));
+  assert.deepEqual(full.strip, { name: 'Garve Hyundai', lines: ['Baner Road, Pune', '+91 97643 79764  ·  garvehyundai.com'], cta: 'Book now' });
+  assert.equal(full.cta, '', 'the button is on the strip');
+  assert.equal(full.terms, '*T&C apply.');
+  const wrongPhone = compareWords(full, ['x', 'Garve Hyundai', 'Baner Road, Pune', '+91 97643 79746 · garvehyundai.com', 'Book now', '*T&C apply.']);
+  assert.deepEqual(wrongPhone.missing, ['+91 97643 79764  ·  garvehyundai.com'], 'a misdrawn phone number is caught');
+  const compact = designWordsOf({ ...emptyCopy(), headline: 'x', cta: 'Book now' }, input({ panel: { style: 'compact', name: 'Garve Hyundai', details: ['+91 97643 79764', 'Pune'] } }));
+  assert.deepEqual(compact.strip, { name: '', lines: ['Garve Hyundai  ·  +91 97643 79764  ·  Pune'], cta: '' });
+  assert.equal(compact.cta, 'Book now', 'a one-line strip leaves the button to the words');
   assert.ok(sameDesignWords(words, { ...words }));
   assert.ok(!sameDesignWords(words, { ...words, headline: 'Another' }));
   assert.equal(verdictWeight({ same: false, checked: true }, dropped), 5);
   assert.equal(verdictWeight({ same: true, checked: true }, ok), 0);
 });
 
-test('a design carries only what must be exact: the logos, the panel and the small print', () => {
-  for (const f of SOCIAL) {
+test('a design carries the client’s exact logos and nothing else; it is designed on a canvas with them in place', () => {
+  for (const f of CREATIVE_FORMATS.filter((x) => x.design === 'whole')) {
     const doc = layoutDesigned(input({ format: f.id, picture: { src: '/api/refs/d/design.png', storagePath: 'refs/d/design.png', mode: 'design' } }));
     const where = f.id;
     assert.equal(validateCreativeDoc(doc), null, where);
     const pic = doc.layers[0]!;
     assert.ok(pic.kind === 'image' && pic.role === 'background' && pic.fit === 'cover' && pic.w === f.width && pic.h === f.height, `${where}: the design fills the frame`);
-    assert.ok(!doc.layers.some((l) => l.role === 'headline' || l.role === 'kicker' || l.role === 'sub' || l.role === 'badge' || l.role === 'points'), `${where}: the words are the design's`);
-    assert.ok(!doc.layers.some((l) => l.role === 'scrim' && l.name !== 'Shade, foot'), `${where}: no shades over the design`);
-    assert.ok(doc.layers.some((l) => l.role === 'dealer-logo') && doc.layers.some((l) => l.role === 'panel'), `${where}: logos and panel`);
-    const carries = panelCarries(input({ format: f.id }));
-    assert.equal(doc.layers.some((l) => l.role === 'cta'), carries.cta, `${where}: the panel's call to action, or the design's`);
-    assert.ok(doc.layers.some((l) => l.role === 'terms'), `${where}: the small print is the app's`);
-    const zones = designZonesOf(doc, 'dark');
-    const panel = doc.layers.find((l) => l.role === 'panel')!;
-    assert.ok(zones.logoBand > 0 && zones.logoBand < 0.35, `${where}: the logo row ${zones.logoBand}`);
-    assert.ok(zones.stripTop <= panel.y / f.height + 0.001 && zones.stripTop > 0.6, `${where}: the strip ${zones.stripTop}`);
-    assert.equal(zones.textSide, f.width / f.height > 1.3 ? 'left' : 'top');
+    assert.ok(doc.layers.slice(1).every((l) => l.role === 'dealer-logo' || l.role === 'brand-logo'), `${where}: only the logos go on it`);
+    assert.ok(doc.layers.some((l) => l.role === 'dealer-logo'), `${where}: the dealer's logo`);
+
+    const canvas = designSkeleton(input({ format: f.id }));
+    const at = designCanvasOf(f.id);
+    assert.equal(canvas.background, DESIGN_GROUND);
+    assert.deepEqual([canvas.width, canvas.height], [at.width, at.height], `${where}: the canvas is the shape the model draws`);
+    const drawn = PICTURE_ASPECT_RATIO[f.pictureAspect];
+    assert.ok(Math.abs(canvas.width / canvas.height - drawn) < 0.01, `${where}: at ${f.pictureAspect}`);
+    const logos = doc.layers.slice(1);
+    assert.equal(canvas.layers.length, logos.length, `${where}: every logo, and nothing else`);
+    canvas.layers.forEach((l, i) => {
+      assert.equal(l.x, logos[i]!.x + at.dx, `${where}: the logo sits where the frame sits in the canvas`);
+      assert.equal(l.y, logos[i]!.y + at.dy);
+    });
   }
-  const bare = layoutDesigned(input({ picture: { src: '/x.png', mode: 'design' }, logos: { placement: { brand: 'off', dealer: 'off' } }, panel: { style: 'none', name: '', details: [] } }));
-  const z = designZonesOf(bare, 'light');
-  assert.equal(z.logoBand, 0, 'no logos, no logo row');
-  assert.ok(z.stripTop < 1, 'the small print at the foot is still kept clear');
-  assert.ok(bare.layers.some((l) => l.name === 'Shade, foot'), 'and shaded');
+  assert.deepEqual(designCanvasOf('landscape'), { width: 1200, height: 675, dx: 0, dy: 24 }, '1.91:1 is the middle of 16:9');
+  assert.deepEqual(designCanvasOf('cd-300x600'), { width: 338, height: 600, dx: 19, dy: 0 }, '1:2 is the middle of 9:16');
+  assert.deepEqual(designCanvasOf('ig-square'), { width: 1080, height: 1080, dx: 0, dy: 0 });
+  const zones = designZonesOf(layoutCreative(input({})), 'dark');
+  assert.ok(zones.stripTop > 0.7 && zones.stripTop < 0.9, 'the strip the model is asked for is the layout’s own');
 });
 
 test('a new picture keeps every change made to a creative', () => {
@@ -403,11 +423,11 @@ test('the CarDekho ad set: five banners at their own pixels, words never too sma
           assert.ok(l.kind === 'text' && (l.minSize ?? l.size * 0.5) >= 8, `${where}: ${l.name} could shrink below 8px`);
         }
         assert.ok(doc.layers.some((l) => l.role === 'dealer-logo'), `${where}: the logo`);
-        const terms = doc.layers.find((l) => l.role === 'terms');
-        assert.ok(terms && terms.kind === 'text' && terms.text.length <= 48, `${where}: the small print, short`);
         if (picture?.mode === 'design') {
-          assert.ok(!doc.layers.some((l) => l.role === 'headline' || l.role === 'cta'), `${where}: the design carries the words`);
+          assert.ok(doc.layers.slice(1).every((l) => l.role === 'dealer-logo' || l.role === 'brand-logo'), `${where}: the design carries the words and the small print`);
         } else {
+          const terms = doc.layers.find((l) => l.role === 'terms');
+          assert.ok(terms && terms.kind === 'text' && terms.text.length <= 48, `${where}: the small print, short`);
           assert.ok(doc.layers.some((l) => l.role === 'headline'), `${where}: the headline`);
           assert.ok(doc.layers.some((l) => l.role === 'cta'), `${where}: the button`);
           const cta = doc.layers.find((l) => l.role === 'cta')!;
@@ -418,10 +438,10 @@ test('the CarDekho ad set: five banners at their own pixels, words never too sma
       }
     }
   }
-  // What Nano Banana 2 is asked to set on a banner: few words.
-  const rect = designWordsOf({ ...COPY, sub: 'A second line', points: ['One', 'Two'] }, false, 'cd-300x250');
-  assert.deepEqual([rect.sub, rect.points], ['', []]);
-  const half = designWordsOf({ ...COPY, sub: 'A second line', points: ['One', 'Two'] }, false, 'cd-300x600');
+  // What Nano Banana 2 is asked to set on a banner: few words, no strip, the short small print.
+  const rect = designWordsOf({ ...COPY, sub: 'A second line', points: ['One', 'Two'], terms: '*T&C apply. Offer valid till 31 October.' }, input({ format: 'cd-300x250' }));
+  assert.deepEqual([rect.sub, rect.points, rect.strip, rect.terms], ['', [], undefined, '*T&C apply.']);
+  const half = designWordsOf({ ...COPY, sub: 'A second line', points: ['One', 'Two'] }, input({ format: 'cd-300x600' }));
   assert.deepEqual([half.sub, half.points], ['A second line', []]);
   assert.deepEqual(pictureTrim('cd-300x600').sides, 'left-right');
   assert.ok(Math.abs(pictureTrim('landscape').each - 0.035) < 0.002);

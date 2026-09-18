@@ -162,6 +162,7 @@ import {
   type EditLayer,
   type EditLook,
   UNREAD_WORDS,
+  UNCHECKED_LOGOS,
   compareWords,
   isCreativeColour,
   isCreativeEngine,
@@ -169,6 +170,7 @@ import {
   isCreativeTemplate,
   verdictWeight,
   type DesignWords,
+  type LogosVerdict,
   type WordsVerdict,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title, syncColours } from './carSync.js';
@@ -4182,10 +4184,24 @@ function cleanDesign(raw: unknown): DesignRequest | null {
     badge: text(w.badge, 80),
     points: (Array.isArray(w.points) ? w.points : []).map((x) => text(x, 120)).filter(Boolean).slice(0, 6),
     cta: text(w.cta, 60),
+    terms: text(w.terms, 240),
   };
+  const st = w.strip as Record<string, unknown> | undefined;
+  if (st && typeof st === 'object') {
+    const strip = {
+      name: text(st.name, 80),
+      lines: (Array.isArray(st.lines) ? st.lines : []).map((x) => text(x, 140)).filter(Boolean).slice(0, 3),
+      cta: text(st.cta, 60),
+    };
+    if (strip.name || strip.lines.length) words.strip = strip;
+  }
   if (!words.headline && !words.kicker && !words.sub) return null;
   const z = (d.zones ?? {}) as Record<string, unknown>;
+  const canvas = d.canvas as { storagePath?: unknown; logos?: unknown } | undefined;
   return {
+    ...(canvas && typeof canvas.storagePath === 'string' && STORED.test(canvas.storagePath)
+      ? { canvas: { storagePath: canvas.storagePath, logos: unit(canvas.logos, 0, 4, 0) } }
+      : {}),
     format: d.format,
     engine: d.engine,
     ...(isCreativeEngine(d.secondary) ? { secondary: d.secondary } : {}),
@@ -4227,24 +4243,72 @@ async function carRefs(photos: unknown, name: string, max: number): Promise<Arra
 const asReadable = async (bytes: Buffer): Promise<Buffer> =>
   sharp(bytes).rotate().resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
 
-/** What a design is checked for: the vehicle against its photograph, and every word against the copy. */
+/**
+ * How far the logos moved: the canvas's logo pixels — everything not the grey ground — against
+ * the same pixels of the design, as an average difference out of 255. The exact logo files go
+ * back on at these places, so a design that moved them would show a ghost beside each.
+ */
+async function logoDrift(canvas: Buffer, design: Buffer): Promise<number | null> {
+  try {
+    const meta = await sharp(canvas).metadata();
+    const w = meta.width ?? 0;
+    const h = meta.height ?? 0;
+    if (!w || !h) return null;
+    const a = await sharp(canvas).removeAlpha().raw().toBuffer();
+    const b = await sharp(design).resize(w, h, { fit: 'fill' }).removeAlpha().raw().toBuffer();
+    let n = 0;
+    let sum = 0;
+    for (let i = 0; i < w * h; i++) {
+      const r = a[i * 3]!;
+      const g = a[i * 3 + 1]!;
+      const bl = a[i * 3 + 2]!;
+      // The grey ground, and the soft edges where a logo meets it, are the model's to design.
+      if (Math.abs(r - 128) + Math.abs(g - 128) + Math.abs(bl - 128) < 90) continue;
+      n++;
+      sum += (Math.abs(r - b[i * 3]!) + Math.abs(g - b[i * 3 + 1]!) + Math.abs(bl - b[i * 3 + 2]!)) / 3;
+    }
+    return n < 40 ? null : sum / n;
+  } catch {
+    return null;
+  }
+}
+
+/** What a design is checked for: the vehicle against its photograph, every word against the copy, the logos against the canvas. */
 async function checkDesign(
   bytes: Buffer,
   design: DesignRequest,
   reference: Buffer | undefined,
+  canvas: Buffer | null,
   key: string,
-): Promise<{ vehicle: { same: boolean; checked: boolean; why?: string }; words: WordsVerdict; costInr: number }> {
-  const [vehicle, read] = await Promise.all([
+): Promise<{ vehicle: { same: boolean; checked: boolean; why?: string }; words: WordsVerdict; logos: LogosVerdict; costInr: number }> {
+  const [vehicle, read, drift] = await Promise.all([
     reference ? checkVehicleFrame(await asJpeg(bytes), reference, design.vehicle.name, key) : Promise.resolve({ same: true, checked: false, why: '' }),
     readCreativeWords(await asReadable(bytes), key),
+    canvas ? logoDrift(canvas, bytes) : Promise.resolve(null),
   ]);
   // The maker's badge and the model's name, as they are on the vehicle itself.
   const badge = [design.vehicle.name, ...design.vehicle.name.split(/\s+/)];
+  const expected = design.canvas?.logos ?? 0;
+  const extra = read && read.logos >= 0 && canvas ? Math.max(0, read.logos - expected) : 0;
+  const logos: LogosVerdict =
+    drift === null && !(read && read.logos >= 0 && canvas)
+      ? UNCHECKED_LOGOS
+      : { checked: true, kept: drift === null || drift < LOGO_DRIFT_LIMIT, extra, ...(drift !== null ? { drift: Math.round(drift) } : {}) };
   return {
     vehicle: { same: vehicle.same, checked: vehicle.checked, ...(vehicle.why ? { why: vehicle.why } : {}) },
     words: read ? compareWords(design.words, read.texts, badge) : UNREAD_WORDS,
+    logos,
     costInr: read?.costInr ?? 0,
   };
+}
+/** Past this, a logo was moved or painted out — not just redrawn a little, which the exact file laid back on covers. */
+const LOGO_DRIFT_LIMIT = 90;
+
+/** The canvas a design was made on, as a PNG. */
+async function readCanvas(design: DesignRequest): Promise<Buffer | null> {
+  if (!design.canvas) return null;
+  const o = await readObject(design.canvas.storagePath).catch(() => null);
+  return o ? sharp(o.bytes).png().toBuffer().catch(() => null) : null;
 }
 
 async function storeDesign(format: string, out: { bytes: Buffer; mimeType: string }): Promise<{ image: StoredImage; width?: number; height?: number }> {
@@ -4272,11 +4336,12 @@ app.post<{ Body: { projectId?: string; design?: unknown; photos?: unknown } }>('
   if (!design) return reply.code(400).send({ code: 'bad-request', message: 'Pick the vehicle and the sizes, and give the creative its words first.' });
   const refs = await carRefs(req.body?.photos, design.vehicle.name, 4);
   if (!refs.length) return reply.code(400).send({ code: 'design-no-photo', message: 'Pick a photo of the vehicle first — the creative is built from it.' });
+  const canvas = await readCanvas(design);
   try {
     const attempt = async () => {
-      const out = await drawCreativeDesign(design, refs, key);
-      const checks = await checkDesign(out.bytes, design, refs[0]!.bytes, key);
-      return { out, checks, spent: out.costInr + checks.costInr, weight: verdictWeight(checks.vehicle, checks.words) };
+      const out = await drawCreativeDesign(design, canvas ? { bytes: canvas, mimeType: 'image/png' } : null, refs, key);
+      const checks = await checkDesign(out.bytes, design, refs[0]!.bytes, canvas, key);
+      return { out, checks, spent: out.costInr + checks.costInr, weight: verdictWeight(checks.vehicle, checks.words, checks.logos) };
     };
     let best = await attempt();
     let spent = best.spent;
@@ -4290,7 +4355,7 @@ app.post<{ Body: { projectId?: string; design?: unknown; photos?: unknown } }>('
     const stored = await storeDesign(design.format, best.out);
     const projectId = req.body?.projectId;
     if (typeof projectId === 'string' && projectId) void addToTotals('imageProjects', projectId, spent).catch(() => {});
-    return { ...stored, words: design.words, checks: { vehicle: best.checks.vehicle, words: best.checks.words }, model: best.out.model };
+    return { ...stored, words: design.words, checks: { vehicle: best.checks.vehicle, words: best.checks.words, logos: best.checks.logos }, model: best.out.model };
   } catch (err) {
     const e = err as CreativeError;
     app.log.warn({ code: e.code, message: e.message }, 'creative design failed');
@@ -4319,11 +4384,11 @@ app.post<{ Body: { projectId?: string; design?: unknown; image?: { storagePath?:
     try {
       const png = await sharp(current.bytes).png().toBuffer();
       const out = await reviseCreativeDesign(design, change, { bytes: png, mimeType: 'image/png' }, refs, key);
-      const checks = await checkDesign(out.bytes, design, refs[0]?.bytes, key);
+      const checks = await checkDesign(out.bytes, design, refs[0]?.bytes, await readCanvas(design), key);
       const stored = await storeDesign(design.format, out);
       const projectId = req.body?.projectId;
       if (typeof projectId === 'string' && projectId) void addToTotals('imageProjects', projectId, out.costInr + checks.costInr).catch(() => {});
-      return { ...stored, words: design.words, checks: { vehicle: checks.vehicle, words: checks.words }, model: out.model, revision: change };
+      return { ...stored, words: design.words, checks: { vehicle: checks.vehicle, words: checks.words, logos: checks.logos }, model: out.model, revision: change };
     } catch (err) {
       const e = err as CreativeError;
       app.log.warn({ code: e.code, message: e.message }, 'creative revision failed');

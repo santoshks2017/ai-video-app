@@ -283,9 +283,10 @@ export async function drawCreativeScene(
 /* ============================== the design ============================== */
 
 /**
- * A whole creative from Nano Banana 2: the real car in a scene, and the words set into it as a
- * designed advertisement. The logos and the dealer panel are the app's, laid over it after —
- * so the model is told where they go, and to keep those places clear.
+ * A whole creative from Nano Banana 2: the real car in a scene, and every word — the headline,
+ * the offer, the dealership's strip, the small print — designed into one piece. It designs on a
+ * canvas with the client's logos already in their places, so it works around the real logos
+ * instead of inventing its own; the app lays the exact logo files back on afterwards.
  */
 export interface DesignRequest {
   format: CreativeFormatId;
@@ -301,6 +302,8 @@ export interface DesignRequest {
   language: { name: string; script: 'latin' | 'indic' };
   look: { panel: string; accent: string };
   zones: DesignZones;
+  /** The canvas with the logos in place, and how many logos are on it. */
+  canvas?: { storagePath: string; logos: number };
 }
 
 const TYPE_MOOD: Record<CreativeTemplateId, string> = {
@@ -313,13 +316,14 @@ const TYPE_MOOD: Record<CreativeTemplateId, string> = {
 };
 
 const pct = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 100);
+const pct1 = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 1000) / 10;
 const quoted = (s: string): string => `"${s.replace(/"/g, '”')}"`;
 
 /** The words a design is asked to set, each with its part in the hierarchy. */
 function wordsBrief(w: DesignWords): string[] {
   const out: string[] = [];
   if (w.kicker) out.push(`- Small line above the headline: ${quoted(w.kicker)}`);
-  if (w.headline) out.push(`- Headline — the largest, boldest words on the creative: ${quoted(w.headline)}`);
+  if (w.headline) out.push(`- Headline — the largest, boldest words on the creative by far: ${quoted(w.headline)}`);
   if (w.sub) out.push(`- Second line, under the headline, much smaller: ${quoted(w.sub)}`);
   if (w.badge) out.push(`- Offer badge — a bold tag or sticker shape in the accent colour that stands out: ${quoted(w.badge)}`);
   if (w.points.length) out.push(`- Points, as a short list with ticks or bullets, one per line: ${w.points.map(quoted).join(' / ')}`);
@@ -327,61 +331,81 @@ function wordsBrief(w: DesignWords): string[] {
   return out;
 }
 
-/** Where the words, the car and the app's own overlays go, for this size. */
+/** The dealership's strip and the small print. */
+function stripBrief(req: DesignRequest): string[] {
+  const w = req.words;
+  const out: string[] = [];
+  if (w.strip) {
+    const share = Math.max(10, Math.min(24, 100 - pct(req.zones.stripTop)));
+    out.push(
+      '',
+      '## The dealership strip',
+      `Across the bottom, about ${share}% of the height: a strip that belongs to the design — in its colours and its style, not a box pasted on — with clear space between it and the vehicle above. It carries exactly:`,
+    );
+    if (w.strip.name) out.push(`- The dealership's name, bold, the largest words in the strip: ${quoted(w.strip.name)}`);
+    for (const l of w.strip.lines) out.push(`- ${w.strip.name ? 'Then, smaller' : 'One line'}: ${quoted(l)}`);
+    if (w.strip.cta) out.push(`- A button on the strip's right, a rounded pill in the accent colour: ${quoted(w.strip.cta)}`);
+  }
+  if (w.terms) out.push(`${w.strip ? '' : '\n'}- The small print, at the very bottom, small but legible: ${quoted(w.terms)}`);
+  return out;
+}
+
+/** Where the words, the car and the strip go, for this size. */
 function layoutBrief(req: DesignRequest, noun: string): string[] {
   const f = CREATIVE_FORMAT_BY_ID[req.format];
   const z = req.zones;
   const out: string[] = [
     z.textSide === 'left'
-      ? `Put the words in the left half of the frame and the whole ${noun} in the right half. No word may touch or cover the ${noun}.`
-      : `Put the words in the upper part of the frame${z.logoBand > 0 ? ', below the logo row' : ''}, and the whole ${noun} below them. No word may touch or cover the ${noun}.`,
+      ? `Put the words in the left half of the frame and the whole ${noun} in the right half.`
+      : `Put the words in the upper part of the frame${z.logoBand > 0 ? ', below the logos' : ''}, and the whole ${noun} below them.`,
+    `Nothing overlaps: no word on the ${noun}, no word on a logo, no word on another word, and nothing touching the edges.`,
   ];
-  if (z.logoBand > 0) {
-    out.push(
-      `The top ${pct(z.logoBand)}% of the frame is the logo row: logos are placed in its left and right corners afterwards. Keep both of those corners plain, ${z.logoTone} background — no words, no detail, nothing bright.`,
-    );
-  } else if (f.safeTop > 0) {
-    out.push(`Keep every word out of the top ${pct(f.safeTop) + 2}% — the platform's own controls cover it.`);
-  }
-  if (z.stripTop < 1) {
-    out.push(
-      isAdFormat(req.format)
-        ? `The bottom ${100 - pct(z.stripTop)}% carries a line of small print afterwards: keep it plain, with no words.`
-        : `Everything below ${pct(z.stripTop)}% of the height is covered afterwards by a solid strip with the dealership's details: put no words there, and keep the ${noun}'s wheels above it.`,
-    );
-  } else if (f.safeBottom > 0) {
-    out.push(`Keep every word out of the bottom ${pct(f.safeBottom) + 2}% — the platform's own controls cover it.`);
-  }
+  if (f.safeTop > 0) out.push(`Keep every word out of the top ${pct(f.safeTop) + 2}% and the bottom ${pct(f.safeBottom) + 2}% — the platform's own controls cover them.`);
   // A size not drawn at its own shape is cut from the picture: nothing that matters may sit where it is cut.
   const trim = pictureTrim(req.format);
   if (trim.each > 0.015) {
-    out.push(`The ${trim.sides === 'top-bottom' ? 'top and bottom' : 'left and right'} ${Math.ceil(trim.each * 100) + 1}% may be trimmed: keep every word and the whole ${noun} clear of them.`);
+    out.push(`The ${trim.sides === 'top-bottom' ? 'top and bottom' : 'left and right'} ${Math.ceil(trim.each * 100) + 1}% may be trimmed: keep every word, the logos' surroundings and the whole ${noun} clear of them.`);
   }
-  out.push('Leave comfortable margins: no word closer than 5% to any edge of the frame.');
+  out.push('Leave comfortable margins: no word closer than 5% to any edge of the frame. Align everything to a clear grid.');
   return out;
 }
 
-/** The instruction for a whole creative: this vehicle, this scene, these words and nothing else, room for the logos and panel. */
-export function designInstruction(req: DesignRequest, refLabels: string[]): string {
+/** The instruction for a whole creative: the canvas, this vehicle, these words exactly and nothing else. */
+export function designInstruction(req: DesignRequest, carLabels: string[]): string {
   const noun = req.vehicle.kind === 'bike' ? 'motorcycle' : 'car';
   const f = CREATIVE_FORMAT_BY_ID[req.format];
+  const ad = isAdFormat(req.format);
   const e = CREATIVE_ENGINE_BY_ID[req.engine];
   const second = req.secondary ? CREATIVE_ENGINE_BY_ID[req.secondary] : undefined;
   const template = req.template ?? e?.template ?? 'hero';
   const scene = (req.occasion && OCCASION_SCENES[req.occasion]) || e?.scene || 'a clean, premium setting';
-  const ad = isAdFormat(req.format);
+  const canvas = Boolean(req.canvas);
+  const car = canvas ? 1 : 0;
+  // The smallest words at the creative's own pixels: small print, then everything else.
+  const tiny = pct1((ad ? 9 : 22) / f.height);
+  const small = pct1((ad ? 11 : 30) / f.height);
   return [
     ad
       ? `Design one finished display advertisement for an Indian ${noun} dealership: a banner for CarDekho, India's car marketplace (${f.platforms}). It is shown at just ${f.width}×${f.height} pixels on a web page, so it carries very few words, very large and bold, and one clear button. Draw it at aspect ${f.pictureAspect}.`
       : `Design one finished social media advertisement for an Indian ${noun} dealership: a ${f.label} post (${f.platforms}), ${f.width}×${f.height} pixels, aspect ${f.pictureAspect}.`,
+    'Make it look like the work of a top automotive advertising agency: one clear idea, a strong hierarchy, generous space, everything aligned, nothing crowded.',
     e ? `It is a ${e.label} post${second ? `, blended with ${second.label}` : ''}. ${e.purpose}` : '',
     e?.avoid.length ? `Avoid: ${e.avoid.join('; ')}.` : '',
     '',
     '## References',
-    ...refLabels.map((l, i) => `<IMAGE_REF_${i}> — ${l}`),
+    ...(canvas ? ["<IMAGE_REF_0> — the canvas: this creative's exact shape, with the client's logos already in their final places"] : []),
+    ...carLabels.map((l, i) => `<IMAGE_REF_${i + car}> — ${l}`),
+    ...(canvas
+      ? [
+          '',
+          '## The canvas',
+          `Design the whole creative on <IMAGE_REF_0>. The logos on it are the client's real logos, already where they belong: keep each one exactly where it is — the same place, the same size, the same colours — and keep the ground around them calm and ${req.zones.logoTone}, so they read clearly. The grey is empty canvas: replace every bit of it with the design.`,
+          `Add no other logo, emblem, brand name or wordmark anywhere — the logos on the canvas are the only ones (the manufacturer's badge on the ${noun} itself aside).`,
+        ]
+      : []),
     '',
     `## The ${noun}`,
-    `<IMAGE_REF_0> is the ${req.vehicle.name}${req.vehicle.colour ? ` in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the creative: the same model generation, body shape, grille, headlamps, tail-lamps, badges, alloy wheels, colour and trim as in the reference photographs${refLabels.length > 1 ? ', which show its other sides' : ''}. Build it only from these photographs — never from what the name brings to mind, and never an older or different model.`,
+    `<IMAGE_REF_${car}> is the ${req.vehicle.name}${req.vehicle.colour ? ` in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the creative: the same model generation, body shape, grille, headlamps, tail-lamps, badges, alloy wheels, colour and trim as in the reference photographs${carLabels.length > 1 ? ', which show its other sides' : ''}. Build it only from these photographs — never from what the name brings to mind, and never an older or different model.`,
     `The ${noun} is whole and uncropped, sharp, the hero of the picture, on the ground with correct contact shadows and true reflections in the paint and glass.`,
     `NUMBER PLATES ARE PLAIN WHITE AND BLANK — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is a plain white plate with nothing on it: no letters, no numbers, no state code, no dealer name. Writing on a plate in the reference photographs is not part of the ${noun}; never copy it.`,
     '',
@@ -389,15 +413,18 @@ export function designInstruction(req: DesignRequest, refLabels: string[]): stri
     `${scene}.${req.note?.trim() ? ` ${req.note.trim()}` : ''} Photorealistic, like a professional automotive campaign photograph — real light, real materials — with the words designed into it as a polished advertisement. No people in the foreground.`,
     '',
     '## The words — set exactly these, and nothing else',
-    'Spell every word exactly as written between the quotes: the same letters and capitals, the ₹ sign, the commas in numbers, and every asterisk (*).',
+    'Spell every word exactly as written between the quotes: the same letters and capitals, the ₹ sign, the commas in numbers, every digit of a phone number, and every asterisk (*).',
     ...wordsBrief(req.words),
-    `No other text anywhere: no extra slogans, dates, prices or numbers, no phone number, website, address, hashtags, logos, brand names or watermarks, and no writing on signs, screens or banners in the scene. The only other lettering allowed is the manufacturer's own badge on the ${noun}, exactly as in the photographs.`,
+    ...stripBrief(req),
+    '',
+    `No other text anywhere: nothing that is not listed above — no extra slogans, dates, prices, numbers, phone numbers, websites, hashtags or watermarks, and no writing on signs, screens or banners in the scene.`,
     req.language.script === 'indic'
-      ? `The words are in ${req.language.name}, in its own script: set every conjunct and vowel sign correctly. Model names, brand names and ₹ amounts stay in Latin letters and digits, exactly as written.`
+      ? `The words are in ${req.language.name}, in its own script: set every conjunct and vowel sign correctly. Model names, brand names, ₹ amounts, phone numbers and websites stay in Latin letters and digits, exactly as written.`
       : '',
     '',
     '## Typography and colour',
-    `${TYPE_MOOD[template]}. Type is large, crisp and easy to read ${ad ? `at ${f.width}×${f.height} pixels` : 'on a phone'}, with strong contrast against what is behind it — a soft shade or a clean band behind the words where the picture is busy. The headline takes at most two lines.`,
+    `${TYPE_MOOD[template]}. Type is crisp and easy to read ${ad ? `at ${f.width}×${f.height} pixels` : 'on a phone'}, with strong contrast against what is behind it. The headline takes at most two lines.`,
+    `No word smaller than ${small}% of the height, and the small print no smaller than ${tiny}% of the height.`,
     `The creative's colours are ${req.look.panel} and ${req.look.accent}: use ${req.look.accent} for the badge, the button and small accents.`,
     '',
     '## Layout',
@@ -416,9 +443,8 @@ export function reviseInstruction(req: DesignRequest, change: string, carRefs: n
     '',
     `Make this one change to the advertisement: ${quoted(change.trim())}`,
     '',
-    `Keep everything else exactly as it is: the same ${noun} (as in the photographs), the same scene, layout, colours and typography, and every word exactly as written — unless the change asks for different words.`,
-    `Number plates stay plain white and blank. Add no other text, logos or watermarks.`,
-    ...layoutBrief(req, noun),
+    `Keep everything else exactly as it is: the same ${noun} (as in the photographs), the same scene, layout, colours and typography, the logos exactly where they are, and every word exactly as written — unless the change asks for different words.`,
+    `Number plates stay plain white and blank. Add no other text, logos or watermarks. Nothing may overlap: no word on the ${noun}, on a logo or on another word.`,
     `Frame: ${CREATIVE_FORMAT_BY_ID[req.format].pictureAspect}.`,
   ]
     .filter((l) => l !== '')
@@ -432,13 +458,15 @@ const designConfigs = (req: DesignRequest) => {
 
 export async function drawCreativeDesign(
   req: DesignRequest,
+  canvas: { bytes: Buffer; mimeType: string } | null,
   refs: Array<{ bytes: Buffer; mimeType: string; label: string }>,
   apiKey: string,
 ): Promise<{ bytes: Buffer; mimeType: string; model: string; costInr: number }> {
   if (!refs.length) throw new CreativeError('design-no-photo', 'Pick a photo of the vehicle first — the creative is built from it.', 400);
   const model = await resolveNanoBanana2(apiKey);
   const parts: ImagePart[] = [
-    { text: designInstruction(req, refs.map((r) => r.label)) },
+    { text: designInstruction(canvas ? req : { ...req, canvas: undefined }, refs.map((r) => r.label)) },
+    ...(canvas ? [{ inline_data: { mime_type: canvas.mimeType, data: canvas.bytes.toString('base64') } }] : []),
     ...refs.map((r) => ({ inline_data: { mime_type: r.mimeType, data: r.bytes.toString('base64') } })),
   ];
   const out = await requestImage(model, parts, apiKey, designConfigs(req), 0.6, 'Creative images');
@@ -466,12 +494,12 @@ export async function reviseCreativeDesign(
  * Every piece of writing on a creative, read back as it is — not as it should be. Null when
  * it could not be read; the creative is then shown as not checked, never as passed.
  */
-export async function readCreativeWords(image: Buffer, apiKey: string): Promise<{ texts: string[]; costInr: number } | null> {
+export async function readCreativeWords(image: Buffer, apiKey: string): Promise<{ texts: string[]; logos: number; costInr: number } | null> {
   const instruction = [
     'Read every piece of text on this advertisement exactly as it is written: the same spelling, capitals, symbols (₹, *, %), numbers and punctuation. Do not correct anything.',
-    'Each separate block of text is one string — a headline over two lines is one block, a button is one block, a badge is one block, each point of a list is one block.',
-    'Include lettering anywhere in the picture: on the vehicle, its number plates, signs, screens and the background.',
-    'Answer JSON only: {"texts": ["..."]} — an empty list when there is no text.',
+    'Each separate block of text is one string — a headline over two lines is one block, a button is one block, a badge is one block, each point of a list is one block, each line of an address or contact strip is one block.',
+    'Include lettering anywhere in the picture — signs, screens, the background, the number plates — except lettering that is part of a logo, an emblem or a wordmark, and the badges on the vehicle itself: count those instead.',
+    'Answer JSON only: {"texts": ["..."], "logos": <how many separate logos, emblems or brand wordmarks are printed on the advertisement itself, not counting badges on the vehicle>} — "texts" is an empty list when there is no text.',
   ].join('\n');
   try {
     const model = await resolveTextModel(apiKey, 'transform');
@@ -487,8 +515,9 @@ export async function readCreativeWords(image: Buffer, apiKey: string): Promise<
     const json = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[]; usageMetadata?: TokenUsage };
     recordUsage('Creative checks', model, json.usageMetadata);
     const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
-    const parsed = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { texts?: unknown };
-    return { texts: strs(parsed.texts), costInr: inr(model, json.usageMetadata) };
+    const parsed = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { texts?: unknown; logos?: unknown };
+    const logos = typeof parsed.logos === 'number' && Number.isFinite(parsed.logos) ? Math.max(0, Math.round(parsed.logos)) : -1;
+    return { texts: strs(parsed.texts), logos, costInr: inr(model, json.usageMetadata) };
   } catch {
     return null;
   }

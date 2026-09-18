@@ -66,54 +66,76 @@ test('the picture is asked for with this vehicle, a blank plate, room for the wo
   assert.match(sceneInstruction({ aspect: '1:1', engine: 'festival', vehicle: { name: 'Hyundai Creta' }, textBand: 'top', band: 0.95, panel: true }, ['x']), /top 60%/, 'never most of the frame');
 });
 
-test('Nano Banana 2 is asked for the whole creative: this vehicle, these words exactly and nothing else, room for the logos and panel', () => {
+test('Nano Banana 2 designs the whole creative on the canvas with the logos in place: this vehicle, these words exactly, the strip, nothing else', () => {
   const req: DesignRequest = {
     format: 'ig-square',
     engine: 'festival',
     secondary: 'offer',
     occasion: 'Navratri',
     vehicle: { name: 'Hyundai Creta', colour: 'Abyss Black', kind: 'car' },
-    words: { kicker: 'Navratri offer', headline: 'Celebrate Navratri in the Creta', sub: '', badge: 'Benefits up to ₹50,000*', points: ['Exchange bonus up to ₹20,000*'], cta: '' },
+    words: {
+      kicker: 'Navratri offer',
+      headline: 'Celebrate Navratri in the Creta',
+      sub: '',
+      badge: 'Benefits up to ₹50,000*',
+      points: ['Exchange bonus up to ₹20,000*'],
+      cta: '',
+      strip: { name: 'Garve Hyundai', lines: ['Baner Road, Pune', '+91 97643 79764  ·  garvehyundai.com'], cta: 'Book a test drive' },
+      terms: '*T&C apply. Offer valid till 31 October.',
+    },
     language: { name: 'English', script: 'latin' },
     look: { panel: '#0F1E33', accent: '#E8590C' },
     zones: { logoBand: 0.14, stripTop: 0.82, logoTone: 'dark', textSide: 'top' },
+    canvas: { storagePath: 'refs/c/canvas.png', logos: 2 },
   };
   const p = designInstruction(req, ['the Hyundai Creta, front', 'the Hyundai Creta, side']);
   assert.match(p, /Instagram square post .*1080×1080 pixels, aspect 1:1/);
-  assert.match(p, /<IMAGE_REF_0> — the Hyundai Creta, front\n<IMAGE_REF_1> — the Hyundai Creta, side/);
-  assert.match(p, /Put THIS car in the creative/);
+  assert.match(p, /top automotive advertising agency/);
+  assert.match(p, /<IMAGE_REF_0> — the canvas: this creative's exact shape, with the client's logos already in their final places\n<IMAGE_REF_1> — the Hyundai Creta, front\n<IMAGE_REF_2> — the Hyundai Creta, side/);
+  assert.match(p, /keep each one exactly where it is — the same place, the same size, the same colours/);
+  assert.match(p, /The grey is empty canvas: replace every bit of it/);
+  assert.match(p, /Add no other logo, emblem, brand name or wordmark anywhere/);
+  assert.match(p, /<IMAGE_REF_1> is the Hyundai Creta in Abyss Black\. Put THIS car/, 'the car is the first photo after the canvas');
   assert.match(p, /NUMBER PLATES ARE PLAIN WHITE AND BLANK/);
   assert.match(p, /Navratri night/, 'dressed for the occasion');
-  assert.match(p, /Headline — the largest, boldest words on the creative: "Celebrate Navratri in the Creta"/);
+  assert.match(p, /Headline — the largest, boldest words on the creative by far: "Celebrate Navratri in the Creta"/);
   assert.match(p, /Offer badge .*: "Benefits up to ₹50,000\*"/);
-  assert.match(p, /Points, .*: "Exchange bonus up to ₹20,000\*"/);
-  assert.doesNotMatch(p, /Second line|Button/, 'only the words given');
-  assert.match(p, /No other text anywhere: .*no phone number, website, address/);
+  assert.doesNotMatch(p, /Second line|Button — /, 'only the words given; the button is the strip’s');
+  assert.match(p, /## The dealership strip\nAcross the bottom, about 18% of the height: a strip that belongs to the design — in its colours and its style, not a box pasted on/);
+  assert.match(p, /The dealership's name, bold, .*: "Garve Hyundai"/);
+  assert.match(p, /Then, smaller: "\+91 97643 79764  ·  garvehyundai\.com"/);
+  assert.match(p, /A button on the strip's right, .*: "Book a test drive"/);
+  assert.match(p, /The small print, at the very bottom, small but legible: "\*T&C apply\. Offer valid till 31 October\."/);
+  assert.match(p, /every digit of a phone number/);
+  assert.match(p, /Nothing overlaps: no word on the car, no word on a logo, no word on another word/);
+  assert.match(p, /No word smaller than 2\.8% of the height, and the small print no smaller than 2% of the height/);
   assert.match(p, /elegant serif greeting/, 'the festival’s typography');
-  assert.match(p, /The top 14% of the frame is the logo row: .*plain, dark background/);
-  assert.match(p, /Everything below 82% of the height is covered afterwards by a solid strip/);
   assert.match(p, /#E8590C for the badge, the button/);
+
+  const bare = designInstruction({ ...req, canvas: undefined }, ['x']);
+  assert.doesNotMatch(bare, /IMAGE_REF_0> — the canvas/);
+  assert.match(bare, /<IMAGE_REF_0> is the Hyundai Creta/, 'without a canvas the car comes first');
 
   const wide = designInstruction({ ...req, format: 'landscape', zones: { logoBand: 0.2, stripTop: 0.83, logoTone: 'light', textSide: 'left' } }, ['x']);
   assert.match(wide, /words in the left half of the frame and the whole car in the right half/);
   assert.match(wide, /top and bottom 5% may be trimmed/, '1.91:1 is cut from 16:9');
-  const story = designInstruction({ ...req, format: 'story', zones: { logoBand: 0, stripTop: 1, logoTone: 'dark', textSide: 'top' } }, ['x']);
-  assert.match(story, /out of the top 9%/);
-  assert.match(story, /out of the bottom 12%/);
+  assert.match(wide, /ground around them calm and light/);
+  const story = designInstruction({ ...req, format: 'story' }, ['x']);
+  assert.match(story, /out of the top 9% and the bottom 12%/);
   const hindi = designInstruction({ ...req, language: { name: 'Hindi', script: 'indic' }, words: { ...req.words, headline: 'नवरात्रि की शुभकामनाएँ' } }, ['x']);
   assert.match(hindi, /in Hindi, in its own script: set every conjunct and vowel sign correctly/);
   assert.match(hindi, /"नवरात्रि की शुभकामनाएँ"/);
 
-  const banner = designInstruction({ ...req, format: 'cd-300x600', zones: { logoBand: 0.09, stripTop: 0.95, logoTone: 'dark', textSide: 'top' } }, ['x']);
+  const banner = designInstruction({ ...req, format: 'cd-300x600', words: { ...req.words, strip: undefined, cta: 'Book a test drive', terms: '*T&C apply.' }, zones: { logoBand: 0.09, stripTop: 0.95, logoTone: 'dark', textSide: 'top' } }, ['x']);
   assert.match(banner, /a banner for CarDekho, India's car marketplace .*shown at just 300×600 pixels .*very few words, very large and bold/);
   assert.match(banner, /Draw it at aspect 9:16/);
-  assert.match(banner, /The bottom 5% carries a line of small print afterwards/);
+  assert.doesNotMatch(banner, /dealership strip/, 'a banner has no strip');
+  assert.match(banner, /Button — a rounded pill .*: "Book a test drive"/);
   assert.match(banner, /The left and right 7% may be trimmed/, '300×600 is cut from 9:16');
-  assert.match(banner, /easy to read at 300×600 pixels/);
+
   const r = reviseInstruction(req, 'make the headline gold', 2);
   assert.match(r, /<IMAGE_REF_0> is a finished social media advertisement\.\n<IMAGE_REF_1>, <IMAGE_REF_2> are photographs of the Hyundai Creta/);
   assert.match(r, /Make this one change to the advertisement: "make the headline gold"/);
-  assert.match(r, /Keep everything else exactly as it is/);
+  assert.match(r, /the logos exactly where they are, and every word exactly as written/);
   assert.match(r, /plain white and blank/);
-  assert.match(r, /The top 14% of the frame is the logo row/);
 });

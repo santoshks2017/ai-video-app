@@ -7,40 +7,69 @@
  * are read back and compared: a wrong price, a dropped asterisk or an invented line is caught
  * before anyone downloads the creative.
  */
-import { CREATIVE_FORMAT_BY_ID, isAdFormat, type CreativeDoc, type CreativeFormatId } from './creative.js';
+import { CREATIVE_FORMAT_BY_ID, isAdFormat, type CreativeDoc } from './creative.js';
 import type { CreativeCopy } from './creativeCopy.js';
+import { adTerms, panelCarries, type LayoutInput } from './creativeLayout.js';
 
-/** The words the model sets on the picture. The panel's words — contact, small print — are the app's. */
+/** The dealership's strip at the foot of a design, set by the model like everything else. */
+export interface DesignStrip {
+  /** The dealership's name, bold. */
+  name: string;
+  /** Address, phone and website, each a line as it should read. */
+  lines: string[];
+  /** The button on the strip, when the strip carries it. */
+  cta: string;
+}
+
+/** Every word the model sets on a design, exactly. */
 export interface DesignWords {
   kicker: string;
   headline: string;
   sub: string;
   badge: string;
   points: string[];
-  /** Empty when the dealer panel carries the call to action. */
+  /** The button beside the words — empty when the strip carries it. */
   cta: string;
+  /** The dealership strip; absent when the client wants none, or on a banner. */
+  strip?: DesignStrip;
+  /** The small print, last and smallest. */
+  terms: string;
 }
 
 /**
- * The words for the model from the copy. A banner is seen small, so it carries fewer: no list
- * of points, and on a rectangle no second line either.
+ * The words for the model from the copy and the size. A full strip carries the button on a
+ * square, portrait or story; a one-line strip is the name and contact in one line. A banner is
+ * seen small, so it carries fewer: no points, no strip, and on a rectangle no second line.
  */
-export function designWordsOf(copy: CreativeCopy, panelCarriesCta: boolean, format?: CreativeFormatId): DesignWords {
-  const ad = format !== undefined && isAdFormat(format);
-  const roomy = format !== undefined && CREATIVE_FORMAT_BY_ID[format].height >= CREATIVE_FORMAT_BY_ID[format].width * 1.5;
+export function designWordsOf(copy: CreativeCopy, input: Pick<LayoutInput, 'format' | 'panel' | 'copy' | 'look' | 'logos' | 'template'>): DesignWords {
+  const f = CREATIVE_FORMAT_BY_ID[input.format];
+  const ad = isAdFormat(input.format);
+  const roomy = f.height >= f.width * 1.5;
+  const style = input.format === 'thumbnail' && input.panel.style === 'full' ? 'compact' : input.panel.style;
+  const hasStrip = !ad && style !== 'none' && Boolean(input.panel.name || input.panel.details.length);
+  const carries = panelCarries({ ...(input as LayoutInput), copy }).cta;
+  const strip: DesignStrip | undefined = !hasStrip
+    ? undefined
+    : style === 'compact'
+      ? { name: '', lines: [[input.panel.name, ...input.panel.details].filter(Boolean).join('  ·  ')], cta: '' }
+      : { name: input.panel.name, lines: input.panel.details.slice(0, 2), cta: carries ? copy.cta.trim() : '' };
   return {
     kicker: copy.kicker.trim(),
     headline: copy.headline.trim(),
     sub: ad && !roomy ? '' : copy.sub.trim(),
     badge: copy.badge.trim(),
     points: ad ? [] : copy.points.map((p) => p.trim()).filter(Boolean),
-    cta: panelCarriesCta ? '' : copy.cta.trim(),
+    cta: strip?.cta ? '' : copy.cta.trim(),
+    ...(strip ? { strip } : {}),
+    terms: ad ? adTerms(copy.terms) : copy.terms.trim(),
   };
 }
 
 /** Every line the model is asked to set, in reading order. */
 export const designLines = (w: DesignWords): string[] =>
-  [w.kicker, w.headline, w.sub, w.badge, ...w.points, w.cta].map((s) => s.trim()).filter(Boolean);
+  [w.kicker, w.headline, w.sub, w.badge, ...w.points, w.cta, w.strip?.name ?? '', ...(w.strip?.lines ?? []), w.strip?.cta ?? '', w.terms ?? '']
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 /** Whether two sets of words would put the same text on the picture. */
 export const sameDesignWords = (a: DesignWords, b: DesignWords): boolean => designLines(a).join('\n') === designLines(b).join('\n');
@@ -101,9 +130,23 @@ export function compareWords(expected: DesignWords, seen: string[], allowed: str
   return { checked: true, ok: missing.length === 0 && extra.length === 0, missing, extra: extra.map((s) => s.trim()).filter(Boolean) };
 }
 
+/** Whether the client's logos stayed as they were put on the canvas, and nothing else was branded. */
+export interface LogosVerdict {
+  checked: boolean;
+  /** The logos are where they were, as they were. */
+  kept: boolean;
+  /** Logos or brand marks drawn beyond the client's own (the vehicle's badge aside). */
+  extra: number;
+  /** How far the logo pixels moved from the canvas, 0–255, for the record. */
+  drift?: number;
+}
+export const UNCHECKED_LOGOS: LogosVerdict = { checked: false, kept: true, extra: 0 };
+
 /** How bad a verdict is, to keep the better of two attempts. */
-export const verdictWeight = (vehicle: { same: boolean; checked: boolean }, words: WordsVerdict): number =>
-  (vehicle.checked && !vehicle.same ? 3 : 0) + (words.checked ? words.missing.length * 2 + words.extra.length : 0);
+export const verdictWeight = (vehicle: { same: boolean; checked: boolean }, words: WordsVerdict, logos: LogosVerdict = UNCHECKED_LOGOS): number =>
+  (vehicle.checked && !vehicle.same ? 3 : 0) +
+  (words.checked ? words.missing.length * 2 + words.extra.length : 0) +
+  (logos.checked ? (logos.kept ? 0 : 3) + logos.extra * 2 : 0);
 
 /**
  * The parts of the frame the app covers, as fractions of its height: the row the logos sit

@@ -10,6 +10,7 @@ import {
   classifyCreative,
   creativeLook,
   creativeUid,
+  designSkeleton,
   designWordsOf,
   designZonesOf,
   emptyCopy,
@@ -19,7 +20,6 @@ import {
   isLightColour,
   layoutCreative,
   layoutDesigned,
-  panelCarries,
   sameDesignWords,
   swapPicture,
   wordsBand,
@@ -420,7 +420,8 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   /** What Nano Banana 2 is asked to design for one size: the words, the look, and where the app's logos and panel go. */
   const designBrief = (format: CreativeFormatId): DesignRequest => {
     const input = inputFor(format);
-    const zones = designZonesOf(layoutDesigned({ ...input, picture: { src: '', mode: 'design' } }), isLightColour(look.panel) ? 'light' : 'dark');
+    // Where the strip and the logos go is the layout's own, words and all.
+    const zones = designZonesOf(layoutCreative({ ...input, picture: { src: '', mode: 'scene' } }), isLightColour(look.panel) ? 'light' : 'dark');
     return {
       format,
       engine: engineId,
@@ -429,11 +430,28 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       ...(occasion ? { occasion } : {}),
       vehicle: { name: vehicleName, ...(p.carColour ? { colour: p.carColour } : {}), kind: vehicleKind },
       ...(p.sceneNote?.trim() ? { note: p.sceneNote.trim() } : {}),
-      words: designWordsOf(copy, panelCarries(input).cta, format),
+      words: designWordsOf(copy, input),
       language: { name: language.name, script: language.script },
       look: { panel: look.panel, accent: look.accent },
       zones,
     };
+  };
+
+  /**
+   * The canvas Nano Banana 2 designs a size on — its shape in grey, with the client's logos in
+   * their places — drawn here and stored, so the server can hand it over and check it after.
+   */
+  const uploadCanvas = async (format: CreativeFormatId): Promise<{ image: StoredImage; logos: number } | null> => {
+    const doc = designSkeleton(inputFor(format));
+    if (!doc.layers.length) return null;
+    try {
+      const blob = await exportCreative(doc, 'image/png');
+      const up = await uploadRef(new File([blob], `canvas-${format}.png`, { type: 'image/png' }), `${p.name} · canvas · ${CREATIVE_FORMAT_BY_ID[format].label}`, 'extra');
+      if (isApiError(up)) return null;
+      return { image: { refId: up.refId, storagePath: up.storagePath, filename: up.filename, label: up.label }, logos: doc.layers.length };
+    } catch {
+      return null;
+    }
   };
 
   /**
@@ -453,12 +471,13 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     return { designs: { ...(cur.designs ?? {}), [format]: d }, pictureMode: 'design', creatives };
   };
 
-  const designed = (r: DesignResult, revision?: string): DesignedCreative => ({
+  const designed = (r: DesignResult, skeleton: StoredImage | undefined, revision?: string): DesignedCreative => ({
     image: r.image,
     words: r.words,
     checks: r.checks,
     model: r.model,
     ...(r.width ? { width: r.width, height: r.height } : {}),
+    ...(skeleton ? { skeleton } : {}),
     ...(revision ? { revision } : {}),
     at: Date.now(),
   });
@@ -487,14 +506,16 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     setDesignState((s) => ({ ...s, ...Object.fromEntries(formats.map((f) => [f, 'working'])) }));
     await Promise.all([
       ...whole.map(async (format) => {
-        const r = await drawCreativeDesign(p.id, designBrief(format), refs);
+        const canvas = await uploadCanvas(format);
+        const brief = { ...designBrief(format), ...(canvas ? { canvas: { storagePath: canvas.image.storagePath, logos: canvas.logos } } : {}) };
+        const r = await drawCreativeDesign(p.id, brief, refs);
         if (isApiError(r)) {
           settle(format, true);
           setError(r.message);
           return;
         }
         settle(format, false);
-        set((cur) => adoptDesign(cur, format, designed(r)));
+        set((cur) => adoptDesign(cur, format, designed(r, canvas?.image)));
       }),
       ...stripAspects.map(async (aspect) => {
         const mine = strips.filter((f) => CREATIVE_FORMAT_BY_ID[f].pictureAspect === aspect);
@@ -536,7 +557,9 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     setDesignState((s) => ({ ...s, [format]: 'working' }));
     setError('');
     // Checked against the words it carries, so a change of colour is not taken for a change of words.
-    const r = await reviseCreativeDesign(p.id, { ...designBrief(format), words: d.words }, { storagePath: d.image.storagePath }, change, carRefList().slice(0, 3));
+    const logos = designSkeleton(inputFor(format)).layers.length;
+    const brief = { ...designBrief(format), words: d.words, ...(d.skeleton ? { canvas: { storagePath: d.skeleton.storagePath, logos } } : {}) };
+    const r = await reviseCreativeDesign(p.id, brief, { storagePath: d.image.storagePath }, change, carRefList().slice(0, 3));
     if (isApiError(r)) {
       settle(format, true);
       setError(r.message);
@@ -544,7 +567,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     }
     settle(format, false);
     setChanges((c) => ({ ...c, [format]: '' }));
-    set((cur) => adoptDesign(cur, format, designed(r, change)));
+    set((cur) => adoptDesign(cur, format, designed(r, d.skeleton, change)));
     await refresh();
   };
 
@@ -1173,6 +1196,11 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                               <span className={`ip-check ${words?.checked ? (words.ok ? 'ok' : 'bad') : ''}`}>
                                 {words?.checked ? (words.ok ? 'Words ✓' : `Words: ${words.missing.length + words.extra.length} to check`) : 'Words not checked'}
                               </span>
+                              {d.checks.logos?.checked && (
+                                <span className={`ip-check ${d.checks.logos.kept && !d.checks.logos.extra ? 'ok' : 'bad'}`} title={d.checks.logos.drift !== undefined ? `Logo drift ${d.checks.logos.drift}/255` : undefined}>
+                                  {!d.checks.logos.kept ? 'Logos moved — check them' : d.checks.logos.extra ? `${d.checks.logos.extra} logo${d.checks.logos.extra === 1 ? '' : 's'} not yours` : 'Logos ✓'}
+                                </span>
+                              )}
                               {words?.checked && !words.ok && (
                                 <ul className="ip-check-list">
                                   {words.missing.map((m) => (

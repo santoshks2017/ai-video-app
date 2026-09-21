@@ -384,6 +384,26 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
     for (const view of ANGLE_ORDER) {
       const sheet = project.useSheets === false ? undefined : car!.sheets?.[view];
       if (sheet?.storagePath) {
+        /*
+         * The face leads, on its own.
+         *
+         * A sheet holds every photograph of a side in one image, which is how four
+         * slots become one — but a tile in it is a few hundred pixels across, and
+         * the badge on the grille is a dozen of them. A model cannot read what it
+         * cannot see: it drew the maker's older emblem, and the older car that wears
+         * it. So the best single photograph of the front goes first, whole and
+         * full-size, and the sheet follows it for everything else the front shows.
+         */
+        if (view === 'front') {
+          const lead = (shotsByAngle.get('front') ?? [])[0];
+          if (lead?.storagePath) {
+            attachments.push({
+              ...toDealerPhoto(lead, 'car-model'),
+              angle: 'front',
+              label: `${car!.brand} ${car!.model} — the front, on its own: the face, the grille, the maker's emblem and the lamp signature exactly as they are${paint && hero.swatch ? '; its paint may differ' : ''}`,
+            });
+          }
+        }
         attachments.push({
           ...toDealerPhoto(sheet, 'car-model'),
           angle: view,
@@ -396,9 +416,25 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
     }
     for (const img of shotsByAngle.get('other') ?? []) pushShot(img, undefined);
 
+    /*
+     * The other models on the project.
+     *
+     * They are in the film because a scene names them, and they are not what the
+     * film's own vehicle looks like. Sent as plain vehicle photographs they were
+     * taken for exactly that: a Kiger film was handed a Triber and a Kwid, and came
+     * back with a Renault wearing the Kwid's older face and the maker's older
+     * emblem. They travel marked, and the renderer keeps them out of the vehicle's
+     * own slots.
+     */
     for (const v of vehicles.slice(1)) {
       const first = carReferenceImages(v)[0];
-      if (first) attachments.push(toDealerPhoto(first, 'car-model'));
+      if (first) {
+        attachments.push({
+          ...toDealerPhoto(first, 'car-model'),
+          otherModel: true,
+          label: `${v.brand} ${v.model} — a different model, for the scenes that name it. It is not the ${noun} this film is about: take nothing about that ${noun} from this photograph.`,
+        });
+      }
     }
   } else if (b.lineup) {
     // One shot each from a few models in the range: enough to fix the brand's

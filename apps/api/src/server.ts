@@ -1790,7 +1790,12 @@ async function loadBriefAssets(brief: Brief): Promise<{
       mimeType: obj.contentType || 'image/jpeg',
       kind: 'image',
     };
-    if (a.kind === 'car-model') {
+    if (a.kind === 'car-model' && a.otherModel) {
+      // Another model in the range. It keeps its own words, and never a slot among
+      // the vehicle's photographs: taken for one, its face and its emblem end up on
+      // the vehicle the film is actually about.
+      references.push({ ref, filename: a.filename, label: a.label });
+    } else if (a.kind === 'car-model') {
       // A sheet carries its own warning in the label the brief wrote for it; a
       // single photograph just needs naming by the side it shows.
       const side = a.sheet ? a.label : a.angle ? `${noun}, ${a.angle}` : `${noun} — ${a.label}`;

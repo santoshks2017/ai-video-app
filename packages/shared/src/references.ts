@@ -29,7 +29,9 @@ export const ROLE_LABEL: Record<RefRole, string> = {
 export function refRole(a: DealerPhoto): RefRole {
   if (a.kind === 'logo' || a.kind === 'brand-logo') return 'overlay';
   if (a.kind === 'reference-video') return 'video';
-  if (a.kind === 'car-model') return 'vehicle';
+  // Another model in the range is not a record of the vehicle this film is about,
+  // and the renderer does not give it one of the vehicle's slots either.
+  if (a.kind === 'car-model') return a.otherModel ? 'extra' : 'vehicle';
   if (a.kind === 'actor') return 'presenter';
   if (a.kind === 'extra') return 'extra';
   return 'dealership';

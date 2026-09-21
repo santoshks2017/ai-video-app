@@ -211,6 +211,14 @@ export interface DealerPhoto {
    * will happily film a contact sheet if it is not told the thing is a record.
    */
   sheet?: boolean;
+  /**
+   * A different model from the one this film is about — another car in the range,
+   * attached for the scenes that name it.
+   *
+   * It is never a reference for the film's own vehicle. Sent as one, a Kwid's older
+   * face and the maker's older emblem were blended into a Kiger, in every part.
+   */
+  otherModel?: boolean;
 }
 
 export interface Dealer {

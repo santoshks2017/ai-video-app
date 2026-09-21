@@ -1054,6 +1054,57 @@ test('the vehicle, the presenter and the dealership each keep a slot', () => {
   );
 });
 
+test('a film about one car sends that car: its face on its own, and the other models marked', () => {
+  const img = (label: string, filename: string) => ({ label, filename, storagePath: `refs/x/${filename}`, refId: 'r', url: `/api/refs/r/${filename}` });
+  const kiger = {
+    id: 'renault__kiger', brand: 'Renault', model: 'Kiger', slug: 'renault/kiger',
+    images: {
+      front: [img('Renault Kiger front 1', 'kiger-front-1.jpg'), img('Renault Kiger front 2', 'kiger-front-2.jpg')],
+      side: [img('Renault Kiger side 1', 'kiger-side-1.jpg')],
+    },
+    sheets: { front: img('Kiger front sheet', 'kiger-sheet-front.jpg'), side: img('Kiger side sheet', 'kiger-sheet-side.jpg') },
+    colours: [],
+    variants: [],
+  } as unknown as CarModelProfile;
+  const triber = { id: 'renault__triber', brand: 'Renault', model: 'Triber', slug: 'renault/triber', images: { front: [img('Renault Triber front', 'triber-front-1.jpg')] }, colours: [], variants: [] } as unknown as CarModelProfile;
+  const kwid = { id: 'renault__kwid', brand: 'Renault', model: 'Kwid', slug: 'renault/kwid', images: { front: [img('Renault Kwid front', 'kwid-front-1.jpg')] }, colours: [], variants: [] } as unknown as CarModelProfile;
+  const project = { ...emptyProject(), useCases: ['walkaround'], carId: kiger.id, carIds: [kiger.id, triber.id, kwid.id] };
+
+  const brief = composeBrief(project as never, { car: kiger, vehicles: [kiger, triber, kwid] });
+  const cars = brief.attachments.filter((a) => a.kind === 'car-model');
+  assert.equal(cars[0]!.filename, 'kiger-front-1.jpg', 'the face goes first, on its own — a tile in a sheet is too small to read a badge');
+  assert.match(cars[0]!.label, /the face, the grille, the maker's emblem and the lamp signature exactly as they are/);
+  assert.deepEqual(cars.map((a) => a.filename), ['kiger-front-1.jpg', 'kiger-sheet-front.jpg', 'kiger-sheet-side.jpg', 'triber-front-1.jpg', 'kwid-front-1.jpg']);
+  const others = cars.filter((a) => a.otherModel).map((a) => a.filename);
+  assert.deepEqual(others, ['triber-front-1.jpg', 'kwid-front-1.jpg'], 'the other models travel marked');
+  assert.match(cars.find((a) => a.otherModel)!.label, /It is not the car this film is about: take nothing about that car from this photograph\./);
+  // And the rules say it, since the pictures alone were not enough.
+  const text = buildPrompt(brief)!.parts[0]!.text;
+  assert.match(text, /Photographs of other models may be attached/);
+  assert.match(text, /THE PHOTOGRAPHS OUTRANK EVERY OTHER IMAGE/);
+  assert.match(text, /maker's emblem on the grille, the tailgate, the wheels and the steering wheel is exactly the emblem in the photographs/);
+  assert.match(text, /only the paint changes/);
+});
+
+test('another model in the range is never a reference for the vehicle the film is about', () => {
+  const photo = (filename: string, over: Partial<DealerPhoto> = {}): DealerPhoto => ({ filename, label: filename, kind: 'car-model', ...over });
+  const brief = {
+    attachments: [
+      photo('kiger-front'),
+      photo('kiger-sheet-side', { sheet: true }),
+      photo('triber-front', { otherModel: true }),
+      photo('kwid-front', { otherModel: true }),
+    ],
+  };
+  const plan = referencePlan(brief, { max: 10 });
+  const vehicle = plan.sent.filter((e) => e.role === 'vehicle').map((e) => e.photo.filename);
+  assert.deepEqual(vehicle, ['kiger-front', 'kiger-sheet-side'], 'only the film’s own vehicle fills the vehicle slots');
+  const extras = plan.sent.filter((e) => e.role === 'extra').map((e) => e.photo.filename);
+  assert.deepEqual(extras, ['triber-front', 'kwid-front'], 'the others are still sent, as what they are');
+  const order = plan.sent.map((e) => e.photo.filename);
+  assert.ok(order.indexOf('kiger-front') < order.indexOf('triber-front'), 'and they come after it');
+});
+
 test('the vehicle’s photograph leads every part, ahead of the frames a model drew', () => {
   const ref = (n: string) => ({ n });
   const order = orderReferences({

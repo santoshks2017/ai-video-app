@@ -125,6 +125,10 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
    * a brand changes its logo, and the older one is what a model has seen most.
    */
   lines.push(
+    `- Photographs of other models may be attached, for the scenes that name them. They are not this ${noun}: never take its face, grille, emblem, lamps, wheels or lines from one of them, and never blend two vehicles into one.`,
+    `- Where the paint is a colour the photographs do not show, only the paint changes. The face, the grille, the emblem, the lamps, the wheels, the glass and every line stay exactly as photographed — a colour is not a different ${noun}.`,
+  );
+  lines.push(
     `- THE PHOTOGRAPHS OUTRANK EVERY OTHER IMAGE. The photographs of the ${noun} are the only record of what it looks like. A drawn frame of the shot, or the frame the part before this one ended on, says where the camera is, how the shot is framed and how it is lit — nothing more. Where any of them disagrees with the photographs about the ${noun}'s shape, face, grille, lamps, wheels, badges or proportions, the photographs are right and the other image is wrong: follow the photographs and correct the ${noun} back to them.`,
     `- The maker's emblem on the grille, the tailgate, the wheels and the steering wheel is exactly the emblem in the photographs, in that exact design — never an older or a newer version of that maker's logo, and never another maker's. Where an emblem is not legible in the photographs, leave that surface plain.`,
   );

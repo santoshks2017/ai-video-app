@@ -1060,15 +1060,25 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                       ))}
                     </select>
                   </Field>
-                  <Field label="Colour">
+                  <Field
+                    label="Colour"
+                    hint={
+                      project.carColour && !colours.find((c) => c.name === project.carColour)?.image?.storagePath
+                        ? 'The library has no photograph of the car in this colour, so the model has to imagine it — and an imagined colour often brings an older model with it. Attach a photo of this colour, or leave it as the photographs show.'
+                        : undefined
+                    }
+                  >
                     <select
                       value={project.carColour ?? ''}
                       onChange={(e) => set({ carColour: e.target.value || undefined })}
                     >
-                      <option value="">Any colour</option>
+                      {/* Not "any colour": a colour nobody chose is a colour the model invents,
+                          and the car it draws in that colour is the one it has seen in it. */}
+                      <option value="">As in the photographs</option>
                       {colours.map((c) => (
                         <option key={c.name} value={c.name}>
                           {colourName(c.name)}
+                          {c.image?.storagePath ? '' : ' — no photo'}
                         </option>
                       ))}
                     </select>

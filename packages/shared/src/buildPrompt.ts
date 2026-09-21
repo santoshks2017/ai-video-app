@@ -124,6 +124,21 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
    * So the ranking is said outright, and the maker's emblem gets its own line:
    * a brand changes its logo, and the older one is what a model has seen most.
    */
+  /*
+   * The paint, when nobody chose one.
+   *
+   * The colour was pinned only when a designer picked one, and left free otherwise
+   * — and free is where the drift got in. A Kiger film came back orange in two
+   * scenes and yellow in the other two: the photographs are yellow, so the yellow
+   * shots were the facelift with the maker's current emblem, and the orange ones
+   * were the older car the model has seen in orange, old badge and all. A colour
+   * that is not in the photographs is a car that is not in the photographs.
+   */
+  if (!brief.carColour) {
+    lines.push(
+      `- The paint is the colour the photographs show, in every shot and in every part — the same colour, the same finish. Never another colour, however well it would suit the scene: a ${noun} in a colour the photographs do not show is a ${noun} taken from somewhere other than the photographs, and it comes with the wrong face and the wrong badge. Where a shot direction names a colour the photographs do not show, the photographs win.`,
+    );
+  }
   lines.push(
     `- Photographs of other models may be attached, for the scenes that name them. They are not this ${noun}: never take its face, grille, emblem, lamps, wheels or lines from one of them, and never blend two vehicles into one.`,
     `- Where the paint is a colour the photographs do not show, only the paint changes. The face, the grille, the emblem, the lamps, the wheels, the glass and every line stay exactly as photographed — a colour is not a different ${noun}.`,

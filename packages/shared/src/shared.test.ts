@@ -1054,6 +1054,20 @@ test('the vehicle, the presenter and the dealership each keep a slot', () => {
   );
 });
 
+test('a film with no colour chosen keeps the colour of the photographs', () => {
+  const car = { id: 'renault__kiger', brand: 'Renault', model: 'Kiger', slug: 'renault/kiger', images: { front: [{ label: 'Kiger front', filename: 'kiger-front-1.jpg', storagePath: 'refs/x/kiger-front-1.jpg' }] }, colours: [], variants: [] } as unknown as CarModelProfile;
+  const free = buildPrompt(composeBrief({ ...emptyProject(), useCases: ['walkaround'], carId: car.id, carIds: [car.id] } as never, { car }))!.parts[0]!.text;
+  assert.match(free, /The paint is the colour the photographs show, in every shot and in every part/);
+  assert.match(free, /Where a shot direction names a colour the photographs do not show, the photographs win\./);
+  // A colour that was chosen is still the one that is painted.
+  const picked = buildPrompt(
+    composeBrief({ ...emptyProject(), useCases: ['walkaround'], carId: car.id, carIds: [car.id], carColour: 'Caspian Blue' } as never, { car }),
+  )!.parts[0]!.text;
+  assert.match(picked, /Paint colour: Caspian Blue/);
+  assert.doesNotMatch(picked, /The paint is the colour the photographs show/, 'the chosen colour is not argued with');
+  assert.match(picked, /only the paint changes/, 'and the rest of the car still comes from the photographs');
+});
+
 test('a film about one car sends that car: its face on its own, and the other models marked', () => {
   const img = (label: string, filename: string) => ({ label, filename, storagePath: `refs/x/${filename}`, refId: 'r', url: `/api/refs/r/${filename}` });
   const kiger = {

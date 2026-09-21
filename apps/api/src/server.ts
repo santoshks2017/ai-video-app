@@ -1575,15 +1575,14 @@ async function renderSegment(
 
   // Google Gemini (Omni Flash): the seed frame is frame 1, so the model
   // continues the motion rather than restarting it.
-  const shown: LabelledRef[] = [];
-  if (seeded) {
-    shown.push({
-      ref: { data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', kind: 'image' },
-      label:
-        'where the part before this one ended — carry the same presenter, the same vehicle, the same place and the same light straight on from here',
-      filename: 'seed-frame.jpg',
-    });
-  }
+  const seedRef: LabelledRef | undefined = seeded
+    ? {
+        ref: { data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', kind: 'image' },
+        label:
+          'where the part before this one ended — carry the framing, the place, the presenter and the light straight on from here. It is a frame a model drew, not a record of the vehicle: where it and the photographs disagree about the vehicle, the photographs are right',
+        filename: 'seed-frame.jpg',
+      }
+    : undefined;
   /*
    * What every part is shown, in order, and why the order is fixed.
    *
@@ -1610,20 +1609,19 @@ async function renderSegment(
       }
     : undefined;
   // orderReferences is the one rule, and the editor calls it too — so the list a
-  // designer checks before paying is the list that is actually sent.
-  shown.push(
-    ...orderReferences<LabelledRef>({
-      seed: shown[0],
-      frames: req.frames ?? [],
-      car: req.carRefs ?? [],
-      actor: req.actorRef,
-      place: req.placeRef,
-      anchor,
-      rest: req.references,
-      videos: req.videoRefs ?? [],
-      max: model.maxReferenceImages,
-    }).filter((r) => r !== shown[0]),
-  );
+  // designer checks before paying is the list that is actually sent. The vehicle's
+  // photograph leads it, ahead of the seed and the drawn frames.
+  const shown: LabelledRef[] = orderReferences<LabelledRef>({
+    seed: seedRef,
+    frames: req.frames ?? [],
+    car: req.carRefs ?? [],
+    actor: req.actorRef,
+    place: req.placeRef,
+    anchor,
+    rest: req.references,
+    videos: req.videoRefs ?? [],
+    max: model.maxReferenceImages,
+  });
   const refs = shown.map((r) => r.ref);
 
   /*
@@ -1643,6 +1641,10 @@ async function renderSegment(
         // contact sheet on screen, tiles, gutters and captions.
         '',
         'These images are records of what the subjects look like. They are never things to put on screen. Do not film, show, reflect or hang any photograph, grid of photographs, contact sheet, caption, watermark or screen showing them. Film the real vehicle and the real people in the real location.',
+        '',
+        // Said where the images are named, as well as in the rules: a ranking the
+        // model reads beside the pictures is a ranking it applies to them.
+        'The photographs of the vehicle outrank every other image here. A drawn frame of a shot, and the frame the part before this one ended on, show only where the camera is, how the shot is framed and how it is lit. Where any of them disagrees with the photographs about the vehicle — its shape, face, grille, lamps, wheels, badges or emblems — the photographs are right: build the vehicle from the photographs and correct it back to them.',
         '',
       ].join('\n')
     : '';
@@ -1906,14 +1908,18 @@ async function framesForPart(
   const out: LabelledRef[] = [];
   for (const sc of scenePlan?.scenes ?? []) {
     if (sc.end <= part.start || sc.start >= part.end) continue;
-    const frame = sceneOverrides[sc.beat.key ?? '']?.frame;
+    const edit = sceneOverrides[sc.beat.key ?? ''];
+    const frame = edit?.frame;
     if (!frame?.storagePath || out.some((r) => r.filename === frame.filename)) continue;
+    // A frame that came back with the wrong vehicle is a drawing of the wrong car:
+    // it would hand the model that car as the shot to match.
+    if (edit?.frameCheck?.checked && !edit.frameCheck.same) continue;
     const obj = await readObject(frame.storagePath).catch(() => null);
     if (!obj) continue;
     out.push({
       ref: { data: obj.bytes.toString('base64'), mimeType: obj.contentType || 'image/png', kind: 'image' },
       filename: frame.filename,
-      label: `how the shot "${sc.beat.title}" is framed — the camera, the distance and where everything sits. Match this composition.`,
+      label: `how the shot "${sc.beat.title}" is framed — the camera, the distance and where everything sits. Match this composition; take the vehicle itself from the photographs, not from this drawing.`,
     });
   }
   return out;
@@ -2232,7 +2238,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
 
       // The photos of the vehicle this part frames — the cabin shot for a cabin
       // scene, the rear for a rear scene — rather than whatever came first.
-      const partCars: LabelledRef[] = carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs);
+      const partCars: CarRef[] = carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs);
       // The storyboard's own frames for these scenes, when they were drawn.
       const partFrames = await framesForPart(part, scenePlan, req.body?.sceneOverrides);
       // And the room this part is set in, rather than the same photograph every time.
@@ -2267,15 +2273,25 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
        * Look at what came back before the film is built on it.
        *
        * The model is held to the vehicle by photographs, and mostly that works —
-       * but "mostly" is not good enough at ₹300–1,000 a film. One frame is
-       * compared against the reference photograph, and a clear mismatch is made
-       * again. The judgement and the retake are both on the record.
+       * but "mostly" is not good enough at ₹300–1,000 a film. Two moments of the
+       * part are compared against the vehicle's photograph, not one: a part that
+       * starts on the right car and drifts off it halfway through was passing a
+       * check taken at the halfway mark. The judgement and the retake are both on
+       * the record.
        */
       if (partCars.length && brief.carModel && resolved.provider === 'google-gemini') {
-        const frame = await posterFrame(bytes, Math.min(2.5, part.duration * 0.5)).catch(() => null);
-        const refPhoto = partCars[0]?.ref.data ? Buffer.from(partCars[0]!.ref.data!, 'base64') : null;
-        if (frame && refPhoto) {
-          const verdict = await checkVehicleFrame(frame, refPhoto, brief.carModel, resolved.apiKey);
+        // An outside photograph to judge against: a cabin shot says nothing about
+        // the face, the badge or the wheels.
+        const outside = partCars.find((r) => r.angle && r.angle !== 'interior') ?? partCars[0]!;
+        const refPhoto = outside.ref.data ? Buffer.from(outside.ref.data, 'base64') : null;
+        const moments = [part.duration * 0.35, part.duration * 0.85].map((t) => Math.max(0.2, Math.min(t, part.duration - 0.2)));
+        const frames = (await Promise.all(moments.map((t) => posterFrame(bytes, t).catch(() => null)))).filter((f): f is Buffer => Boolean(f));
+        if (frames.length && refPhoto) {
+          const verdicts = await Promise.all(frames.map((f) => checkVehicleFrame(f, refPhoto, brief.carModel!, resolved.apiKey)));
+          const judged = verdicts.filter((v) => v.checked);
+          // One clear mismatch anywhere in the part is a wrong car in the film.
+          const wrong = judged.find((v) => !v.same);
+          const verdict = wrong ?? judged[0] ?? { same: true, checked: false, why: '' };
           if (verdict.checked) {
             const remade = !verdict.same && retakesLeft > 0;
             vehicleChecks.push({ part: part.partNum, same: verdict.same, why: verdict.why, remade });
@@ -4476,8 +4492,21 @@ app.post<{
     return out.slice(0, 6);
   };
 
-  type Result = { key: string; frame?: StoredImage; error?: string };
+  type Result = { key: string; frame?: StoredImage; check?: { same: boolean; checked: boolean; why?: string }; error?: string };
   const results: Result[] = scenes.map((sc) => ({ key: sc.key }));
+  /**
+   * The drawn frame goes to the video model as the shot to match, so a frame with
+   * the wrong car hands the wrong car to the film. Each one is compared with the
+   * vehicle's own photograph and drawn once more when it comes back wrong; a frame
+   * that is wrong twice is kept for the designer to see, and not sent to the film.
+   */
+  const judgeFrame = async (drawn: Buffer, refs: SceneImageRef[]): Promise<{ same: boolean; checked: boolean; why?: string }> => {
+    const cars = refs.filter((r) => /^(car|bike)\b/i.test(r.label) || /vehicle/i.test(r.label));
+    // Judge against an outside photograph: a cabin shot says nothing about the face or the badge.
+    const photo = cars.find((r) => !/interior|cabin|dashboard|boot/i.test(r.label)) ?? cars[0];
+    if (!brief.carModel || !photo) return { same: true, checked: false };
+    return await checkVehicleFrame(await asJpeg(drawn).catch(() => drawn), Buffer.from(photo.data, 'base64'), brief.carModel, apiKey);
+  };
   let next = 0;
   const LANES = 3;
   await Promise.all(
@@ -4487,16 +4516,31 @@ app.post<{
         const sc = scenes[i];
         if (!sc) return;
         try {
-          const drawn = await drawSceneFrame(
-            {
-              ...ctx,
-              shot: String(sc.shot),
-              title: sc.title,
-              onCameraPerson,
-              references: shot(sc),
-            },
-            apiKey,
-          );
+          const refs = shot(sc);
+          const draw = () =>
+            drawSceneFrame(
+              {
+                ...ctx,
+                shot: String(sc.shot),
+                title: sc.title,
+                onCameraPerson,
+                references: refs,
+              },
+              apiKey,
+            );
+          let drawn = await draw();
+          let check = await judgeFrame(drawn.bytes, refs);
+          if (check.checked && !check.same) {
+            app.log.warn({ key: sc.key, why: check.why }, 'wrong vehicle in the drawn frame — drawing it again');
+            const again = await draw().catch(() => null);
+            if (again) {
+              const second = await judgeFrame(again.bytes, refs);
+              if (!second.checked || second.same || !check.checked) {
+                drawn = again;
+                check = second;
+              }
+            }
+          }
           const ext = drawn.mimeType.includes('png') ? 'png' : 'jpg';
           const filename = `scene-${sc.key.replace(/[^a-zA-Z0-9]+/g, '-')}-${Date.now().toString(36)}.${ext}`;
           const { refId, storagePath } = await putRef(filename, drawn.mimeType, drawn.bytes);
@@ -4509,6 +4553,7 @@ app.post<{
               url: `/api/refs/${refId}/${filename}`,
               label: `${sc.title || 'Scene'} — how this shot is framed`,
             },
+            check: { same: check.same, checked: check.checked, ...(check.why ? { why: check.why } : {}) },
           };
         } catch (e) {
           const err = e as SceneImageError;

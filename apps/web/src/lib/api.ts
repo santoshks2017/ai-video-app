@@ -344,6 +344,8 @@ export const api = {
       scenes: {
         key: string;
         frame?: { refId: string; storagePath: string; url?: string; filename: string; label: string };
+        /** What the vehicle check made of it — a frame with the wrong car is never sent to the film. */
+        check?: { same: boolean; checked: boolean; why?: string };
         error?: string;
       }[];
     }>('/api/scene-images', { method: 'POST', body: JSON.stringify({ brief, scenes }) });

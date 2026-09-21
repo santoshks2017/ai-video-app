@@ -179,6 +179,7 @@ function instruction(req: SceneImageRequest): string {
       ? `- The only person who may appear is ${req.cast} Nobody else is in the frame — no second salesperson, no family, no couple, no children, no passers-by, no crowd — unless the shot above names them. If the shot describes no person, there is no person in the picture at all.`
       : '- NO people in this frame at all. No presenter, no salesperson, no customers, no family, no children, no passers-by. The shot is the vehicle and the place, and nothing else, unless the shot above names a person.',
     `- Build the ${noun} only from the supplied photographs. If this shot needs a view of the ${noun} they do not cover, move the camera to an angle they do cover, or come closer, or let the ${noun} sit out of focus. Never fill the gap from memory.`,
+    `- The maker's emblem on the grille, the tailgate and the wheels is exactly the emblem in the photographs, in that exact design — never an older or a newer version of that maker's logo. Where it is not legible in the photographs, leave that surface plain.`,
     '- Every number plate in the frame is a plain white plate with nothing on it, whatever the photographs show. Never copy writing from a plate in a photograph.',
     '- The supplied images are records of what the subjects look like. Never draw a photograph, a grid of photographs, a contact sheet, a poster or a screen showing one. Draw the real scene.',
     `- Framing: ${req.aspect}. A real lens, real depth of field, real light.`,

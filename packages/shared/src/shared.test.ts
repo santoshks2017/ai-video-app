@@ -37,6 +37,7 @@ import {
   applyBriefPlan,
   projectStage,
   PROJECT_STAGES,
+  orderReferences,
   referencePlan,
   speechRate,
   DEFAULT_WPM,
@@ -1051,6 +1052,27 @@ test('the vehicle, the presenter and the dealership each keep a slot', () => {
     plan.spare.some((e) => e.photo.filename === 'c4'),
     'what did not fit is listed rather than silently dropped',
   );
+});
+
+test('the vehicle’s photograph leads every part, ahead of the frames a model drew', () => {
+  const ref = (n: string) => ({ n });
+  const order = orderReferences({
+    seed: ref('seed'),
+    frames: [ref('frame1'), ref('frame2'), ref('frame3')],
+    car: [ref('car1'), ref('car2'), ref('car3')],
+    actor: ref('actor'),
+    place: ref('place'),
+    rest: [ref('extra')],
+    videos: [ref('clip')],
+    max: 8,
+  }).map((r) => r.n);
+  assert.equal(order[0], 'car1', 'the photograph of the vehicle comes first — a drawn frame is not a record of it');
+  assert.deepEqual(order.slice(0, 4), ['car1', 'seed', 'frame1', 'frame2'], 'then the frame it continues from, then the shots drawn for it');
+  assert.ok(order.includes('actor') && order.includes('place'), 'the presenter and the dealership keep their slots');
+  assert.equal(order.at(-1), 'clip', 'videos ride on their own allowance');
+  // With no photograph of the vehicle, the frame it continues from still leads.
+  const noCar = orderReferences({ seed: ref('seed'), frames: [ref('frame1')], car: [], rest: [], max: 5 }).map((r) => r.n);
+  assert.deepEqual(noCar, ['seed', 'frame1']);
 });
 
 test('a reference held back is listed, not deleted', () => {

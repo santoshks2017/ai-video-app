@@ -114,6 +114,20 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
     '- NO LETTERING ANYWHERE IN THE FRAME. Not one letter, digit or word, on anything, at any distance, in or out of focus: no signage, fascia, banner, poster, standee, price board, sticker, screen, brochure, no watermark, no caption, no subtitle. Where a real place would carry writing, render the surface blank, or turn it away from camera, or let it fall out of focus entirely. Number plates follow their own rule above: plain white and blank. Every word the viewer reads is added afterwards.',
     `- The one exception is lettering already moulded into the ${noun} in the supplied photographs, and only where you can read it there and copy it character for character. Nothing is added from what you believe a badge on this ${noun} ought to say. Where a panel's lettering is not legible in the photographs, leave that panel plain — an unbadged tailgate is fine, an invented one is not. Number plates stay blank whatever the photographs show — plain white, with nothing on them.`,
   );
+  /*
+   * Which reference wins.
+   *
+   * A part is shown photographs of the vehicle, a frame drawn for the shot, and
+   * the frame the part before it ended on. The last two are pictures a model made,
+   * and a model told to "carry the same vehicle on from here" carries on whatever
+   * is in them — an older badge drawn once is then drawn in every part after it.
+   * So the ranking is said outright, and the maker's emblem gets its own line:
+   * a brand changes its logo, and the older one is what a model has seen most.
+   */
+  lines.push(
+    `- THE PHOTOGRAPHS OUTRANK EVERY OTHER IMAGE. The photographs of the ${noun} are the only record of what it looks like. A drawn frame of the shot, or the frame the part before this one ended on, says where the camera is, how the shot is framed and how it is lit — nothing more. Where any of them disagrees with the photographs about the ${noun}'s shape, face, grille, lamps, wheels, badges or proportions, the photographs are right and the other image is wrong: follow the photographs and correct the ${noun} back to them.`,
+    `- The maker's emblem on the grille, the tailgate, the wheels and the steering wheel is exactly the emblem in the photographs, in that exact design — never an older or a newer version of that maker's logo, and never another maker's. Where an emblem is not legible in the photographs, leave that surface plain.`,
+  );
   lines.push(
     `- Build this ${noun} only from the supplied photographs. Every panel, lamp, badge, wheel and surface is copied from them — all but the number plates, which stay plain white and blank — and nothing about it comes from anywhere else — not from another ${noun} of this name, not from an earlier generation, not from anything you have seen elsewhere. If a shot would need a view of the ${noun} the photographs do not cover, film an angle they do cover, or hold the camera closer, or let the ${noun} sit out of focus — never fill the gap from memory.`,
   );
@@ -220,6 +234,12 @@ export interface SceneOverride {
    * and it is sent as the first reference for the part the scene falls in.
    */
   frame?: { refId: string; storagePath: string; url?: string; filename: string; label: string };
+  /**
+   * What the vehicle check made of that frame. A frame drawn with the wrong car —
+   * an older generation, another maker's emblem — is not sent to the video model,
+   * which would otherwise be handed the wrong car as the shot to match.
+   */
+  frameCheck?: { same: boolean; checked: boolean; why?: string };
   shot?: string;
   /**
    * Filename of the reference image this shot is built on. The prompt cites

@@ -65,6 +65,13 @@ export interface RefSlots<T> {
 /**
  * The order, fixed.
  *
+ * The vehicle's own photograph comes first, always. A model weighs the images it
+ * is given first the most, and everything else in the list — the frame the part
+ * before this one ended on, the stills drawn for these scenes — is a picture a
+ * model made. Lead with those and a wrong badge or an older generation, drawn
+ * once, is copied into every part after it. The photograph is the only record of
+ * what the vehicle looks like, so it leads.
+ *
  * Three things are guaranteed a slot on every part, because a film missing any of
  * them is unusable: the vehicle, the presenter, the dealership. So the vehicle
  * fills the budget bar two, and those two are held back for the other two. What is
@@ -73,13 +80,15 @@ export interface RefSlots<T> {
  */
 export function orderReferences<T>(s: RefSlots<T>): T[] {
   const out: T[] = [];
+  const [lead, ...moreCars] = s.car;
+  if (lead) out.push(lead);
   if (s.seed) out.push(s.seed);
   // At most two: a part holds two or three scenes, and a reference set that is
   // mostly compositions stops being a record of what the car looks like.
   out.push(...(s.frames ?? []).slice(0, 2));
   const room = (): number => Math.max(0, s.max - out.length);
 
-  out.push(...s.car.slice(0, Math.max(1, s.max - out.length - 2)));
+  out.push(...moreCars.slice(0, Math.max(0, s.max - out.length - 2)));
   if (s.actor && room() > 0) out.push(s.actor);
   if (s.place && room() > 0) out.push(s.place);
   if (!s.car.length && s.anchor && room() > 0) out.push(s.anchor);

@@ -484,13 +484,18 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     });
     const next = { ...edits };
     for (const row of r.scenes) {
-      if (row.frame) next[row.key] = { ...next[row.key], frame: row.frame };
+      if (row.frame) next[row.key] = { ...next[row.key], frame: row.frame, frameCheck: row.check };
     }
     set({ sceneEdits: next });
     const failed = r.scenes.filter((row) => row.error);
+    const wrongCar = r.scenes.filter((row) => row.check?.checked && !row.check.same);
     return [
       `Drew ${r.made} scene${r.made === 1 ? '' : 's'}.`,
       failed.length ? `${failed.length} did not come back — ${failed[0]!.error}` : '',
+      // A frame drawn with the wrong car is kept to look at, but never sent to the film.
+      wrongCar.length
+        ? `${wrongCar.length} came back with the wrong vehicle even after a second try — ${wrongCar[0]!.check!.why ?? ''} Those are not sent to the video; draw them again or change the shot.`
+        : '',
     ]
       .filter(Boolean)
       .join(' ');

@@ -219,6 +219,16 @@ export interface DealerPhoto {
    * face and the maker's older emblem were blended into a Kiger, in every part.
    */
   otherModel?: boolean;
+  /**
+   * The maker's emblem itself, as the client's own artwork.
+   *
+   * Held in the library for the end card, it was never shown to the model — so the
+   * only emblem in the room was the one the model remembered, and a maker that has
+   * changed its logo is remembered wearing the old one. It is a record of the
+   * design, wherever the design appears: the grille, the tailgate, the showroom's
+   * sign. It is never a thing to put in the frame.
+   */
+  emblem?: boolean;
 }
 
 export interface Dealer {

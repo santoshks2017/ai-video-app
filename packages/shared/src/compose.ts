@@ -460,6 +460,25 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
   if (client?.logo && logos.dealer !== 'off') attachments.push(toDealerPhoto(client.logo, 'logo'));
   if (client?.brandLogo && logos.brand !== 'off') attachments.push(toDealerPhoto(client.brandLogo, 'brand-logo'));
   /*
+   * The maker's emblem, as a picture rather than a memory.
+   *
+   * The client's own artwork of it sat in the library for the end card and was
+   * never shown to the model, which drew the emblem it remembered: Renault's older
+   * diamond, on the car's grille and over the showroom door, in film after film.
+   * A maker that changes its logo is remembered wearing the old one for years. So
+   * the artwork travels as a reference of its own, right behind the vehicle's face.
+   */
+  const emblemArt = client?.brandLogo?.storagePath ? client.brandLogo : undefined;
+  const brandName = car?.brand || b.lineup?.brand || client?.brand || '';
+  if (emblemArt && (car || b.lineup)) {
+    const kindNoun = (car?.kind ?? b.lineup?.kind ?? 'car') === 'bike' ? 'bike' : 'car';
+    attachments.push({
+      ...toDealerPhoto(emblemArt, 'extra'),
+      emblem: true,
+      label: `the ${brandName ? `${brandName} ` : ''}emblem as it is today — this exact design, wherever the emblem appears: on the ${kindNoun}'s grille, tailgate, wheel centres and steering wheel, and on the sign over the showroom. Never an older version of it. A record of the design, never a thing to place in the frame`,
+    });
+  }
+  /*
    * The dealership as a profile, the same way as the vehicle: one sheet per part
    * of the place where a sheet has been built, the loose photographs where it has
    * not. A showroom is not one room — a handover belongs in the delivery bay and

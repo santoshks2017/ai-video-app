@@ -1506,6 +1506,8 @@ async function renderSegment(
     carRefs?: LabelledRef[];
     /** The presenter. Given a slot on every part, whatever else is competing for one. */
     actorRef?: LabelledRef;
+    /** The maker's emblem, in the design it wears today. */
+    emblemRef?: LabelledRef;
     /** The dealership. Given a slot on every part. */
     placeRef?: LabelledRef;
     /** Everything else in scope — project extras, further showroom photos. */
@@ -1615,6 +1617,7 @@ async function renderSegment(
     seed: seedRef,
     frames: req.frames ?? [],
     car: req.carRefs ?? [],
+    emblem: req.emblemRef,
     actor: req.actorRef,
     place: req.placeRef,
     anchor,
@@ -1748,6 +1751,8 @@ async function loadBriefAssets(brief: Brief): Promise<{
   actorRef?: LabelledRef;
   /** One photograph of the dealership. Reserved a slot on every part. */
   placeRef?: LabelledRef;
+  /** The maker's emblem in the design it wears today, sent with every part. */
+  emblemRef?: LabelledRef;
   /** Reference videos, for the models that take them. Omni accepts three. */
   videoRefs: LabelledRef[];
   dealerLogo?: Buffer;
@@ -1757,6 +1762,7 @@ async function loadBriefAssets(brief: Brief): Promise<{
   const carRefs: CarRef[] = [];
   const videoRefs: LabelledRef[] = [];
   let actorRef: LabelledRef | undefined;
+  let emblemRef: LabelledRef | undefined;
   let dealerLogo: Buffer | undefined;
   let brandLogo: Buffer | undefined;
   const noun = brief.vehicleKind === 'bike' ? 'the bike' : 'the car';
@@ -1790,7 +1796,18 @@ async function loadBriefAssets(brief: Brief): Promise<{
       mimeType: obj.contentType || 'image/jpeg',
       kind: 'image',
     };
-    if (a.kind === 'car-model' && a.otherModel) {
+    if (a.emblem) {
+      // The maker's artwork of its own emblem: shown to the model, not laid over the cut.
+      // Logo artwork is cut out, and what is behind a cut-out is nothing — sent as it
+      // is, the transparent part arrives black and takes the emblem with it. On a mid
+      // grey, an emblem of any colour reads, white ones included.
+      const flat = await sharp(obj.bytes).flatten({ background: '#9e9e9e' }).jpeg({ quality: 92 }).toBuffer().catch(() => null);
+      emblemRef = {
+        ref: flat ? { data: flat.toString('base64'), mimeType: 'image/jpeg', kind: 'image' } : ref,
+        filename: a.filename,
+        label: a.label,
+      };
+    } else if (a.kind === 'car-model' && a.otherModel) {
       // Another model in the range. It keeps its own words, and never a slot among
       // the vehicle's photographs: taken for one, its face and its emblem end up on
       // the vehicle the film is actually about.
@@ -1823,6 +1840,7 @@ async function loadBriefAssets(brief: Brief): Promise<{
     carRefs,
     actorRef,
     placeRef: references[0],
+    emblemRef,
     // Three is Omni's limit, and the first three are the ones the designer chose first.
     videoRefs: videoRefs.slice(0, 3),
     dealerLogo,
@@ -2195,7 +2213,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
 
   // The music is made while the segments render, and waited for only at the stitch.
   const musicBed = makeMusicBed(brief, jobId, cost.totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0));
-  const { references, carRefs, actorRef, placeRef, videoRefs, dealerLogo, brandLogo } =
+  const { references, carRefs, actorRef, placeRef, emblemRef, videoRefs, dealerLogo, brandLogo } =
     await loadBriefAssets(brief);
   const scenePlan = buildPrompt(brief, { sceneOverrides: req.body?.sceneOverrides })?.scenePlan ?? null;
   /** What each part was actually shown, kept on the record so a wrong car is traceable. */
@@ -2268,6 +2286,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
           carRefs: partCars,
           actorRef,
           placeRef: partPlace,
+          emblemRef,
           references,
           videoRefs,
         });
@@ -2703,7 +2722,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
       : redo.length === parts.length
         ? makeMusicBed(brief, jobId, totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0))
         : Promise.resolve(null);
-    const { references, carRefs, actorRef, placeRef, videoRefs, dealerLogo, brandLogo } =
+    const { references, carRefs, actorRef, placeRef, emblemRef, videoRefs, dealerLogo, brandLogo } =
       await loadBriefAssets(brief);
     const scenePlan = buildPrompt(brief, { sceneOverrides: req.body?.sceneOverrides })?.scenePlan ?? null;
     // Images attached to this retake: "the car is wrong in these frames — here is the car".
@@ -2774,6 +2793,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
               : carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs),
             actorRef,
             placeRef,
+            emblemRef,
             references: attached.length ? [...attached, ...references] : references,
             videoRefs,
           });
@@ -4445,7 +4465,7 @@ app.post<{
       .send({ code: 'script-no-key', message: 'Drawing scenes needs a Google Gemini key. Add one in APIs & models.' });
   }
 
-  const { carRefs, actorRef, references } = await loadBriefAssets(brief);
+  const { carRefs, actorRef, references, emblemRef } = await loadBriefAssets(brief);
   const ctx = sceneImageContext(brief);
   const onCameraPerson = narrationMode(brief.narration).onCameraPerson;
 
@@ -4484,6 +4504,7 @@ app.post<{
       cars.slice(0, 4).forEach(add);
       places.slice(0, 1).forEach(add);
     }
+
     /*
      * The presenter, whenever there is one.
      *
@@ -4494,6 +4515,16 @@ app.post<{
      * video is built from.
      */
     add(actorRef);
+    /*
+     * The maker's emblem, in the design it wears today.
+     *
+     * It goes in right behind the vehicle rather than at the end, because the end is
+     * past the six the model is shown — and the emblem is on the grille in most of
+     * these shots and over the showroom door in the rest.
+     */
+    if (emblemRef?.ref.data && !out.some((x) => x.data === emblemRef.ref.data)) {
+      out.splice(Math.min(1, out.length), 0, { data: emblemRef.ref.data, mimeType: emblemRef.ref.mimeType, label: emblemRef.label });
+    }
     return out.slice(0, 6);
   };
 

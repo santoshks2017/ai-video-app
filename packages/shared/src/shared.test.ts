@@ -38,6 +38,7 @@ import {
   projectStage,
   PROJECT_STAGES,
   orderReferences,
+  refRole,
   referencePlan,
   speechRate,
   DEFAULT_WPM,
@@ -1052,6 +1053,31 @@ test('the vehicle, the presenter and the dealership each keep a slot', () => {
     plan.spare.some((e) => e.photo.filename === 'c4'),
     'what did not fit is listed rather than silently dropped',
   );
+});
+
+test('the maker’s emblem is shown to the model, right behind the vehicle’s face', () => {
+  const img = (label: string, filename: string) => ({ label, filename, storagePath: `refs/x/${filename}`, refId: 'r', url: `/api/refs/r/${filename}` });
+  const car = { id: 'renault__kiger', brand: 'Renault', model: 'Kiger', slug: 'renault/kiger', images: { front: [img('Kiger front', 'kiger-front-1.jpg')] }, colours: [], variants: [] } as unknown as CarModelProfile;
+  const client = { id: 'cl1', name: 'Garve Renault', brand: 'Renault', brandLogo: img('Renault logo', 'renault-logo.png'), photos: [] } as never;
+  const brief = composeBrief({ ...emptyProject(), useCases: ['walkaround'], clientId: 'cl1', carId: car.id, carIds: [car.id] } as never, { car, client });
+
+  const emblem = brief.attachments.find((a) => a.emblem)!;
+  assert.ok(emblem, 'the client’s own artwork of the emblem travels with the brief');
+  assert.match(emblem.label, /Renault emblem as it is today/);
+  assert.match(emblem.label, /Never an older version of it/);
+  assert.match(emblem.label, /on the sign over the showroom/);
+  assert.equal(refRole(emblem), 'emblem', 'and it is shown to the model, not laid over the cut');
+  // The end card still gets its logo: the artwork is carried twice, for its two jobs.
+  assert.ok(brief.attachments.some((a) => a.kind === 'brand-logo' && refRole(a) === 'overlay'));
+
+  const plan = referencePlan(brief, { max: 10 });
+  const sent = plan.sent.map((e) => e.photo.filename);
+  assert.equal(sent[0], 'kiger-front-1.jpg', 'the vehicle’s face leads');
+  assert.equal(sent[1], 'renault-logo.png', 'the emblem is right behind it');
+
+  const text = buildPrompt(brief)!.parts[0]!.text;
+  assert.match(text, /the emblem artwork supplied with them/);
+  assert.match(text, /the one you have seen most is the one they have stopped using/);
 });
 
 test('a film with no colour chosen keeps the colour of the photographs', () => {

@@ -13,11 +13,12 @@
 import type { Brief, DealerPhoto } from './types.js';
 
 /** What a reference is a picture of. */
-export type RefRole = 'scene' | 'vehicle' | 'presenter' | 'dealership' | 'extra' | 'video' | 'overlay';
+export type RefRole = 'scene' | 'vehicle' | 'emblem' | 'presenter' | 'dealership' | 'extra' | 'video' | 'overlay';
 
 export const ROLE_LABEL: Record<RefRole, string> = {
   scene: 'Scene',
   vehicle: 'Vehicle',
+  emblem: "Maker's emblem",
   presenter: 'Presenter',
   dealership: 'Dealership',
   extra: 'Extra',
@@ -27,6 +28,8 @@ export const ROLE_LABEL: Record<RefRole, string> = {
 
 /** Which of those a brief attachment is. */
 export function refRole(a: DealerPhoto): RefRole {
+  // The emblem is artwork the model is shown, not furniture laid over the cut.
+  if (a.emblem) return 'emblem';
   if (a.kind === 'logo' || a.kind === 'brand-logo') return 'overlay';
   if (a.kind === 'reference-video') return 'video';
   // Another model in the range is not a record of the vehicle this film is about,
@@ -48,6 +51,8 @@ export interface RefSlots<T> {
   frames?: T[];
   /** Photographs of the vehicle, best first. These outrank everything. */
   car: T[];
+  /** The maker's emblem, in the design it wears today. Right behind the vehicle's face. */
+  emblem?: T;
   /** The presenter. Reserved a slot on every part. */
   actor?: T;
   /** The dealership. Reserved a slot on every part. */
@@ -84,6 +89,7 @@ export function orderReferences<T>(s: RefSlots<T>): T[] {
   const out: T[] = [];
   const [lead, ...moreCars] = s.car;
   if (lead) out.push(lead);
+  if (s.emblem) out.push(s.emblem);
   if (s.seed) out.push(s.seed);
   // At most two: a part holds two or three scenes, and a reference set that is
   // mostly compositions stops being a record of what the car looks like.
@@ -145,12 +151,13 @@ export function referencePlan(
   const overlays = all.filter((r) => r.role === 'overlay');
   const live = all.filter((r) => r.role !== 'overlay' && !r.held);
   const car = live.filter((r) => r.role === 'vehicle');
+  const emblem = live.find((r) => r.role === 'emblem');
   const actor = live.find((r) => r.role === 'presenter');
   const rest = live.filter((r) => r.role === 'dealership' || r.role === 'extra');
   const place = rest[0];
   const videos = live.filter((r) => r.role === 'video');
 
-  const ordered = orderReferences({ car, actor, place, rest, videos, max, maxVideos });
+  const ordered = orderReferences({ car, emblem, actor, place, rest, videos, max, maxVideos });
   ordered.forEach((r, i) => {
     r.slot = i;
   });

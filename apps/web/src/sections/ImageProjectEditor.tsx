@@ -29,6 +29,7 @@ import {
   occasionIn,
   pictureAspectsFor,
   tidyCopy,
+  type AttachedPhoto,
   type CarAngle,
   type CarModelProfile,
   type ClientProfile,
@@ -41,6 +42,7 @@ import {
   type DesignedCreative,
   type ImageCreative,
   type ImageProject,
+  type ImageRole,
   type LayoutInput,
   type PanelStyle,
   type PictureAspect,
@@ -61,6 +63,7 @@ import { zipFiles } from '../components/creative/zip.js';
 
 const ANGLES: CarAngle[] = ['front', 'side', 'rear', 'interior'];
 const ASPECT_TEXT_BAND: Record<PictureAspect, 'top' | 'left'> = { '1:1': 'top', '4:5': 'top', '9:16': 'top', '16:9': 'left', '5:4': 'top', '21:9': 'left' };
+const ROLE_LABEL_SHORT: Record<ImageRole, string> = { vehicle: 'vehicle', creative: 'creative', moment: 'moment', logo: 'logo' };
 const SOCIAL_FORMATS = CREATIVE_FORMATS.filter((f) => f.group === 'social');
 const AD_FORMATS = CREATIVE_FORMATS.filter((f) => f.group === 'cardekho');
 /** Whether Nano Banana 2 designs this size whole, words and all, rather than drawing its picture. */
@@ -850,6 +853,17 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
           </Confirm>
         )}
       </div>
+      {p.intake && (
+        <div className="ip-intake-bar">
+          <span className="chip on">{engine.label}</span>
+          {second && <span className="chip on">{second.label}</span>}
+          {p.intake.heard.length > 0 && <span className="hint">heard {p.intake.heard.map((h) => `"${h}"`).join(', ')}</span>}
+          {p.intake.fallback && <span className="hint">read without the model</span>}
+          <button type="button" className="btn ghost small" onClick={() => setView('auto')} disabled={!(showIntake(p) || proofOnly)}>
+            Back to the intake
+          </button>
+        </div>
+      )}
       {error && (
         <Banner kind="bad">
           {error}{' '}
@@ -1012,7 +1026,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                       aria-pressed={on}
                     >
                       <img src={refUrl(ph.storagePath)} alt={ph.label || ph.angle || 'Vehicle photo'} loading="lazy" crossOrigin="anonymous" />
-                      {ph.angle && <span>{ph.angle}</span>}
+                      {(ph.angle || (ph as AttachedPhoto).role) && <span>{ph.angle ?? ROLE_LABEL_SHORT[(ph as AttachedPhoto).role!]}</span>}
                     </button>
                   );
                 })}

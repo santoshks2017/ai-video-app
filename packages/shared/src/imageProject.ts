@@ -12,6 +12,13 @@ import type { CreativeEngineId, CreativeTemplateId } from './creativeEngines.js'
 import type { PanelStyle } from './creativeLayout.js';
 import type { ProjectStage, StoredImage } from './library.js';
 
+/** What an attached image is to the project — read by the intake model, flippable by hand. */
+export type ImageRole = 'vehicle' | 'creative' | 'moment' | 'logo';
+/** What to do with an attached finished creative. */
+export type ReferenceIntent = 'recreate' | 'edit' | 'sizes';
+/** A photo attached to the project, with what it is. */
+export type AttachedPhoto = StoredImage & { role?: ImageRole };
+
 /** A picture the image model drew for one aspect ratio, with the vehicle check's verdict. */
 export interface ScenePicture {
   image: StoredImage;
@@ -70,7 +77,11 @@ export interface ImageProject {
   /** The photo the picture is built on: a library photo or an attached one. */
   heroPhoto?: StoredImage;
   /** Photos attached to this project, which take the library's place. */
-  attachedPhotos?: StoredImage[];
+  attachedPhotos?: AttachedPhoto[];
+  /** An earlier creative to build from: recreate it, change elements, or make its other sizes. */
+  reference?: { image: StoredImage; intent: ReferenceIntent; changes?: string };
+  /** What the intake read, when, and how sure it was. */
+  intake?: { at: number; heard: string[]; confidence?: 'high' | 'low'; model?: string; fallback?: boolean };
   /** What the post is about, in the designer's words. */
   prompt: string;
   /** The engine the brief was read as, or picked by hand. */
@@ -116,6 +127,13 @@ export function emptyImageProject(): Omit<ImageProject, 'id' | 'createdAt' | 'up
     creatives: [],
   };
 }
+
+/** The size a new creative is proved on before the rest are paid for. */
+export const PROOF_FORMAT: CreativeFormatId = 'ig-square';
+
+/** A project with nothing made yet opens on the intake; anything made opens the workspace. */
+export const showIntake = (p: ImageProject): boolean =>
+  !p.creatives.length && !Object.keys(p.designs ?? {}).length && !Object.keys(p.pictures ?? {}).length;
 
 /** A list fact's rows. */
 export const factRows = (v: string | undefined): string[] => (v ?? '').split('\n').map((r) => r.trim()).filter(Boolean);

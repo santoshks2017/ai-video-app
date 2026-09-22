@@ -165,6 +165,9 @@ import {
   EDIT_AUDIO_TRACK,
   type FilmLayers,
   type EditClip,
+  emptyImageProject,
+  showIntake,
+  PROOF_FORMAT,
 } from '@ava/shared';
 
 function base(overrides: Partial<Brief> = {}): Brief {
@@ -2260,4 +2263,13 @@ test('the preview plays a sound at the level export gives it', () => {
   assert.ok(Math.abs(editSoundLevel(legacy, 2 + 0.4) - levelled * 0.5) < 1e-9, 'music from an edit made before lines fades the way export fades it');
   const sound: EditClip = { ...bed, bed: undefined, gain: undefined, volume: 0.5, fadeIn: 1, fadeOut: 0 };
   assert.ok(Math.abs(editSoundLevel(sound, 2.5) - 0.25) < 1e-9, "any other sound: its volume and its own fades");
+});
+
+test('a project shows intake until anything has been made, and the proof is the square', () => {
+  const base = { ...emptyImageProject(), id: 'p1', createdAt: 1, updatedAt: 1 };
+  assert.equal(PROOF_FORMAT, 'ig-square');
+  assert.equal(showIntake(base), true, 'nothing made yet');
+  assert.equal(showIntake({ ...base, creatives: [{ id: 'c', format: 'ig-square', doc: { format: 'ig-square', layers: [] }, updatedAt: 1 } as never] }), false, 'an edited size means workspace');
+  assert.equal(showIntake({ ...base, designs: { 'ig-square': {} as never } }), false, 'a design means workspace');
+  assert.equal(showIntake({ ...base, pictures: { '1:1': {} as never } }), false, 'a scene picture means workspace');
 });

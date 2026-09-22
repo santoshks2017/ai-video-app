@@ -423,12 +423,19 @@ export function designInstruction(req: DesignRequest, carLabels: string[]): stri
           req.reference.kind === 'style'
             ? `<IMAGE_REF_${refIdx}> is an earlier advertisement. Design this one in its image: the same layout idea, palette, type feeling and mood — a fresh render in this frame, never a copy of its pixels. The words to set are the ones listed below, exactly.${req.reference.changes ? ` One thing changes from it: ${quoted(req.reference.changes)}.` : ''}`
             : req.reference.kind === 'master'
-              ? `<IMAGE_REF_${refIdx}> is this same advertisement, already approved at another size. Keep its scene, palette, typography and words; adapt the composition to this frame.`
+              ? `<IMAGE_REF_${refIdx}> is this same advertisement, already approved at another size. Keep its scene, palette and typography; adapt the composition to this frame. The words to set are the ones listed below, exactly.`
               : `<IMAGE_REF_${refIdx}> is the photograph this advertisement is built on. Keep the people and the vehicle in it exactly as photographed — the same faces, poses, clothes and vehicle, reframed to fit but never redrawn — and improve only the backdrop, the light and the grade. Design the words around them.`,
         ]
       : []),
-    ...(basePhoto && !carLabels.length
-      ? ['', `## The ${noun}`, `The vehicle in the advertisement is the one in the photograph — keep it exactly as shot, including its number plate area, repainted plain white and blank.`]
+    // No photographs of the vehicle: the reference carries it — as shot, or as the earlier advertisement drew it.
+    ...(req.reference && !carLabels.length
+      ? [
+          '',
+          `## The ${noun}`,
+          basePhoto
+            ? `The vehicle in the advertisement is the one in the photograph — keep it exactly as shot, including its number plate area, repainted plain white and blank.`
+            : `The vehicle in the advertisement is the one in the reference advertisement: the same model, colour and trim, rebuilt faithfully. Its number plates are plain white and blank.`,
+        ]
       : [
           '',
           `## The ${noun}`,
@@ -438,7 +445,8 @@ export function designInstruction(req: DesignRequest, carLabels: string[]): stri
         ]),
     '',
     '## The scene',
-    `${scene}.${req.note?.trim() ? ` ${req.note.trim()}` : ''} Photorealistic, like a professional automotive campaign photograph — real light, real materials — with the words designed into it as a polished advertisement. No people in the foreground.`,
+    // Built on a photograph of people, the people are the point: only an empty scene keeps them out.
+    `${scene}.${req.note?.trim() ? ` ${req.note.trim()}` : ''} Photorealistic, like a professional automotive campaign photograph — real light, real materials — with the words designed into it as a polished advertisement.${basePhoto ? '' : ' No people in the foreground.'}`,
     '',
     '## The words — set exactly these, and nothing else',
     'Spell every word exactly as written between the quotes: the same letters and capitals, the ₹ sign, the commas in numbers, every digit of a phone number, and every asterisk (*).',
@@ -491,7 +499,8 @@ export async function drawCreativeDesign(
   refs: Array<{ bytes: Buffer; mimeType: string; label: string }>,
   apiKey: string,
 ): Promise<{ bytes: Buffer; mimeType: string; model: string; costInr: number }> {
-  if (!refs.length && req.reference?.kind !== 'base-photo')
+  // A reference carries the vehicle when there are no photographs of it: the moment as shot, or the earlier advertisement.
+  if (!refs.length && !req.reference)
     throw new CreativeError('design-no-photo', 'Pick a photo of the vehicle first — the creative is built from it.', 400);
   const model = await resolveNanoBanana2(apiKey);
   const parts: ImagePart[] = [

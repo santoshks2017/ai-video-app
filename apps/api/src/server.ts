@@ -4159,17 +4159,22 @@ app.post<{ Body: { projectId?: string; request?: unknown; images?: unknown } }>(
   const key = await googleKey();
   if (!key) return reply.code(503).send({ code: 'script-no-key', message: 'Add a Google (Gemini) key in APIs & models first.' });
   const r = req.body?.request as Record<string, any> | undefined;
+  // Each image keeps the place the web app sent it at, so the roles go back to the right photos.
   const picked = (Array.isArray(req.body?.images) ? (req.body!.images as unknown[]) : [])
-    .filter((p): p is { storagePath: string; label?: string } => typeof (p as any)?.storagePath === 'string' && STORED.test((p as any).storagePath))
+    .map((p, at) => ({ p, at }))
+    .filter((x): x is { p: { storagePath: string; label?: string }; at: number } => typeof (x.p as any)?.storagePath === 'string' && STORED.test((x.p as any).storagePath))
     .slice(0, 4);
   const images: Array<{ bytes: Buffer; mimeType: string }> = [];
   const kept: Array<{ storagePath: string; label?: string }> = [];
-  for (const p of picked) {
+  /** Where each image the model sees was in the list sent — the model numbers only the ones that loaded. */
+  const sentAt: number[] = [];
+  for (const { p, at } of picked) {
     const o = await readObject(p.storagePath).catch(() => null);
     const bytes = o ? await asJpeg(o.bytes).catch(() => null) : null;
     if (bytes) {
       images.push({ bytes, mimeType: 'image/jpeg' });
       kept.push(p);
+      sentAt.push(at);
     }
   }
   const request = {
@@ -4190,7 +4195,9 @@ app.post<{ Body: { projectId?: string; request?: unknown; images?: unknown } }>(
     const out = await understandBrief(request, images, key);
     const projectId = req.body?.projectId;
     if (typeof projectId === 'string' && projectId) void addToTotals('imageProjects', projectId, out.costInr).catch(() => {});
-    return { interpretation: out.interpretation, model: out.model };
+    // The model's image 0 is the first image that loaded; the web app counts every image it sent.
+    const interpretation = { ...out.interpretation, images: out.interpretation.images.map((im) => ({ ...im, index: sentAt[im.index]! })) };
+    return { interpretation, model: out.model };
   } catch (err) {
     const e = err as CreativeError;
     app.log.warn({ code: e.code, message: e.message }, 'creative intake failed');
@@ -4444,7 +4451,8 @@ app.post<{ Body: { projectId?: string; design?: unknown; photos?: unknown } }>('
   const design = cleanDesign(req.body?.design);
   if (!design) return reply.code(400).send({ code: 'bad-request', message: 'Pick the vehicle and the sizes, and give the creative its words first.' });
   const refs = await carRefs(req.body?.photos, design.vehicle.name, 4);
-  if (!refs.length && design.reference?.kind !== 'base-photo')
+  // With no photographs of the vehicle, a reference carries it — the moment as shot, or the earlier advertisement.
+  if (!refs.length && !design.reference)
     return reply.code(400).send({ code: 'design-no-photo', message: 'Pick a photo of the vehicle first — the creative is built from it.' });
   const canvas = await readCanvas(design);
   const refImage = design.reference

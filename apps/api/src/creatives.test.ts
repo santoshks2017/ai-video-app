@@ -168,7 +168,7 @@ test('a reference joins the design: a style to follow, a master to match, or the
 
   const master = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind: 'master' } }, ['the Hyundai Creta, front']);
   assert.match(master, /this same advertisement, already approved at another size/);
-  assert.match(master, /Keep its scene, palette, typography and words; adapt the composition/);
+  assert.match(master, /Keep its scene, palette and typography; adapt the composition to this frame\. The words to set are the ones listed below, exactly\./);
   assert.doesNotMatch(master, /One thing changes/);
 
   const moment = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind: 'base-photo' } }, []);
@@ -177,6 +177,45 @@ test('a reference joins the design: a style to follow, a master to match, or the
   assert.match(moment, /improve only the backdrop, the light and the grade/);
   assert.doesNotMatch(moment, /Put THIS car/, 'no car photos, no car block');
   assert.match(moment, /The vehicle in the advertisement is the one in the photograph/);
+});
+
+test('built on a photograph of people, the people stay: the scene no longer asks for none in the foreground', () => {
+  const base: DesignRequest = {
+    format: 'ig-square',
+    engine: 'delivery',
+    vehicle: { name: 'Hyundai Creta', kind: 'car' },
+    words: { kicker: '', headline: 'Welcome to the family', sub: '', badge: '', points: [], cta: '', terms: '' },
+    language: { name: 'English', script: 'latin' },
+    look: { panel: '#0F1E33', accent: '#E8590C' },
+    zones: { logoBand: 0, stripTop: 1, logoTone: 'dark', textSide: 'top' },
+  };
+  const moment = designInstruction({ ...base, reference: { storagePath: 'refs/a/moment.jpg', kind: 'base-photo' } }, []);
+  assert.match(moment, /exactly as photographed/);
+  assert.doesNotMatch(moment, /No people in the foreground/, 'the photograph’s own people are not asked away');
+  const withCar = designInstruction({ ...base, reference: { storagePath: 'refs/a/moment.jpg', kind: 'base-photo' } }, ['the Hyundai Creta, front']);
+  assert.doesNotMatch(withCar, /No people in the foreground/, 'nor when the library’s photographs come with it');
+  assert.match(designInstruction(base, ['the Hyundai Creta, front']), /No people in the foreground/, 'a design on no photograph of people still keeps them out');
+});
+
+test('with no photographs of the vehicle, an earlier advertisement or the approved size carries it', () => {
+  const base: DesignRequest = {
+    format: 'story',
+    engine: 'offer',
+    vehicle: { name: 'Hyundai vehicle in the photograph', kind: 'car' },
+    words: { kicker: '', headline: 'Drive home the Creta', sub: '', badge: '', points: [], cta: '', terms: '' },
+    language: { name: 'English', script: 'latin' },
+    look: { panel: '#0F1E33', accent: '#E8590C' },
+    zones: { logoBand: 0, stripTop: 1, logoTone: 'dark', textSide: 'top' },
+  };
+  for (const kind of ['style', 'master'] as const) {
+    const p = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind } }, []);
+    assert.match(p, /The vehicle in the advertisement is the one in the reference advertisement: the same model, colour and trim, rebuilt faithfully\. Its number plates are plain white and blank\./, kind);
+    assert.doesNotMatch(p, /Put THIS car|<IMAGE_REF_1>/, `${kind}: no car photos, no car block pointing past the reference`);
+    assert.match(p, /No people in the foreground/, `${kind}: only a photograph of people lets people in`);
+  }
+  const withCar = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind: 'style' } }, ['the Hyundai Creta, front']);
+  assert.match(withCar, /<IMAGE_REF_1> is the Hyundai vehicle in the photograph\. Put THIS car/, 'with photographs, the car block stands as before');
+  assert.doesNotMatch(withCar, /one in the reference advertisement/);
 });
 
 test('with a canvas and a reference, the canvas stays first and everything shifts by one', () => {

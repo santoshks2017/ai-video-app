@@ -40,10 +40,13 @@ export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, 
   const second = p.engine?.secondary ? CREATIVE_ENGINE_BY_ID[p.engine.secondary] : undefined;
   const occasion = p.facts.occasion || occasionIn(p.prompt) || undefined;
   const fields = [...engine.fields, ...(second?.fields ?? []).filter((f) => !engine.fields.some((g) => g.id === f.id))];
-  const missing = engine.mandatory.filter((id) => !(p.facts[id] ?? '').trim());
+  /** A fact as its field shows it — the occasion falls back to the one the brief names. */
+  const factValue = (id: string): string => p.facts[id] ?? (id === 'occasion' ? occasion ?? '' : '');
+  const missing = engine.mandatory.filter((id) => !factValue(id).trim());
   const read = Boolean(p.intake);
   const sizesIntent = p.reference?.intent === 'sizes';
-  const canRead = !readOnly && canCreate && !understanding && (p.prompt.trim().length > 0 || (p.attachedPhotos ?? []).length > 0);
+  // Not while a design is being made: a second reading would pull the plan out from under it.
+  const canRead = !readOnly && canCreate && !understanding && busy === '' && proofState !== 'working' && (p.prompt.trim().length > 0 || (p.attachedPhotos ?? []).length > 0);
   /** A real photo to build the picture on: the hero, a style reference, or a moment photo. */
   const hasPhoto = Boolean(p.heroPhoto) || Boolean(p.reference) || (p.attachedPhotos ?? []).some((x) => x.role === 'moment');
   const canProve = read && canCreate && !readOnly && busy === '' && proofState !== 'working' && !missing.length && !(p.engine == null) && hasPhoto;
@@ -52,11 +55,11 @@ export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, 
       const attachedPhotos = (cur.attachedPhotos ?? []).map((x) => (x.storagePath === ph.storagePath ? { ...x, role } : x));
       const creative = attachedPhotos.find((x) => x.role === 'creative');
       const wasHero = cur.heroPhoto?.storagePath === ph.storagePath;
-      const isVehicleLike = role === 'vehicle' || role === 'moment';
-      // Retagging the hero away from vehicle/moment moves it on; tagging a photo vehicle/moment claims an empty hero.
-      const heroPhoto = wasHero && !isVehicleLike
-        ? attachedPhotos.find((x) => x.role === 'vehicle' || x.role === 'moment')
-        : !cur.heroPhoto && isVehicleLike
+      // The hero is only ever a photograph of the vehicle. Retagging it as anything else moves it on
+      // to the first vehicle photo, or leaves no hero; tagging a photo a vehicle claims an empty hero.
+      const heroPhoto = wasHero && role !== 'vehicle'
+        ? attachedPhotos.find((x) => (x.role ?? 'vehicle') === 'vehicle')
+        : !cur.heroPhoto && role === 'vehicle'
           ? attachedPhotos.find((x) => x.storagePath === ph.storagePath)
           : cur.heroPhoto;
       return {
@@ -134,7 +137,7 @@ export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, 
               </Field>
             </div>
             {fields.map((f) => {
-              const v = p.facts[f.id] ?? (f.id === 'occasion' ? occasion ?? '' : '');
+              const v = factValue(f.id);
               const need = engine.mandatory.includes(f.id);
               return (
                 <Field key={f.id} label={`${f.label}${need ? ' *' : ''}`} hint={f.hint}>

@@ -68,6 +68,8 @@ const SOCIAL_FORMATS = CREATIVE_FORMATS.filter((f) => f.group === 'social');
 const AD_FORMATS = CREATIVE_FORMATS.filter((f) => f.group === 'cardekho');
 /** Whether Nano Banana 2 designs this size whole, words and all, rather than drawing its picture. */
 const designsWhole = (format: CreativeFormatId): boolean => CREATIVE_FORMAT_BY_ID[format].design === 'whole';
+/** A photograph of the vehicle: tagged so, or not tagged at all — an attachment is a vehicle photo until it is read as something else. */
+const isVehiclePhoto = (ph: AttachedPhoto): boolean => (ph.role ?? 'vehicle') === 'vehicle';
 
 /* ---- what the page needs from the client and the car ---- */
 
@@ -342,9 +344,17 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     );
   }
 
+  const madeFor = (f: CreativeFormatId): boolean => (designsWhole(f) ? Boolean(p.designs?.[f]) : Boolean(p.pictures?.[CREATIVE_FORMAT_BY_ID[f].pictureAspect]));
+  const missingDesigns = p.formats.filter((f) => !madeFor(f));
   /** True once the only design made is the proof itself — the fan-out still belongs on the intake. */
   const proofOnly = Object.keys(p.designs ?? {}).every((f) => f === PROOF_FORMAT) && !p.creatives.length && !Object.keys(p.pictures ?? {}).length;
-  const intakeOpen = view === 'auto' && (showIntake(p) || proofOnly);
+  /**
+   * The intake is for a project with nothing made, or one the intake itself proved that still has
+   * sizes to make. A project from before the intake whose one design is the square, or one whose
+   * only size is the square, opens on the workspace.
+   */
+  const intakeFits = showIntake(p) || (Boolean(p.intake) && proofOnly && missingDesigns.length > 0);
+  const intakeOpen = view === 'auto' && intakeFits;
 
   /* ---- actions ---- */
 
@@ -387,7 +397,13 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
         return role ? { ...ph, role } : ph;
       });
       const creativeRef = attached.find((ph) => ph.role === 'creative');
-      const hero = cur.heroPhoto ?? attached.find((ph) => ph.role === 'vehicle' || ph.role === 'moment');
+      // The hero is only ever a photograph of the vehicle. One now read as a creative, a moment or a
+      // logo gives way to the first vehicle photo; with none, the library's photo of the car the
+      // project ends up with (the designer's own pick before the model's match); else no hero.
+      const heroNow = cur.heroPhoto ? attached.find((ph) => ph.storagePath === cur.heroPhoto!.storagePath) : undefined;
+      const keptHero = cur.heroPhoto && (!heroNow || isVehiclePhoto(heroNow)) ? cur.heroPhoto : undefined;
+      const libraryFirst = it.carId ? libraryPhotos(cars.find((c) => c.id === (cur.carId ?? it.carId)))[0] : undefined;
+      const hero = keptHero ?? attached.find(isVehiclePhoto) ?? (libraryFirst ? { ...libraryFirst.photo, angle: libraryFirst.angle } : undefined);
       // The same creative, read again: keep what a human already chose for it rather than the model's fresh guess.
       const priorRef = creativeRef && cur.reference?.image.storagePath === creativeRef.storagePath ? cur.reference : undefined;
       return {
@@ -400,7 +416,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
         ...(it.sceneNote && !cur.sceneNote ? { sceneNote: it.sceneNote } : {}),
         ...(it.copy && !cur.copy ? { copy: it.copy } : {}),
         attachedPhotos: attached,
-        ...(hero && !cur.heroPhoto ? { heroPhoto: hero } : {}),
+        heroPhoto: hero,
         // A dropped reference is cleared, not left stale — but a kept one keeps the human's own intent and changes.
         reference: creativeRef
           ? { image: creativeRef, intent: priorRef?.intent ?? it.referenceIntent ?? 'recreate', changes: priorRef ? priorRef.changes : it.changes }
@@ -477,17 +493,20 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const carRefList = (): Array<{ storagePath: string; label: string }> => {
     if (!p.heroPhoto) return [];
     const hero = p.heroPhoto;
-    // Keep non-vehicle attachments — an old creative, a logo — out of the car references.
-    const attachable = (p.attachedPhotos ?? []).filter((x) => x.role !== 'creative' && x.role !== 'logo');
+    // Only photographs of the vehicle are car references — never an old creative, a moment or a
+    // logo, not even one left as the hero from before it was read.
+    const attachable = (p.attachedPhotos ?? []).filter(isVehiclePhoto);
+    const tagged = (p.attachedPhotos ?? []).find((x) => x.storagePath === hero.storagePath);
+    const heroIsVehicle = !tagged || isVehiclePhoto(tagged);
     if (!car) {
       // Attached photos only: the chosen one, then the others attached with it.
-      return [hero, ...attachable.filter((x) => x.storagePath !== hero.storagePath)]
+      return [...(heroIsVehicle ? [hero] : []), ...attachable.filter((x) => x.storagePath !== hero.storagePath)]
         .slice(0, 4)
         .map((x, i) => ({ storagePath: x.storagePath, label: i === 0 ? `the ${vehicleName}` : `the ${vehicleName}, another photograph` }));
     }
     const others = photos.filter((x) => x.photo.storagePath !== hero.storagePath);
     return [
-      { storagePath: hero.storagePath, label: `the ${car.brand} ${car.model}${hero.angle ? `, ${hero.angle}` : ''}` },
+      ...(heroIsVehicle ? [{ storagePath: hero.storagePath, label: `the ${car.brand} ${car.model}${hero.angle ? `, ${hero.angle}` : ''}` }] : []),
       // The vehicle's other sides; the cabin only when the picture is of the cabin.
       ...ANGLES.filter((a) => a !== 'interior' || hero.angle === 'interior')
         .map((a) => others.find((x) => x.angle === a && a !== hero.angle))
@@ -588,13 +607,14 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
    */
   const makeDesigns = async (only?: CreativeFormatId[], opts?: { copy?: CreativeCopy; purpose?: 'proof' | 'fanout' }): Promise<void> => {
     const c = opts?.copy ?? copy;
-    const reference = designReference(opts?.purpose ?? 'fanout');
-    if (!p.heroPhoto && !reference) return setError('Pick the vehicle and its photo, or attach a photo of it, first.');
+    // Only the fan-out matches the square: a size made again in the workspace is designed afresh, not copied from it.
+    const reference = designReference(opts?.purpose ?? 'proof');
+    const refs = carRefList();
+    if (!refs.length && !reference) return setError('Pick the vehicle and its photo, or attach a photo of it, first.');
     const formats = only ?? p.formats;
     if (!formats.length) return;
     setBusy('design');
     setError('');
-    const refs = carRefList();
     const whole = formats.filter(designsWhole);
     const strips = formats.filter((f) => !designsWhole(f));
     const stripAspects = pictureAspectsFor(strips);
@@ -792,8 +812,6 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
 
   const aspectsNeeded = pictureAspectsFor(p.formats);
   const missingPictures = aspectsNeeded.filter((a) => !p.pictures?.[a]);
-  const madeFor = (f: CreativeFormatId): boolean => (designsWhole(f) ? Boolean(p.designs?.[f]) : Boolean(p.pictures?.[CREATIVE_FORMAT_BY_ID[f].pictureAspect]));
-  const missingDesigns = p.formats.filter((f) => !madeFor(f));
   const designsMade = p.formats.length - missingDesigns.length;
   /** Why nothing can be made yet, in the words of the step that fixes it — null when it can. */
   const blockedBy = ((): string | null => {
@@ -859,7 +877,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
           {second && <span className="chip on">{second.label}</span>}
           {p.intake.heard.length > 0 && <span className="hint">heard {p.intake.heard.map((h) => `"${h}"`).join(', ')}</span>}
           {p.intake.fallback && <span className="hint">read without the model</span>}
-          <button type="button" className="btn ghost small" onClick={() => setView('auto')} disabled={!(showIntake(p) || proofOnly)}>
+          <button type="button" className="btn ghost small" onClick={() => setView('auto')} disabled={!intakeFits}>
             Back to the intake
           </button>
         </div>

@@ -8,9 +8,11 @@
  * ids, sizes and roles are dropped, never trusted.
  */
 import {
+  CREATIVE_BLENDS,
   CREATIVE_ENGINES,
   CREATIVE_ENGINE_BY_ID,
   CREATIVE_FORMATS,
+  EMOTION_ORDER,
   INDIAN_OCCASIONS,
   emptyCopy,
   isCreativeEngine,
@@ -80,6 +82,10 @@ export function understandPrompt(req: UnderstandRequest): string {
     '## The kinds of post (pick primary, and secondary only when the brief truly blends two)',
     ...engines,
     '',
+    '## Blends the studio knows (the first leads, at this share)',
+    ...CREATIVE_BLENDS.map((b) => `- ${b.lead} + ${b.with} at ${b.ratio}: ${b.logic}`),
+    `Any other pair: the more emotional kind leads, at 60/40. From most emotional to least: ${EMOTION_ORDER.join(', ')}.`,
+    '',
     '## Occasions the app knows',
     INDIAN_OCCASIONS.join(', '),
     '',
@@ -95,7 +101,12 @@ export function understandPrompt(req: UnderstandRequest): string {
     '## The brief',
     req.brief.trim() || '(empty)',
     ...(req.images.length
-      ? ['', '## The images', ROLES, ...req.images.map((im, i) => `<IMAGE_${i + 1}>${im.label ? ` — ${im.label}` : 'unlabelled, no filename given'}`)]
+      ? [
+          '',
+          '## The images (numbered from 0, in the order they are attached; "index" in the answer is this number)',
+          ROLES,
+          ...req.images.map((im, i) => `<IMAGE_${i}>${im.label ? ` — ${im.label}` : ' — unlabelled, no filename given'}`),
+        ]
       : []),
     '',
     '## Answer — JSON only, exactly this shape; leave out what the brief does not say',
@@ -111,10 +122,10 @@ export function understandPrompt(req: UnderstandRequest): string {
       sceneNote: 'setting direction from the brief, if any',
       images: [{ index: 0, role: 'vehicle-photo | finished-creative | moment-photo | logo', note: '' }],
       referenceIntent: 'recreate | edit | sizes — only when an image is a finished creative',
-      changes: 'what the brief asks to change from the finished creative, if anything',
+      changes: 'what the brief asks to change in how the finished creative looks, if anything — never its words',
       copy: { headline: '', kicker: '', sub: '', badge: '', points: [''], cta: '', terms: '' },
     }),
-    'Rules: facts hold only what the brief itself says — never invent a name, a price or a date. "copy" only when an image is a finished creative: the words on it, exactly as written. "referenceIntent" is "sizes" when the designer wants the same creative at other sizes; "edit" when they name a change; else "recreate".',
+    'Rules: facts hold only what the brief itself says — never invent a name, a price or a date. "copy" only when an image is a finished creative: its words read off it exactly as written, except that any change of wording the brief itself asks for (a new offer, a new date, a new line) is made in the copy. "changes" is what changes visually — the colours, the scene, the layout, the vehicle — never the words: the words are always the copy. "referenceIntent" is "sizes" when the designer wants the same creative at other sizes; "edit" when they name a change; else "recreate".',
   ];
   return lines.join('\n');
 }
@@ -136,6 +147,21 @@ function matchVehicle(name: string, vehicles: UnderstandRequest['vehicles']): st
   return hit?.id;
 }
 
+/**
+ * Two kinds of post read as the studio blends them: a pair it knows takes its lead and share
+ * from the blend table, whichever way round it was answered; any other pair is led by the more
+ * emotional, at the share given or 60/40. One kind alone carries no share.
+ */
+function blendOf(a: CreativeEngineId, b: CreativeEngineId | undefined, ratio: string): Interpretation['engine'] {
+  if (!b) return { primary: a };
+  const known = CREATIVE_BLENDS.find((x) => (x.lead === a && x.with === b) || (x.lead === b && x.with === a));
+  if (known) return { primary: known.lead, secondary: known.with, ratio: known.ratio };
+  const swapped = EMOTION_ORDER.indexOf(b) < EMOTION_ORDER.indexOf(a);
+  // A share answered for the other order would be read backwards, so it gives way to the default.
+  const share = !swapped && /^\d{1,2}\/\d{1,2}$/.test(ratio) ? ratio : '60/40';
+  return swapped ? { primary: b, secondary: a, ratio: share } : { primary: a, secondary: b, ratio: share };
+}
+
 const ROLE_MAP: Record<string, ImageRole> = {
   vehicle: 'vehicle', 'vehicle-photo': 'vehicle',
   creative: 'creative', 'finished-creative': 'creative',
@@ -154,9 +180,11 @@ export function parseInterpretation(text: string, req: UnderstandRequest): Inter
   } catch {
     throw new CreativeError('intake-unreadable', 'The interpretation came back in a form that cannot be read. Try again.');
   }
-  const primary = raw.engine?.primary;
-  if (!isCreativeEngine(primary)) throw new CreativeError('intake-no-engine', 'The brief could not tell what kind of post this is — pick one by hand.');
-  const secondary = isCreativeEngine(raw.engine?.secondary) && raw.engine.secondary !== primary ? (raw.engine.secondary as CreativeEngineId) : undefined;
+  const answered = raw.engine?.primary;
+  if (!isCreativeEngine(answered)) throw new CreativeError('intake-no-engine', 'The brief could not tell what kind of post this is — pick one by hand.');
+  const other = isCreativeEngine(raw.engine?.secondary) && raw.engine.secondary !== answered ? (raw.engine.secondary as CreativeEngineId) : undefined;
+  const engine = blendOf(answered, other, str(raw.engine?.ratio, 8));
+  const { primary, secondary } = engine;
   const fieldIds = new Set([...CREATIVE_ENGINE_BY_ID[primary].fields, ...(secondary ? CREATIVE_ENGINE_BY_ID[secondary].fields : [])].map((f) => f.id));
   const facts: Record<string, string> = {};
   if (raw.facts && typeof raw.facts === 'object') {
@@ -182,7 +210,7 @@ export function parseInterpretation(text: string, req: UnderstandRequest): Inter
   const intent = ['recreate', 'edit', 'sizes'].includes(raw.referenceIntent) ? (raw.referenceIntent as ReferenceIntent) : undefined;
   const occasion = INDIAN_OCCASIONS.find((o) => o.toLowerCase() === str(raw.occasion, 60).toLowerCase()) ?? (str(raw.occasion, 60) || undefined);
   return {
-    engine: { primary, ...(secondary ? { secondary } : {}), ...(str(raw.engine?.ratio, 8) ? { ratio: str(raw.engine.ratio, 8) } : {}) },
+    engine,
     heard: strs(raw.heard),
     confidence: raw.confidence === 'high' ? 'high' : 'low',
     ...(occasion ? { occasion } : {}),

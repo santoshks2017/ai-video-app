@@ -28,13 +28,15 @@ export interface ImageIntakeProps {
   onAllSizes: () => Promise<void>;
   onRevise: (change: string) => Promise<void>;
   onSkip: () => void;
+  /** A vehicle picked by hand: the editor sets it and moves a library hero on to the new car's photo. */
+  onPickVehicle: (carId: string | undefined) => void;
   proofState?: 'working' | 'failed';
   proof?: DesignedCreative;
   allCost: string;   // "about ₹36" — computed by the editor
   sizesTodo: number; // how many the fan-out will make
 }
 
-export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, canCreate, readOnly, busy, error, clearError, understanding, onUnderstand, onProof, onAllSizes, onRevise, onSkip, proofState, proof, allCost, sizesTodo }: ImageIntakeProps) {
+export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, canCreate, readOnly, busy, error, clearError, understanding, onUnderstand, onProof, onAllSizes, onRevise, onSkip, onPickVehicle, proofState, proof, allCost, sizesTodo }: ImageIntakeProps) {
   const [change, setChange] = useState('');
   const engine = CREATIVE_ENGINE_BY_ID[p.engine?.primary ?? 'feature'];
   const second = p.engine?.secondary ? CREATIVE_ENGINE_BY_ID[p.engine.secondary] : undefined;
@@ -130,7 +132,7 @@ export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, 
                 </select>
               </Field>
               <Field label="Vehicle">
-                <select value={p.carId ?? ''} onChange={(e) => set({ carId: e.target.value || undefined, carColour: undefined })} disabled={readOnly}>
+                <select value={p.carId ?? ''} onChange={(e) => onPickVehicle(e.target.value || undefined)} disabled={readOnly}>
                   <option value="">{(p.attachedPhotos ?? []).some((x) => x.role === 'vehicle' || x.role === 'moment') ? 'From the photograph' : 'No particular vehicle'}</option>
                   {vehicleChoices.map((c) => (<option key={c.id} value={c.id}>{c.brand} {c.model}</option>))}
                 </select>

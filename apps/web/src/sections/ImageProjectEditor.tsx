@@ -402,7 +402,8 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       // project ends up with (the designer's own pick before the model's match); else no hero.
       const heroNow = cur.heroPhoto ? attached.find((ph) => ph.storagePath === cur.heroPhoto!.storagePath) : undefined;
       const keptHero = cur.heroPhoto && (!heroNow || isVehiclePhoto(heroNow)) ? cur.heroPhoto : undefined;
-      const libraryFirst = it.carId ? libraryPhotos(cars.find((c) => c.id === (cur.carId ?? it.carId)))[0] : undefined;
+      const projectCar = cur.carId ?? it.carId;
+      const libraryFirst = projectCar ? libraryPhotos(cars.find((c) => c.id === projectCar))[0] : undefined;
       const hero = keptHero ?? attached.find(isVehiclePhoto) ?? (libraryFirst ? { ...libraryFirst.photo, angle: libraryFirst.angle } : undefined);
       // The same creative, read again: keep what a human already chose for it rather than the model's fresh guess.
       const priorRef = creativeRef && cur.reference?.image.storagePath === creativeRef.storagePath ? cur.reference : undefined;
@@ -440,6 +441,18 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     });
   };
   const setFact = (id: string, value: string): void => set((cur) => ({ facts: { ...cur.facts, [id]: value } }));
+  /**
+   * The vehicle picked on the intake. An attached photograph of the vehicle stays the hero; any
+   * other hero — a library photo of the car it was, or none — becomes the new car's first library
+   * photo, as the workspace's own pick does, so the picture is never built on the wrong car.
+   */
+  const pickVehicle = (carId: string | undefined): void =>
+    set((cur) => {
+      const tagged = cur.heroPhoto ? (cur.attachedPhotos ?? []).find((x) => x.storagePath === cur.heroPhoto!.storagePath) : undefined;
+      if (tagged && isVehiclePhoto(tagged)) return { carId, carColour: undefined };
+      const first = libraryPhotos(cars.find((c) => c.id === carId))[0];
+      return { carId, carColour: undefined, heroPhoto: first ? { ...first.photo, angle: first.angle } : undefined };
+    });
   const setCopy = (patch: Partial<CreativeCopy>): void =>
     set((cur) => {
       const next = { ...(cur.copy ?? copy), ...patch };
@@ -837,6 +850,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
         onAllSizes={async () => { await makeAllSizes(); setView('work'); }}
         onRevise={(change) => reviseDesign(PROOF_FORMAT, change)}
         onSkip={() => setView('work')}
+        onPickVehicle={pickVehicle}
         proofState={designState[PROOF_FORMAT]} proof={p.designs?.[PROOF_FORMAT]}
         allCost={`about ₹${p.formats.filter((f) => !madeFor(f)).length * 10}`}
         sizesTodo={p.formats.filter((f) => !madeFor(f)).length}

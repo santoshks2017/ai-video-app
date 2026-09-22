@@ -4160,7 +4160,9 @@ const asJpeg = async (bytes: Buffer): Promise<Buffer> =>
  * photographs, placed in a scene with room for the words and no writing of its own. Checked
  * against the first photograph; a clear mismatch is made once more.
  */
-app.post<{ Body: { projectId?: string; scene?: SceneRequest; photos?: Array<{ storagePath?: string; label?: string }> } }>(
+app.post<{
+  Body: { projectId?: string; scene?: SceneRequest; photos?: Array<{ storagePath?: string; label?: string }>; match?: { storagePath?: unknown } };
+}>(
   '/api/creatives/scene',
   async (req, reply) => {
     const key = await googleKey();
@@ -4178,6 +4180,15 @@ app.post<{ Body: { projectId?: string; scene?: SceneRequest; photos?: Array<{ st
       if (bytes) refs.push({ bytes, mimeType: 'image/jpeg', label: p.label?.trim() || (i === 0 ? `the ${scene.vehicle.name}` : `the ${scene.vehicle.name}, another side`) });
     }
     if (!refs.length) return reply.code(400).send({ code: 'scene-no-photo', message: 'Pick a photo of the vehicle first — the picture is built from it.' });
+    const matchPath = req.body?.match?.storagePath;
+    if (typeof matchPath === 'string' && STORED.test(matchPath)) {
+      const o = await readObject(matchPath).catch(() => null);
+      const jpeg = o ? await asJpeg(o.bytes).catch(() => null) : null;
+      if (jpeg) {
+        refs.push({ bytes: jpeg, mimeType: 'image/jpeg', label: 'this same advertisement, approved at another size' });
+        scene.match = true;
+      }
+    }
     try {
       let out = await drawCreativeScene(scene, refs, key);
       let spent = out.costInr;
@@ -4243,6 +4254,14 @@ function cleanDesign(raw: unknown): DesignRequest | null {
     ...(canvas && typeof canvas.storagePath === 'string' && STORED.test(canvas.storagePath)
       ? { canvas: { storagePath: canvas.storagePath, logos: unit(canvas.logos, 0, 4, 0) } }
       : {}),
+    ...((): Partial<Pick<DesignRequest, 'reference'>> => {
+      const r = d.reference as Record<string, unknown> | undefined;
+      const kind = r?.kind;
+      if (!r || typeof r.storagePath !== 'string' || !STORED.test(r.storagePath)) return {};
+      if (kind !== 'style' && kind !== 'master' && kind !== 'base-photo') return {};
+      const changes = text(r.changes, 300);
+      return { reference: { storagePath: r.storagePath, kind, ...(kind === 'style' && changes ? { changes } : {}) } };
+    })(),
     format: d.format,
     engine: d.engine,
     ...(isCreativeEngine(d.secondary) ? { secondary: d.secondary } : {}),
@@ -4376,12 +4395,19 @@ app.post<{ Body: { projectId?: string; design?: unknown; photos?: unknown } }>('
   const design = cleanDesign(req.body?.design);
   if (!design) return reply.code(400).send({ code: 'bad-request', message: 'Pick the vehicle and the sizes, and give the creative its words first.' });
   const refs = await carRefs(req.body?.photos, design.vehicle.name, 4);
-  if (!refs.length) return reply.code(400).send({ code: 'design-no-photo', message: 'Pick a photo of the vehicle first — the creative is built from it.' });
+  if (!refs.length && design.reference?.kind !== 'base-photo')
+    return reply.code(400).send({ code: 'design-no-photo', message: 'Pick a photo of the vehicle first — the creative is built from it.' });
   const canvas = await readCanvas(design);
+  const refImage = design.reference
+    ? await readObject(design.reference.storagePath)
+        .then(async (o) => (o ? { bytes: await asJpeg(o.bytes), mimeType: 'image/jpeg' } : null))
+        .catch(() => null)
+    : null;
+  if (design.reference && !refImage) return reply.code(404).send({ code: 'not-found', message: 'That reference image is no longer stored. Attach it again.' });
   try {
     const attempt = async () => {
-      const out = await drawCreativeDesign(design, canvas ? { bytes: canvas, mimeType: 'image/png' } : null, null, refs, key);
-      const checks = await checkDesign(out.bytes, design, refs[0]!.bytes, canvas, key);
+      const out = await drawCreativeDesign(design, canvas ? { bytes: canvas, mimeType: 'image/png' } : null, refImage, refs, key);
+      const checks = await checkDesign(out.bytes, design, refs[0]?.bytes ?? (design.reference?.kind === 'base-photo' ? refImage?.bytes : undefined), canvas, key);
       return { out, checks, spent: out.costInr + checks.costInr, weight: verdictWeight(checks.vehicle, checks.words, checks.logos) };
     };
     let best = await attempt();

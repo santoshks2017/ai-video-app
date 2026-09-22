@@ -20,6 +20,7 @@ import {
   isLightColour,
   layoutCreative,
   layoutDesigned,
+  PROOF_FORMAT,
   sameDesignWords,
   swapPicture,
   wordsBand,
@@ -295,10 +296,10 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     return undefined;
   };
 
-  const inputFor = (format: CreativeFormatId): LayoutInput => ({
+  const inputFor = (format: CreativeFormatId, c: CreativeCopy = copy): LayoutInput => ({
     format,
     template: p?.templateId ?? engine.template,
-    copy,
+    copy: c,
     look,
     picture: pictureFor(format),
     logos: { dealer: art(client?.logo, client?.logoWhite), brand: art(client?.brandLogo, client?.brandLogoWhite), placement: logoLayout(client?.logoPlacement) },
@@ -355,8 +356,11 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       return { copy: next, creatives: cur.creatives.map((c) => ({ ...c, doc: applyCopyToCreative(c.doc, next) })) };
     });
 
-  const writeCopy = async (): Promise<void> => {
-    if (!client) return setError('Pick the client first — the copy is written in their name.');
+  const writeCopy = async (): Promise<CreativeCopy | null> => {
+    if (!client) {
+      setError('Pick the client first — the copy is written in their name.');
+      return null;
+    }
     setBusy('copy');
     setError('');
     const fields = [...engine.fields, ...(second?.fields ?? [])];
@@ -373,8 +377,12 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     };
     const r = await writeCreativeCopy(p.id, request);
     setBusy('');
-    if (isApiError(r)) return setError(r.message);
+    if (isApiError(r)) {
+      setError(r.message);
+      return null;
+    }
     setCopy(r.copy);
+    return r.copy;
   };
 
   /** How far down the words reach on the size a picture is made for, so the picture leaves them room. */
@@ -394,9 +402,11 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const carRefList = (): Array<{ storagePath: string; label: string }> => {
     if (!p.heroPhoto) return [];
     const hero = p.heroPhoto;
+    // Keep non-vehicle attachments — an old creative, a logo — out of the car references.
+    const attachable = (p.attachedPhotos ?? []).filter((x) => x.role !== 'creative' && x.role !== 'logo');
     if (!car) {
       // Attached photos only: the chosen one, then the others attached with it.
-      return [hero, ...(p.attachedPhotos ?? []).filter((x) => x.storagePath !== hero.storagePath)]
+      return [hero, ...attachable.filter((x) => x.storagePath !== hero.storagePath)]
         .slice(0, 4)
         .map((x, i) => ({ storagePath: x.storagePath, label: i === 0 ? `the ${vehicleName}` : `the ${vehicleName}, another photograph` }));
     }
@@ -412,9 +422,22 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     ];
   };
 
+  /** The image a design builds from: the uploaded original as master (other sizes), the proof as master (fan-out), an old creative as style, or a moment photo as the base. */
+  const designReference = (purpose: 'proof' | 'fanout'): DesignRequest['reference'] | undefined => {
+    if (p.reference?.intent === 'sizes') return { storagePath: p.reference.image.storagePath, kind: 'master' };
+    if (purpose === 'fanout') {
+      const proof = p.designs?.[PROOF_FORMAT];
+      if (proof) return { storagePath: proof.image.storagePath, kind: 'master' };
+    }
+    if (p.reference) return { storagePath: p.reference.image.storagePath, kind: 'style', ...(p.reference.changes ? { changes: p.reference.changes } : {}) };
+    const moment = (p.attachedPhotos ?? []).find((a) => a.role === 'moment');
+    if (moment) return { storagePath: moment.storagePath, kind: 'base-photo' };
+    return undefined;
+  };
+
   /** What Nano Banana 2 is asked to design for one size: the words, the look, and where the app's logos and panel go. */
-  const designBrief = (format: CreativeFormatId): DesignRequest => {
-    const input = inputFor(format);
+  const designBrief = (format: CreativeFormatId, c: CreativeCopy = copy): DesignRequest => {
+    const input = inputFor(format, c);
     // Where the strip and the logos go is the layout's own, words and all.
     const zones = designZonesOf(layoutCreative({ ...input, picture: { src: '', mode: 'scene' } }), isLightColour(look.panel) ? 'light' : 'dark');
     return {
@@ -425,7 +448,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       ...(occasion ? { occasion } : {}),
       vehicle: { name: vehicleName, ...(p.carColour ? { colour: p.carColour } : {}), kind: vehicleKind },
       ...(p.sceneNote?.trim() ? { note: p.sceneNote.trim() } : {}),
-      words: designWordsOf(copy, input),
+      words: designWordsOf(c, input),
       language: { name: language.name, script: language.script },
       look: { panel: look.panel, accent: look.accent },
       zones,
@@ -488,8 +511,10 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
    * Nano Banana 2 makes the creatives — the sizes asked for, or every size. Most it designs
    * whole; a strip wider than it draws gets its picture, one for all the strips of a shape.
    */
-  const makeDesigns = async (only?: CreativeFormatId[]): Promise<void> => {
-    if (!p.heroPhoto) return setError('Pick the vehicle and its photo, or attach a photo of it, first.');
+  const makeDesigns = async (only?: CreativeFormatId[], opts?: { copy?: CreativeCopy; purpose?: 'proof' | 'fanout' }): Promise<void> => {
+    const c = opts?.copy ?? copy;
+    const reference = designReference(opts?.purpose ?? 'fanout');
+    if (!p.heroPhoto && !reference) return setError('Pick the vehicle and its photo, or attach a photo of it, first.');
     const formats = only ?? p.formats;
     if (!formats.length) return;
     setBusy('design');
@@ -502,7 +527,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     await Promise.all([
       ...whole.map(async (format) => {
         const canvas = await uploadCanvas(format);
-        const brief = { ...designBrief(format), ...(canvas ? { canvas: { storagePath: canvas.image.storagePath, logos: canvas.logos } } : {}) };
+        const brief = { ...designBrief(format, c), ...(canvas ? { canvas: { storagePath: canvas.image.storagePath, logos: canvas.logos } } : {}), ...(reference ? { reference } : {}) };
         const r = await drawCreativeDesign(p.id, brief, refs);
         if (isApiError(r)) {
           settle(format, true);
@@ -527,6 +552,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
             mood: { panel: look.panel, accent: look.accent },
           },
           refs,
+          reference?.kind === 'master' ? { storagePath: reference.storagePath } : undefined,
         );
         for (const f of mine) settle(f, isApiError(r));
         if (isApiError(r)) return setError(r.message);
@@ -542,6 +568,20 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     ]);
     setBusy('');
     await refresh();
+  };
+
+  /** The proof: the words written if they have not been, then the square designed with the reference. */
+  const makeProof = async (): Promise<void> => {
+    let c: CreativeCopy | null = p.copy ?? null;
+    if (!c) c = await writeCopy();
+    if (!c) return; // writeCopy set the error
+    await makeDesigns([PROOF_FORMAT], { copy: c, purpose: 'proof' });
+  };
+
+  /** Every chosen size not made yet, in the proof's image. */
+  const makeAllSizes = async (): Promise<void> => {
+    const todo = p.formats.filter((f) => !madeFor(f));
+    if (todo.length) await makeDesigns(todo, { purpose: 'fanout' });
   };
 
   /** One change to a size Nano Banana 2 designed, everything else kept. */
@@ -684,7 +724,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const blockedBy = ((): string | null => {
     if (!canCreate) return 'Viewer access can look but not make — ask an admin for creator access.';
     if (busy === 'copy') return 'Writing the copy — a moment.';
-    if (!p.heroPhoto) {
+    if (!p.heroPhoto && !designReference('proof')) {
       if (!car) return 'Pick the vehicle in 01, or attach a photo of it in 02 — the creative is built from a real photo.';
       return photos.length ? 'Pick the photo to build on in 02.' : `The library has no photos of the ${car.brand} ${car.model} yet — attach one in 02.`;
     }

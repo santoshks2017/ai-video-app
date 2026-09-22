@@ -216,6 +216,8 @@ export interface SceneRequest {
   panel: boolean;
   /** The creative's colours, as a mood for the light. */
   mood?: { panel: string; accent: string };
+  /** The last reference image is the approved creative this picture must match. */
+  match?: boolean;
 }
 
 /** The instruction for the picture: this vehicle, this scene, room for the words, no writing at all. */
@@ -245,6 +247,7 @@ export function sceneInstruction(req: SceneRequest, refLabels: string[]): string
     '## The scene',
     `${scene}.${req.note?.trim() ? ` ${req.note.trim()}` : ''} Photorealistic, like a professional automotive campaign photograph — real light, real materials, no illustration or CGI look, no people in the foreground.`,
     req.mood ? `Light and colour that sit well with the creative's colours: ${req.mood.panel} and ${req.mood.accent}.` : '',
+    req.match ? 'One of the references is this same advertisement, already approved at another size: keep its scene, palette and light, recomposed for this frame. The picture carries no words over from it — it carries no words at all.' : '',
     '',
     '## Composition',
     place,
@@ -280,6 +283,9 @@ export async function drawCreativeScene(
  * canvas with the client's logos already in their places, so it works around the real logos
  * instead of inventing its own; the app lays the exact logo files back on afterwards.
  */
+/** What a reference image is to the design: a style to follow, the same ad at another size, or the photograph it is built on. */
+export type DesignReferenceKind = 'style' | 'master' | 'base-photo';
+
 export interface DesignRequest {
   format: CreativeFormatId;
   engine: CreativeEngineId;
@@ -296,6 +302,8 @@ export interface DesignRequest {
   zones: DesignZones;
   /** The canvas with the logos in place, and how many logos are on it. */
   canvas?: { storagePath: string; logos: number };
+  /** An image the design builds from, read by `kind`; `changes` only with 'style'. */
+  reference?: { storagePath: string; kind: DesignReferenceKind; changes?: string };
 }
 
 const TYPE_MOOD: Record<CreativeTemplateId, string> = {
@@ -372,7 +380,9 @@ export function designInstruction(req: DesignRequest, carLabels: string[]): stri
   const template = req.template ?? e?.template ?? 'hero';
   const scene = (req.occasion && OCCASION_SCENES[req.occasion]) || e?.scene || 'a clean, premium setting';
   const canvas = Boolean(req.canvas);
-  const car = canvas ? 1 : 0;
+  const refIdx = canvas ? 1 : 0;
+  const car = refIdx + (req.reference ? 1 : 0);
+  const basePhoto = req.reference?.kind === 'base-photo';
   // The smallest words at the creative's own pixels: small print, then everything else.
   const tiny = pct1((ad ? 9 : 22) / f.height);
   const small = pct1((ad ? 11 : 30) / f.height);
@@ -386,6 +396,17 @@ export function designInstruction(req: DesignRequest, carLabels: string[]): stri
     '',
     '## References',
     ...(canvas ? ["<IMAGE_REF_0> — the canvas: this creative's exact shape, with the client's logos already in their final places"] : []),
+    ...(req.reference
+      ? [
+          `<IMAGE_REF_${refIdx}> — ${
+            req.reference.kind === 'style'
+              ? 'an earlier advertisement to design this one after'
+              : req.reference.kind === 'master'
+                ? 'this same advertisement, approved at another size'
+                : 'the photograph this advertisement is built on'
+          }`,
+        ]
+      : []),
     ...carLabels.map((l, i) => `<IMAGE_REF_${i + car}> — ${l}`),
     ...(canvas
       ? [
@@ -395,11 +416,26 @@ export function designInstruction(req: DesignRequest, carLabels: string[]): stri
           `Add no other logo, emblem, brand name or wordmark anywhere — the logos on the canvas are the only ones (the manufacturer's badge on the ${noun} itself aside).`,
         ]
       : []),
-    '',
-    `## The ${noun}`,
-    `<IMAGE_REF_${car}> is the ${req.vehicle.name}${req.vehicle.colour ? ` in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the creative: the same model generation, body shape, grille, headlamps, tail-lamps, badges, alloy wheels, colour and trim as in the reference photographs${carLabels.length > 1 ? ', which show its other sides' : ''}. Build it only from these photographs — never from what the name brings to mind, and never an older or different model.`,
-    `The ${noun} is whole and uncropped, sharp, the hero of the picture, on the ground with correct contact shadows and true reflections in the paint and glass.`,
-    `NUMBER PLATES ARE PLAIN WHITE AND BLANK — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is a plain white plate with nothing on it: no letters, no numbers, no state code, no dealer name. Writing on a plate in the reference photographs is not part of the ${noun}; never copy it.`,
+    ...(req.reference
+      ? [
+          '',
+          '## The reference',
+          req.reference.kind === 'style'
+            ? `<IMAGE_REF_${refIdx}> is an earlier advertisement. Design this one in its image: the same layout idea, palette, type feeling and mood — a fresh render in this frame, never a copy of its pixels. The words to set are the ones listed below, exactly.${req.reference.changes ? ` One thing changes from it: ${quoted(req.reference.changes)}.` : ''}`
+            : req.reference.kind === 'master'
+              ? `<IMAGE_REF_${refIdx}> is this same advertisement, already approved at another size. Keep its scene, palette, typography and words; adapt the composition to this frame.`
+              : `<IMAGE_REF_${refIdx}> is the photograph this advertisement is built on. Keep the people and the vehicle in it exactly as photographed — the same faces, poses, clothes and vehicle, reframed to fit but never redrawn — and improve only the backdrop, the light and the grade. Design the words around them.`,
+        ]
+      : []),
+    ...(basePhoto && !carLabels.length
+      ? ['', `## The ${noun}`, `The vehicle in the advertisement is the one in the photograph — keep it exactly as shot, including its number plate area, repainted plain white and blank.`]
+      : [
+          '',
+          `## The ${noun}`,
+          `<IMAGE_REF_${car}> is the ${req.vehicle.name}${req.vehicle.colour ? ` in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the creative: the same model generation, body shape, grille, headlamps, tail-lamps, badges, alloy wheels, colour and trim as in the reference photographs${carLabels.length > 1 ? ', which show its other sides' : ''}. Build it only from these photographs — never from what the name brings to mind, and never an older or different model.`,
+          `The ${noun} is whole and uncropped, sharp, the hero of the picture, on the ground with correct contact shadows and true reflections in the paint and glass.`,
+          `NUMBER PLATES ARE PLAIN WHITE AND BLANK — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is a plain white plate with nothing on it: no letters, no numbers, no state code, no dealer name. Writing on a plate in the reference photographs is not part of the ${noun}; never copy it.`,
+        ]),
     '',
     '## The scene',
     `${scene}.${req.note?.trim() ? ` ${req.note.trim()}` : ''} Photorealistic, like a professional automotive campaign photograph — real light, real materials — with the words designed into it as a polished advertisement. No people in the foreground.`,
@@ -451,14 +487,17 @@ const designConfigs = (req: DesignRequest) => {
 export async function drawCreativeDesign(
   req: DesignRequest,
   canvas: { bytes: Buffer; mimeType: string } | null,
+  reference: { bytes: Buffer; mimeType: string } | null,
   refs: Array<{ bytes: Buffer; mimeType: string; label: string }>,
   apiKey: string,
 ): Promise<{ bytes: Buffer; mimeType: string; model: string; costInr: number }> {
-  if (!refs.length) throw new CreativeError('design-no-photo', 'Pick a photo of the vehicle first — the creative is built from it.', 400);
+  if (!refs.length && req.reference?.kind !== 'base-photo')
+    throw new CreativeError('design-no-photo', 'Pick a photo of the vehicle first — the creative is built from it.', 400);
   const model = await resolveNanoBanana2(apiKey);
   const parts: ImagePart[] = [
     { text: designInstruction(canvas ? req : { ...req, canvas: undefined }, refs.map((r) => r.label)) },
     ...(canvas ? [{ inline_data: { mime_type: canvas.mimeType, data: canvas.bytes.toString('base64') } }] : []),
+    ...(reference ? [{ inline_data: { mime_type: reference.mimeType, data: reference.bytes.toString('base64') } }] : []),
     ...refs.map((r) => ({ inline_data: { mime_type: r.mimeType, data: r.bytes.toString('base64') } })),
   ];
   const out = await requestImage(model, parts, apiKey, designConfigs(req), 0.6, 'Creative images');

@@ -144,3 +144,67 @@ test('Nano Banana 2 designs the whole creative on the canvas with the logos in p
   assert.match(r, /the logos exactly where they are, and every word exactly as written/);
   assert.match(r, /plain white and blank/);
 });
+
+test('a reference joins the design: a style to follow, a master to match, or the photograph it is built on', () => {
+  const base: DesignRequest = {
+    format: 'ig-square',
+    engine: 'offer',
+    vehicle: { name: 'Hyundai Creta', kind: 'car' },
+    words: { kicker: '', headline: 'Drive home the Creta', sub: '', badge: '', points: [], cta: '', terms: '' },
+    language: { name: 'English', script: 'latin' },
+    look: { panel: '#0F1E33', accent: '#E8590C' },
+    zones: { logoBand: 0, stripTop: 1, logoTone: 'dark', textSide: 'top' },
+  };
+  const plain = designInstruction(base, ['the Hyundai Creta, front']);
+  assert.doesNotMatch(plain, /earlier advertisement|approved at another size|built on/, 'no reference, no paragraph');
+
+  const style = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind: 'style', changes: 'swap the offer to ₹75,000' } }, ['the Hyundai Creta, front']);
+  assert.match(style, /<IMAGE_REF_0> — an earlier advertisement to design this one after/);
+  assert.match(style, /<IMAGE_REF_1> — the Hyundai Creta, front/, 'the car moves down one');
+  assert.match(style, /<IMAGE_REF_0> is an earlier advertisement\. Design this one in its image/);
+  assert.match(style, /a fresh render in this frame, never a copy of its pixels/);
+  assert.match(style, /One thing changes from it: "swap the offer to ₹75,000"/);
+  assert.match(style, /<IMAGE_REF_1> is the Hyundai Creta/, 'the car block still points at the right image');
+
+  const master = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind: 'master' } }, ['the Hyundai Creta, front']);
+  assert.match(master, /this same advertisement, already approved at another size/);
+  assert.match(master, /Keep its scene, palette, typography and words; adapt the composition/);
+  assert.doesNotMatch(master, /One thing changes/);
+
+  const moment = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind: 'base-photo' } }, []);
+  assert.match(moment, /<IMAGE_REF_0> is the photograph this advertisement is built on/);
+  assert.match(moment, /exactly as photographed/);
+  assert.match(moment, /improve only the backdrop, the light and the grade/);
+  assert.doesNotMatch(moment, /Put THIS car/, 'no car photos, no car block');
+  assert.match(moment, /The vehicle in the advertisement is the one in the photograph/);
+});
+
+test('with a canvas and a reference, the canvas stays first and everything shifts by one', () => {
+  const withBoth = designInstruction(
+    {
+      format: 'ig-square',
+      engine: 'offer',
+      vehicle: { name: 'Hyundai Creta', kind: 'car' },
+      words: { kicker: '', headline: 'H', sub: '', badge: '', points: [], cta: '', terms: '' },
+      language: { name: 'English', script: 'latin' },
+      look: { panel: '#0F1E33', accent: '#E8590C' },
+      zones: { logoBand: 0, stripTop: 1, logoTone: 'dark', textSide: 'top' },
+      canvas: { storagePath: 'refs/c/c.png', logos: 2 },
+      reference: { storagePath: 'refs/a/b.png', kind: 'style' },
+    },
+    ['the Hyundai Creta, front'],
+  );
+  assert.match(withBoth, /<IMAGE_REF_0> — the canvas/);
+  assert.match(withBoth, /<IMAGE_REF_1> — an earlier advertisement/);
+  assert.match(withBoth, /<IMAGE_REF_2> — the Hyundai Creta, front/);
+  assert.match(withBoth, /<IMAGE_REF_2> is the Hyundai Creta/);
+});
+
+test('a scene can be asked to match the approved creative', () => {
+  const req = { aspect: '21:9' as const, engine: 'offer' as const, vehicle: { name: 'Hyundai Creta' }, textBand: 'left' as const, panel: false, match: true };
+  const p = sceneInstruction(req, ['the Hyundai Creta, front', 'the approved creative to match']);
+  assert.match(p, /keep its scene, palette and light, recomposed for this frame/);
+  assert.match(p, /carries no words over from it/);
+  const plain = sceneInstruction({ ...req, match: false }, ['the Hyundai Creta, front']);
+  assert.doesNotMatch(plain, /recomposed for this frame/);
+});

@@ -4380,7 +4380,7 @@ app.post<{ Body: { projectId?: string; design?: unknown; photos?: unknown } }>('
   const canvas = await readCanvas(design);
   try {
     const attempt = async () => {
-      const out = await drawCreativeDesign(design, canvas ? { bytes: canvas, mimeType: 'image/png' } : null, refs, key);
+      const out = await drawCreativeDesign(design, canvas ? { bytes: canvas, mimeType: 'image/png' } : null, null, refs, key);
       const checks = await checkDesign(out.bytes, design, refs[0]!.bytes, canvas, key);
       return { out, checks, spent: out.costInr + checks.costInr, weight: verdictWeight(checks.vehicle, checks.words, checks.logos) };
     };

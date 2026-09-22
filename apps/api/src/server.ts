@@ -123,6 +123,7 @@ import {
   type DesignRequest,
   type SceneRequest,
 } from './creatives.js';
+import { understandBrief } from './intake.js';
 import { writeScript, ScriptError, type ScriptScene, type ScriptLanguage } from './script.js';
 import { generateMusicBed } from './lyria.js';
 import {
@@ -4146,6 +4147,54 @@ app.post<{ Body: { projectId?: string; request?: CopyRequest } }>('/api/creative
     const e = err as CreativeError;
     app.log.warn({ code: e.code, message: e.message }, 'creative copy failed');
     return reply.code(e.status ?? 502).send({ code: e.code ?? 'copy-failed', message: e.message });
+  }
+});
+
+/**
+ * The intake reads a brief and its attached images together — what kind of post, the facts
+ * already in the brief, what each image is — so the designer corrects a cheap interpretation
+ * instead of paying for a wrong creative.
+ */
+app.post<{ Body: { projectId?: string; request?: unknown; images?: unknown } }>('/api/creatives/understand', async (req, reply) => {
+  const key = await googleKey();
+  if (!key) return reply.code(503).send({ code: 'script-no-key', message: 'Add a Google (Gemini) key in APIs & models first.' });
+  const r = req.body?.request as Record<string, any> | undefined;
+  const picked = (Array.isArray(req.body?.images) ? (req.body!.images as unknown[]) : [])
+    .filter((p): p is { storagePath: string; label?: string } => typeof (p as any)?.storagePath === 'string' && STORED.test((p as any).storagePath))
+    .slice(0, 4);
+  const images: Array<{ bytes: Buffer; mimeType: string }> = [];
+  const kept: Array<{ storagePath: string; label?: string }> = [];
+  for (const p of picked) {
+    const o = await readObject(p.storagePath).catch(() => null);
+    const bytes = o ? await asJpeg(o.bytes).catch(() => null) : null;
+    if (bytes) {
+      images.push({ bytes, mimeType: 'image/jpeg' });
+      kept.push(p);
+    }
+  }
+  const request = {
+    brief: text(r?.brief, 2000),
+    ...(text(r?.client?.name, 120) ? { client: { name: text(r?.client?.name, 120), ...(text(r?.client?.brand, 60) ? { brand: text(r?.client?.brand, 60) } : {}) } } : {}),
+    vehicles: (Array.isArray(r?.vehicles) ? r!.vehicles : [])
+      .map((v: any) => ({ id: text(v?.id, 60), name: text(v?.name, 80) }))
+      .filter((v: { id: string; name: string }) => v.id && v.name)
+      .slice(0, 60),
+    languages: (Array.isArray(r?.languages) ? r!.languages : [])
+      .map((l: any) => ({ id: text(l?.id, 20), name: text(l?.name, 40) }))
+      .filter((l: { id: string; name: string }) => l.id && l.name)
+      .slice(0, 20),
+    images: kept.map((p) => ({ ...(text(p.label, 120) ? { label: text(p.label, 120) } : {}) })),
+  };
+  if (!request.brief && !kept.length) return reply.code(400).send({ code: 'bad-request', message: 'Write the brief, or attach an image, first.' });
+  try {
+    const out = await understandBrief(request, images, key);
+    const projectId = req.body?.projectId;
+    if (typeof projectId === 'string' && projectId) void addToTotals('imageProjects', projectId, out.costInr).catch(() => {});
+    return { interpretation: out.interpretation, model: out.model };
+  } catch (err) {
+    const e = err as CreativeError;
+    app.log.warn({ code: e.code, message: e.message }, 'creative intake failed');
+    return reply.code(e.status && e.status >= 400 ? e.status : 502).send({ code: e.code ?? 'intake-failed', message: e.message });
   }
 });
 

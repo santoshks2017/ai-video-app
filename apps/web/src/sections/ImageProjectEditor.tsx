@@ -363,7 +363,12 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       const read = classifyCreative(p.prompt);
       const found = occasionIn(p.prompt);
       set((cur) => ({
-        ...(read && !cur.engine?.manual ? { engine: { primary: read.primary, secondary: read.secondary, ratio: read.ratio } } : {}),
+        ...(read && !cur.engine?.manual
+          ? { engine: { primary: read.primary, secondary: read.secondary, ratio: read.ratio } }
+          // An unmatched brief reads as nothing: still give it a lead, so the proof is never blocked on an engine that was never set.
+          : !read && !cur.engine
+            ? { engine: { primary: 'feature' } }
+            : {}),
         ...(found && !cur.facts.occasion ? { facts: { ...cur.facts, occasion: found } } : {}),
         intake: { at: Date.now(), heard: read?.heard ?? [], confidence: 'low', fallback: true },
       }));
@@ -380,6 +385,8 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       });
       const creativeRef = attached.find((ph) => ph.role === 'creative');
       const hero = cur.heroPhoto ?? attached.find((ph) => ph.role === 'vehicle' || ph.role === 'moment');
+      // The same creative, read again: keep what a human already chose for it rather than the model's fresh guess.
+      const priorRef = creativeRef && cur.reference?.image.storagePath === creativeRef.storagePath ? cur.reference : undefined;
       return {
         ...(cur.engine?.manual ? {} : { engine: { primary: it.engine.primary, secondary: it.engine.secondary, ratio: it.engine.ratio } }),
         facts: it.occasion && !(facts.occasion ?? '').trim() ? { ...facts, occasion: it.occasion } : facts,
@@ -391,9 +398,10 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
         ...(it.copy && !cur.copy ? { copy: it.copy } : {}),
         attachedPhotos: attached,
         ...(hero && !cur.heroPhoto ? { heroPhoto: hero } : {}),
-        ...(creativeRef
-          ? { reference: { image: creativeRef, intent: it.referenceIntent ?? 'recreate', ...(it.changes ? { changes: it.changes } : {}) } }
-          : {}),
+        // A dropped reference is cleared, not left stale — but a kept one keeps the human's own intent and changes.
+        reference: creativeRef
+          ? { image: creativeRef, intent: priorRef?.intent ?? it.referenceIntent ?? 'recreate', changes: priorRef ? priorRef.changes : it.changes }
+          : undefined,
         intake: { at: Date.now(), heard: it.heard, confidence: it.confidence, model: r.model },
       };
     });

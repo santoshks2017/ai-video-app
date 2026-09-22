@@ -44,13 +44,24 @@ export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, 
   const read = Boolean(p.intake);
   const sizesIntent = p.reference?.intent === 'sizes';
   const canRead = !readOnly && canCreate && !understanding && (p.prompt.trim().length > 0 || (p.attachedPhotos ?? []).length > 0);
-  const canProve = read && canCreate && !readOnly && busy === '' && proofState !== 'working' && !missing.length && !(p.engine == null);
+  /** A real photo to build the picture on: the hero, a style reference, or a moment photo. */
+  const hasPhoto = Boolean(p.heroPhoto) || Boolean(p.reference) || (p.attachedPhotos ?? []).some((x) => x.role === 'moment');
+  const canProve = read && canCreate && !readOnly && busy === '' && proofState !== 'working' && !missing.length && !(p.engine == null) && hasPhoto;
   const setRole = (ph: AttachedPhoto, role: ImageRole): void =>
     set((cur) => {
       const attachedPhotos = (cur.attachedPhotos ?? []).map((x) => (x.storagePath === ph.storagePath ? { ...x, role } : x));
       const creative = attachedPhotos.find((x) => x.role === 'creative');
+      const wasHero = cur.heroPhoto?.storagePath === ph.storagePath;
+      const isVehicleLike = role === 'vehicle' || role === 'moment';
+      // Retagging the hero away from vehicle/moment moves it on; tagging a photo vehicle/moment claims an empty hero.
+      const heroPhoto = wasHero && !isVehicleLike
+        ? attachedPhotos.find((x) => x.role === 'vehicle' || x.role === 'moment')
+        : !cur.heroPhoto && isVehicleLike
+          ? attachedPhotos.find((x) => x.storagePath === ph.storagePath)
+          : cur.heroPhoto;
       return {
         attachedPhotos,
+        heroPhoto,
         reference: creative ? { image: creative, intent: cur.reference?.intent ?? 'recreate', changes: cur.reference?.changes } : undefined,
       };
     });
@@ -90,7 +101,7 @@ export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, 
           ))}
           {!readOnly && (
             <ImageUpload label="Reference image" kind="car-model" buttonText="Attach images"
-              onUploaded={(img) => set((cur) => ({ attachedPhotos: [...(cur.attachedPhotos ?? []), img] }))} />
+              onUploaded={(img) => set((cur) => ({ attachedPhotos: [...(cur.attachedPhotos ?? []), img], ...(cur.heroPhoto ? {} : { heroPhoto: img }) }))} />
           )}
         </div>
         <div className="ip-actions">
@@ -177,6 +188,7 @@ export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, 
               </Field>
             </div>
             {missing.length > 0 && <p className="hint ip-blocked">{missing.map((id) => engine.fields.find((f) => f.id === id)?.label ?? id).join(', ')} still to fill — the proof needs {missing.length === 1 ? 'it' : 'them'}.</p>}
+            {!hasPhoto && <p className="hint ip-blocked">Attach a photo above, or skip to the workspace and pick one from the library — the proof is built from a real photo, never an imagined one.</p>}
             <div className="ip-actions">
               {sizesIntent ? (
                 <button type="button" className="btn primary" disabled={!canProve || !p.formats.length} onClick={() => void onAllSizes()}>

@@ -22,6 +22,7 @@ import {
   layoutDesigned,
   PROOF_FORMAT,
   sameDesignWords,
+  showIntake,
   swapPicture,
   wordsBand,
   logoLayout,
@@ -50,10 +51,11 @@ import {
 import { api, imageTabId, useApp } from '../state/appStore.js';
 import { isApiError, uploadRef } from '../lib/client.js';
 import { refUrl } from '../lib/api.js';
-import { drawCreativeDesign, drawCreativeScene, reviseCreativeDesign, writeCreativeCopy, type CopyRequest, type DesignRequest, type DesignResult } from '../lib/creatives.js';
+import { drawCreativeDesign, drawCreativeScene, reviseCreativeDesign, understandBrief, writeCreativeCopy, type CopyRequest, type DesignRequest, type DesignResult } from '../lib/creatives.js';
 import { Banner, Confirm, Field, ImageUpload, Lock, Section, useReadOnly } from '../components/ui.js';
 import { CreativeCanvas } from '../components/creative/CreativeCanvas.js';
 import { CreativeEditor, type EditorPicture } from '../components/creative/CreativeEditor.js';
+import { ImageIntake } from './ImageIntake.js';
 import { downloadBlob, exportCreative, fileNameOf } from '../components/creative/render.js';
 import { zipFiles } from '../components/creative/zip.js';
 
@@ -213,6 +215,10 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   /** The size open in the editor, with the document as it was when it opened. */
   const [editing, setEditing] = useState<{ format: CreativeFormatId; doc: CreativeDoc } | null>(null);
   const [downloading, setDownloading] = useState(false);
+  /** Whether the one-shot understand call is in flight. */
+  const [understanding, setUnderstanding] = useState(false);
+  /** 'auto' shows the intake or the workspace, whichever the project calls for; 'work' pins the workspace. */
+  const [view, setView] = useState<'auto' | 'work'>('auto');
 
   // The record as stored arrives after the list loads; later, the server's totals come with it.
   useEffect(() => {
@@ -333,7 +339,65 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     );
   }
 
+  /** True once the only design made is the proof itself — the fan-out still belongs on the intake. */
+  const proofOnly = Object.keys(p.designs ?? {}).every((f) => f === PROOF_FORMAT) && !p.creatives.length && !Object.keys(p.pictures ?? {}).length;
+  const intakeOpen = view === 'auto' && (showIntake(p) || proofOnly);
+
   /* ---- actions ---- */
+
+  /** One cheap call reads the brief and the images; its answer fills only what a human has not. */
+  const understand = async (): Promise<void> => {
+    setUnderstanding(true);
+    setError('');
+    const imgs = (p.attachedPhotos ?? []).slice(0, 4).map((x) => ({ storagePath: x.storagePath, ...(x.label ? { label: x.label } : {}) }));
+    const r = await understandBrief(p.id, {
+      brief: p.prompt,
+      ...(client ? { client: { name: client.displayName || client.name, ...(client.brand ? { brand: client.brand } : {}) } } : {}),
+      vehicles: vehicleChoices.map((c) => ({ id: c.id, name: `${c.brand} ${c.model}` })),
+      languages: languageChoices.map((l) => ({ id: l.id, name: l.name })),
+      images: imgs.map((x) => ({ ...(x.label ? { label: x.label } : {}) })),
+    }, imgs);
+    setUnderstanding(false);
+    if (isApiError(r)) {
+      // The model could not be reached: the keyword classifier stands in, marked so.
+      const read = classifyCreative(p.prompt);
+      const found = occasionIn(p.prompt);
+      set((cur) => ({
+        ...(read && !cur.engine?.manual ? { engine: { primary: read.primary, secondary: read.secondary, ratio: read.ratio } } : {}),
+        ...(found && !cur.facts.occasion ? { facts: { ...cur.facts, occasion: found } } : {}),
+        intake: { at: Date.now(), heard: read?.heard ?? [], confidence: 'low', fallback: true },
+      }));
+      setError(r.message);
+      return;
+    }
+    const it = r.interpretation;
+    set((cur) => {
+      const facts = { ...cur.facts };
+      for (const [k, v] of Object.entries(it.facts)) if (!(facts[k] ?? '').trim()) facts[k] = v; // never over a human
+      const attached = (cur.attachedPhotos ?? []).map((ph, i) => {
+        const role = it.images.find((im) => im.index === i)?.role;
+        return role ? { ...ph, role } : ph;
+      });
+      const creativeRef = attached.find((ph) => ph.role === 'creative');
+      const hero = cur.heroPhoto ?? attached.find((ph) => ph.role === 'vehicle' || ph.role === 'moment');
+      return {
+        ...(cur.engine?.manual ? {} : { engine: { primary: it.engine.primary, secondary: it.engine.secondary, ratio: it.engine.ratio } }),
+        facts: it.occasion && !(facts.occasion ?? '').trim() ? { ...facts, occasion: it.occasion } : facts,
+        ...(it.carId && !cur.carId ? { carId: it.carId } : {}),
+        ...(it.colour && !cur.carColour ? { carColour: it.colour } : {}),
+        ...(it.languageId && !cur.languageId ? { languageId: it.languageId } : {}),
+        ...(it.sizes?.length ? { formats: CREATIVE_FORMATS.map((f) => f.id).filter((id) => it.sizes!.includes(id)) } : {}),
+        ...(it.sceneNote && !cur.sceneNote ? { sceneNote: it.sceneNote } : {}),
+        ...(it.copy && !cur.copy ? { copy: it.copy } : {}),
+        attachedPhotos: attached,
+        ...(hero && !cur.heroPhoto ? { heroPhoto: hero } : {}),
+        ...(creativeRef
+          ? { reference: { image: creativeRef, intent: it.referenceIntent ?? 'recreate', ...(it.changes ? { changes: it.changes } : {}) } }
+          : {}),
+        intake: { at: Date.now(), heard: it.heard, confidence: it.confidence, model: r.model },
+      };
+    });
+  };
 
   const setPrompt = (prompt: string): void => {
     set((cur) => {
@@ -585,9 +649,9 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   };
 
   /** One change to a size Nano Banana 2 designed, everything else kept. */
-  const reviseDesign = async (format: CreativeFormatId): Promise<void> => {
+  const reviseDesign = async (format: CreativeFormatId, changeText?: string): Promise<void> => {
     const d = p.designs?.[format];
-    const change = changes[format]?.trim();
+    const change = (changeText ?? changes[format])?.trim();
     if (!d || !change) return;
     setDesignState((s) => ({ ...s, [format]: 'working' }));
     setError('');
@@ -734,6 +798,22 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const canDesign = busy === '' && !blockedBy;
   const fieldsShown = [...engine.fields, ...(second?.fields ?? []).filter((f) => !engine.fields.some((g) => g.id === f.id))];
   const missing = engine.mandatory.filter((id) => !(p.facts[id] ?? '').trim());
+
+  if (intakeOpen) {
+    return (
+      <ImageIntake
+        p={p} set={set} clients={clients} vehicleChoices={vehicleChoices} languageChoices={languageChoices}
+        canCreate={canCreate} readOnly={readOnly} busy={busy} error={error} clearError={() => setError('')}
+        understanding={understanding} onUnderstand={understand} onProof={makeProof}
+        onAllSizes={async () => { await makeAllSizes(); setView('work'); }}
+        onRevise={(change) => reviseDesign(PROOF_FORMAT, change)}
+        onSkip={() => setView('work')}
+        proofState={designState[PROOF_FORMAT]} proof={p.designs?.[PROOF_FORMAT]}
+        allCost={`about ₹${p.formats.filter((f) => !madeFor(f)).length * 10}`}
+        sizesTodo={p.formats.filter((f) => !madeFor(f)).length}
+      />
+    );
+  }
 
   return (
     <div className="editor-page ip-page">

@@ -3253,3 +3253,16 @@ fieldset.lock.inline { display: contents; }
 .ip-creative-canvas canvas { max-width: 100%; height: auto !important; }
 .ip-creative-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ip-creative .ip-actions { justify-content: center; margin: 0; }
+
+/* ---- the intake ---- */
+.intake { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.intake-head { display: flex; align-items: baseline; justify-content: space-between; }
+.intake-photos { display: flex; flex-wrap: wrap; gap: 10px; }
+.intake-photo { width: 132px; display: flex; flex-direction: column; gap: 4px; }
+.intake-photo img { width: 100%; height: 96px; object-fit: cover; border-radius: 8px; }
+.intake-plan { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--line); padding-top: 14px; }
+.intake-sizes { display: flex; flex-wrap: wrap; gap: 6px; }
+.intake-proof { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 14px; align-items: start; }
+.intake-proof img { width: 100%; border-radius: 10px; }
+.intake-proof-side { display: flex; flex-direction: column; gap: 10px; }
+@media (max-width: 760px) { .intake-proof { grid-template-columns: 1fr; } }

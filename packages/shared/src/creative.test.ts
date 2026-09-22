@@ -93,31 +93,25 @@ test('rupees are always written the Indian way', () => {
   assert.equal(formatRupees('₹1.5 cr'), '₹1.5 Crore');
 });
 
-const CLIENT = { name: 'Garve Hyundai', brand: 'Hyundai', city: 'Pune', address: 'Baner Road', phone: '+91 97643 79764', website: 'garvehyundai.com' };
-
-test('the copy keeps the universal rules whatever was written', () => {
+test('the copy keeps the universal rules whatever was written, and is only what goes on the picture', () => {
   const raw: CreativeCopy = {
     ...emptyCopy(),
     headline: 'Navratri on the Creta',
     badge: 'Benefits up to Rs 50000',
     points: ['Exchange bonus ₹ 20000', 'Free 3-year service'],
     cta: 'Book a test drive',
-    caption: 'This Navratri, bring home the Creta.',
-    hashtags: ['navratri', '#Creta', '#creta', 'Festive Offers'],
   };
-  const c = tidyCopy(raw, { client: CLIENT, model: 'Creta', validity: '31 October' });
+  const c = tidyCopy(raw, { validity: '31 October' });
   assert.equal(c.badge, 'Benefits up to ₹50,000*', 'formatted and asterisked');
   assert.equal(c.points[0], 'Exchange bonus ₹20,000*');
   assert.equal(c.points[1], 'Free 3-year service', 'not a price claim');
   assert.equal(c.headline, 'Navratri on the Creta');
   assert.match(c.terms, /^\*T&C apply\. Offer valid till 31 October\./, 'an asterisk is answered');
-  assert.match(c.caption, /📍 Garve Hyundai \| Baner Road, Pune\n📞 \+91 97643 79764\n🌐 garvehyundai\.com$/, 'the contact block ends the caption');
-  assert.deepEqual(c.hashtags.slice(0, 5), ['#Hyundai', '#HyundaiIndia', '#Creta', '#GarveHyundai', '#Pune'], 'brand, model and dealer tiers first');
-  assert.equal(c.hashtags.filter((h) => h.toLowerCase() === '#creta').length, 1, 'no repeats');
-  assert.ok(c.hashtags.includes('#FestiveOffers'));
-  const again = tidyCopy(c, { client: CLIENT, model: 'Creta', validity: '31 October' });
-  assert.equal(again.caption, c.caption, 'the contact block is not added twice');
-  assert.equal(again.badge, c.badge, 'nor the asterisk');
+  // A post's caption, its hashtags and its search line are another tool's, and not written here.
+  assert.deepEqual(Object.keys(emptyCopy()).sort(), ['alternatives', 'badge', 'cta', 'headline', 'kicker', 'points', 'sub', 'terms']);
+  const again = tidyCopy(c, { validity: '31 October' });
+  assert.equal(again.badge, c.badge, 'the asterisk is not doubled');
+  assert.equal(again.terms, c.terms);
 });
 
 test('a creative’s colours come from a look, the manufacturer or the occasion — always readable', () => {

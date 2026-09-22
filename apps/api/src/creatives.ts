@@ -2,6 +2,9 @@
  * Project Image on the server: the words of a creative from the Google text model, and its
  * picture from the image model — with the real car, from the library's own photographs.
  *
+ * The words here are the ones set on the picture, and nothing else: a post's caption, its
+ * hashtags and its search line belong to the tool that posts it.
+ *
  * Two ways to a creative. Nano Banana 2 can design the whole of it — the car, the scene and the
  * words set into it — with the words read back and checked against the copy, and the logos and
  * dealer panel laid over it by the browser. Or it draws a scene with no writing at all, and the
@@ -15,7 +18,6 @@ import {
   DEFAULT_USD_TO_INR,
   isAdFormat,
   pictureTrim,
-  contactBlock,
   emptyCopy,
   isCreativeEngine,
   tidyCopy,
@@ -70,19 +72,17 @@ export function copyPrompt(req: CopyRequest): string {
   const second = req.engine.secondary ? CREATIVE_ENGINE_BY_ID[req.engine.secondary] : undefined;
   const limits = req.language.script === 'indic' ? COPY_LIMITS_NATIVE : COPY_LIMITS;
   const who = req.client.kind === 'oem' ? `${req.client.name}, the manufacturer` : `${req.client.name}, a ${req.client.brand ?? ''} dealership${req.client.city ? ` in ${req.client.city}` : ''}`.replace(/  +/g, ' ');
-  const block = contactBlock(req.client);
   const lang = req.language.hinglish
     ? 'Hinglish: everyday Hindi written in the Latin alphabet, mixed naturally with English, the way Indian dealers write on Instagram. Numbers, ₹ amounts and model names as they are.'
     : req.language.script === 'indic'
       ? `${req.language.name}, in its own script. Model names, brand names and ₹ amounts stay in Latin letters and digits.${req.language.guide ? ` ${req.language.guide}` : ''}`
       : 'English — Indian English, warm and clear.';
   const lines: string[] = [
-    `You write social media creatives for ${who}. A creative is a picture with a few words set on it, and the post's caption.`,
+    `You write social media creatives for ${who}. A creative is a picture with a few words set on it — those words and nothing else: no caption, no hashtags, nothing that is said around the picture when it is posted.`,
     '',
     `## The kind of post: ${e.label}${second ? ` blended with ${second.label} at ${req.engine.ratio ?? '60/40'} — the first leads` : ''}`,
     `Purpose: ${e.purpose}`,
     `On the picture: ${e.onImage}`,
-    `The caption's beats: ${e.caption.join(' → ')}.`,
     `Avoid: ${e.avoid.join('; ')}.`,
   ];
   if (second) {
@@ -107,21 +107,20 @@ export function copyPrompt(req: CopyRequest): string {
   lines.push(
     '',
     '## Language',
-    `Write the words on the picture and the caption in ${lang}`,
+    `Write the words on the picture in ${lang}`,
     '',
     '## Rules — every one of them',
     `- On the picture, words are few and exact. Headline at most ${limits.headline} characters; kicker (a small line above it) at most ${limits.kicker}; second line at most ${limits.sub}; badge at most ${limits.badge}; each point at most ${limits.point}; call to action at most ${limits.cta}.`,
-    '- No emoji on the picture. In the caption, emoji are punctuation, not decoration.',
+    '- No emoji: these words are set on a picture, not typed into a post.',
     '- Rupees always as ₹2,15,000 — never Rs., INR or 2.15L on the picture. Use "up to ₹X", never "₹X off", and never a percentage discount.',
     '- Every price, EMI, benefit or discount claim ends with an asterisk (*), and then `terms` holds the T&C line.',
     '- No unsubstantiated superlatives ("best", "#1", "unbeatable") unless the brief gives the proof.',
     '- Use only facts from the brief, the facts and the vehicle above. Never invent a price, a date, a number or a feature.',
-    `- The caption ends with exactly this contact block, on its own lines:\n${block}`,
-    '- 10 to 15 hashtags in three tiers: the brand and the brand in India; the model and the dealership; then the place, the occasion and the feeling. No spaces inside a hashtag.',
+    "- The dealership's name, address and phone are set by the app on the creative itself. Never write them into any of these lines.",
     '- Two alternative headlines, each a different angle.',
     '',
     '## Return JSON only, exactly this shape',
-    '{"headline": "", "alternatives": ["", ""], "kicker": "", "sub": "", "badge": "", "points": [""], "cta": "", "terms": "", "caption": "", "hashtags": ["#"]}',
+    '{"headline": "", "alternatives": ["", ""], "kicker": "", "sub": "", "badge": "", "points": [""], "cta": "", "terms": ""}',
     'Leave "badge" empty unless there is an offer, a price or a number worth a badge; leave "points" empty unless the post is a list of offers, features or inclusions.',
   );
   return lines.join('\n');
@@ -150,8 +149,6 @@ export function parseCopy(text: string): CreativeCopy {
     points: strs(raw.points),
     cta: str(raw.cta).trim(),
     terms: str(raw.terms).trim(),
-    caption: str(raw.caption).trim(),
-    hashtags: strs(raw.hashtags),
   };
   if (!copy.headline) throw new CreativeError('copy-empty', 'The copy came back without a headline. Try again.');
   return copy;
@@ -176,12 +173,7 @@ export async function writeCreativeCopy(req: CopyRequest, apiKey: string): Promi
   if (!res.ok) throw new CreativeError(json.error?.status ?? 'copy-failed', json.error?.message ?? `The text model returned ${res.status}.`);
   recordUsage('Creative copy', model, json.usageMetadata);
   const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
-  const copy = tidyCopy(parseCopy(text), {
-    client: req.client,
-    model: req.vehicle?.model,
-    validity: req.validity,
-    native: req.language.script === 'indic',
-  });
+  const copy = tidyCopy(parseCopy(text), { validity: req.validity, native: req.language.script === 'indic' });
   return { copy, model, costInr: inr(model, json.usageMetadata) };
 }
 

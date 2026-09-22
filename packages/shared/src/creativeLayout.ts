@@ -178,8 +178,8 @@ function basics(input: LayoutInput, fr: Frame, scrim: 'top' | 'left' | 'full' | 
   const text = input.script === 'indic' ? 'mukta' : 'poppins';
   const script = input.script ?? 'latin';
 
-  // The dealer panel at the foot: full block, a compact line, or nothing (the contact is in the
-  // caption). A thumbnail is too small for a full block, so it takes the line. On a square,
+  // The dealer panel at the foot: full block, a compact line, or nothing (the contact goes in
+  // the post itself). A thumbnail is too small for a full block, so it takes the line. On a square,
   // portrait or story, a full panel also carries the call to action and the small print, so
   // neither lands on the vehicle; a wide size keeps them in its column, clear of the vehicle.
   const panelStyle = panelStyleOn(input);

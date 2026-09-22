@@ -67,17 +67,13 @@ const designsWhole = (format: CreativeFormatId): boolean => CREATIVE_FORMAT_BY_I
 
 function copyClientOf(c: ClientProfile | undefined): CopyClient & { segment?: string; styleNote?: string } {
   if (!c) return { name: '' };
+  // Who the words are for. The address and the phone are the dealer panel's, set by the app.
   return {
     name: c.displayName || c.name,
     kind: c.kind === 'oem' ? 'oem' : 'dealer',
     brand: c.brand,
     city: c.city,
-    address: c.address,
-    phone: c.phone,
-    website: c.website,
     tagline: c.tagline,
-    footerText: c.footerText,
-    instagram: c.social?.instagram,
     segment: c.segment,
     styleNote: c.styleNote,
   };
@@ -216,7 +212,6 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   /** The size open in the editor, with the document as it was when it opened. */
   const [editing, setEditing] = useState<{ format: CreativeFormatId; doc: CreativeDoc } | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   // The record as stored arrives after the list loads; later, the server's totals come with it.
   useEffect(() => {
@@ -278,7 +273,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const copy = useMemo(() => {
     if (!p) return emptyCopy();
     if (p.copy) return p.copy;
-    return tidyCopy(draftCopy(p, client, car), { client: copyClientOf(client), model: car?.model, validity: p.facts.validity, native: language.script === 'indic' });
+    return tidyCopy(draftCopy(p, client, car), { validity: p.facts.validity, native: language.script === 'indic' });
   }, [p, client, car, language.script]);
 
   /**
@@ -655,32 +650,18 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     return `${p.name}-${f.label}-${f.width}x${f.height}`;
   };
 
-  /** The post's words for the platform: the caption, its hashtags and the search line. */
-  const captionText = [copy.caption, copy.hashtags.join(' '), copy.seo].filter((s) => s.trim()).join('\n\n');
   const downloadAll = async (): Promise<void> => {
     setDownloading(true);
     try {
       const files = await Promise.all(
         creatives.map(async (c) => ({ name: fileNameOf(sizeName(c.format), 'png'), blob: await exportCreative(c.doc, 'image/png') })),
       );
-      // The caption travels with the pictures, ready to paste.
-      if (captionText) files.push({ name: 'caption.txt', blob: new Blob([captionText], { type: 'text/plain' }) });
       downloadBlob(await zipFiles(files), fileNameOf(p.name || 'creatives', 'zip'));
     } catch (e) {
       setError((e as Error).message);
     }
     setDownloading(false);
   };
-  const copyCaption = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(captionText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setError('The caption could not be copied — select it and copy it by hand.');
-    }
-  };
-
   /* ---- the editor ---- */
 
   const editorLibrary: EditorPicture[] = [
@@ -1035,7 +1016,13 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
               {!client?.logo && !client?.brandLogo && client && <p className="hint">This client has no logos yet — add them in Clients and they appear here.</p>}
             </Section>
 
-            <Section num="04" title="Copy" defaultOpen step={p.copy ? 'Written' : 'Draft from the facts'} note="Rupees, asterisks, the T&C line and the contact block are kept to the rules after writing.">
+            <Section
+              num="04"
+              title="The words"
+              defaultOpen
+              step={p.copy ? 'Written' : 'Draft from the facts'}
+              note="The words set on the creative, and only those. Rupees, asterisks and the T&C line are kept to the rules after writing; the dealership's name and contact are the panel's, and the post's own caption belongs to the tool that posts it."
+            >
               <div className="ip-actions">
                 <button type="button" className="btn primary small" disabled={!canCreate || busy !== '' || !client} onClick={() => void writeCopy()}>
                   {busy === 'copy' ? 'Writing…' : p.copy ? 'Write it again' : 'Write the copy'}
@@ -1077,12 +1064,6 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                   <input value={copy.terms} onChange={(e) => setCopy({ terms: e.target.value })} />
                 </Field>
               </div>
-              <Field label="Caption">
-                <textarea rows={6} value={copy.caption} onChange={(e) => setCopy({ caption: e.target.value })} placeholder="Written with the copy." />
-              </Field>
-              <Field label="Hashtags">
-                <textarea rows={2} value={copy.hashtags.join(' ')} onChange={(e) => setCopy({ hashtags: e.target.value.split(/\s+/).filter(Boolean) })} />
-              </Field>
             </Section>
 
             <Section
@@ -1300,9 +1281,6 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                 <h3>Creatives</h3>
               </div>
               <div className="ip-actions">
-                <button type="button" className="btn small ghost" onClick={() => void copyCaption()} disabled={!copy.caption.trim()}>
-                  {copied ? 'Copied' : 'Copy caption'}
-                </button>
                 <button type="button" className="btn small" disabled={downloading || !creatives.length} onClick={() => void downloadAll()}>
                   {downloading ? 'Packing…' : 'Download all'}
                 </button>

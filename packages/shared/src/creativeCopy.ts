@@ -1,9 +1,12 @@
 /**
  * The words of a creative, and the rules they keep whatever the model wrote.
  *
- * The orchestrator's universal rules are applied after writing, not only asked for: ₹ amounts
- * are formatted the Indian way, a price claim carries an asterisk and the picture a T&C line,
- * the caption ends in the client's own contact block, and the hashtag set has its three tiers.
+ * These are the words set on the picture, and nothing else. The orchestrator's universal rules
+ * are applied after writing, not only asked for: ₹ amounts are formatted the Indian way, and a
+ * price claim carries an asterisk with a T&C line to answer it.
+ *
+ * A post's caption, its hashtags and its search line are not written here. This tool makes the
+ * picture; what is said around it when it is posted belongs to the tool that posts it.
  */
 import { overlayTheme, type OverlayTheme } from './overlayLook.js';
 
@@ -23,11 +26,6 @@ export interface CreativeCopy {
   cta: string;
   /** The small print. Filled when any claim carries an asterisk. */
   terms: string;
-  /** The post's caption, contact block included. */
-  caption: string;
-  hashtags: string[];
-  /** Instagram search keywords after the hashtags, "(…)" or "[…]", when the client uses them. */
-  seo: string;
 }
 
 export const emptyCopy = (): CreativeCopy => ({
@@ -39,9 +37,6 @@ export const emptyCopy = (): CreativeCopy => ({
   points: [],
   cta: '',
   terms: '',
-  caption: '',
-  hashtags: [],
-  seo: '',
 });
 
 /** How long each line may run on the picture, in characters, before the layout would have to shrink it too far. */
@@ -84,71 +79,21 @@ export const withAsterisk = (line: string): string => (!line.trim() || /\*\s*$/.
 
 /* ---- the contact block ---- */
 
+/** Who the words are written for. The contact itself is the dealer panel's, not the writer's. */
 export interface CopyClient {
   name: string;
   kind?: 'dealer' | 'oem';
   brand?: string;
   city?: string;
-  address?: string;
-  phone?: string;
-  website?: string;
   tagline?: string;
-  /** The client's own contact strip, when set. */
-  footerText?: string;
-  instagram?: string;
-}
-
-/** The contact block a caption ends with, in one fixed format per client. */
-export function contactBlock(c: CopyClient): string {
-  if (c.kind === 'oem') {
-    return [c.name, c.website ? `🌐 ${c.website}` : '', c.instagram ? `📷 ${c.instagram}` : ''].filter(Boolean).join('\n');
-  }
-  const where = [c.address?.trim(), c.city?.trim() && !c.address?.includes(c.city) ? c.city.trim() : ''].filter(Boolean).join(', ');
-  return [
-    `📍 ${c.name}${where ? ` | ${where}` : ''}`,
-    c.phone ? `📞 ${c.phone}` : '',
-    c.website ? `🌐 ${c.website}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
-/* ---- hashtags ---- */
-
-const tag = (s: string): string => `#${s.replace(/[^\p{L}\p{N}]+/gu, '')}`;
-/** The three tiers: brand, then model and dealer, then place and moment. */
-export function baseHashtags(c: CopyClient, model?: string): string[] {
-  const brand = (c.brand ?? '').trim();
-  return [
-    brand ? tag(brand) : '',
-    brand ? tag(`${brand}India`) : '',
-    model ? tag(model) : '',
-    c.kind !== 'oem' && c.name ? tag(c.name) : '',
-    c.city ? tag(c.city) : '',
-  ].filter((t) => t.length > 1);
-}
-/** A clean set: #-prefixed, no spaces, no repeats (case-blind), the tier-1 and tier-2 tags first, at most `max`. */
-export function tidyHashtags(tags: string[], must: string[], range: [number, number] = [8, 15]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of [...must, ...tags]) {
-    const t = tag(raw.startsWith('#') ? raw.slice(1) : raw);
-    if (t.length < 2 || seen.has(t.toLowerCase())) continue;
-    seen.add(t.toLowerCase());
-    out.push(t);
-  }
-  return out.slice(0, range[1]);
 }
 
 /* ---- the whole copy ---- */
 
 export interface TidyContext {
-  client: CopyClient;
-  model?: string;
   /** Offer validity, for the T&C line. */
   validity?: string;
   native?: boolean;
-  hashtagRange?: [number, number];
 }
 
 const clip = (s: string, n: number): string => {
@@ -160,8 +105,7 @@ const clip = (s: string, n: number): string => {
 
 /**
  * The copy as it goes on the picture: rupees formatted, price claims asterisked with a T&C
- * line to answer them, each line inside its limit, the caption ending in the contact block,
- * and the hashtags in three tiers.
+ * line to answer them, and each line inside its limit.
  */
 export function tidyCopy(copy: CreativeCopy, ctx: TidyContext): CreativeCopy {
   const L = ctx.native ? COPY_LIMITS_NATIVE : COPY_LIMITS;
@@ -179,12 +123,6 @@ export function tidyCopy(copy: CreativeCopy, ctx: TidyContext): CreativeCopy {
       : asterisked
         ? `*T&C apply.${ctx.validity ? ` Offer valid till ${ctx.validity}.` : ''} Benefits vary by variant and location.`
         : '';
-  const block = contactBlock(ctx.client);
-  let caption = money(copy.caption ?? '').trim();
-  const firstLine = block.split('\n')[0]!.replace(/^📍\s*/, '');
-  if (block && !caption.includes(firstLine) && !(ctx.client.phone && caption.includes(ctx.client.phone))) {
-    caption = `${caption}\n\n${block}`.trim();
-  }
   return {
     headline,
     alternatives,
@@ -194,9 +132,6 @@ export function tidyCopy(copy: CreativeCopy, ctx: TidyContext): CreativeCopy {
     points,
     cta: clip(copy.cta ?? '', L.cta),
     terms,
-    caption,
-    hashtags: tidyHashtags(copy.hashtags ?? [], baseHashtags(ctx.client, ctx.model), ctx.hashtagRange),
-    seo: (copy.seo ?? '').trim(),
   };
 }
 

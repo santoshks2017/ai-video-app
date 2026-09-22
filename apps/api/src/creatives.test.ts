@@ -10,7 +10,7 @@ const REQ: CopyRequest = {
     { label: 'Offers', value: 'Benefits up to ₹50,000\nExchange bonus ₹20,000' },
     { label: 'Valid till', value: '' },
   ],
-  client: { name: 'Garve Hyundai', brand: 'Hyundai', city: 'Pune', phone: '+91 97643 79764', address: 'Baner Road' },
+  client: { name: 'Garve Hyundai', brand: 'Hyundai', city: 'Pune' },
   vehicle: { model: 'Creta', brand: 'Hyundai', highlights: ['Panoramic sunroof', 'Level 2 ADAS'] },
   language: { name: 'English', script: 'latin' },
   voiceNote: 'Always say "Drive the difference". Never say "cheap".',
@@ -23,7 +23,11 @@ test('the copy is asked for as the engine, the client and the facts say, under t
   assert.doesNotMatch(p, /Valid till:/, 'an empty fact is left out');
   assert.match(p, /never "₹X off", and never a percentage discount/);
   assert.match(p, /ends with an asterisk/);
-  assert.match(p, /📍 Garve Hyundai \| Baner Road, Pune\n📞 \+91 97643 79764/, 'the contact block, verbatim');
+  // The words asked for are the ones set on the picture: the post around it is another tool's.
+  assert.doesNotMatch(p, /The caption's beats|hashtags in three tiers|contact block/, 'none of the post’s own words are asked for');
+  assert.match(p, /no caption, no hashtags, nothing that is said around the picture when it is posted/);
+  assert.match(p, /"headline": "", "alternatives": \["", ""\], "kicker": "", "sub": "", "badge": "", "points": \[""\], "cta": "", "terms": ""\}/, 'and none in the shape it answers in');
+  assert.match(p, /name, address and phone are set by the app on the creative itself/);
   assert.match(p, /Drive the difference/, 'the client’s own voice');
   assert.match(p, /Panoramic sunroof; Level 2 ADAS/);
   assert.match(p, /Never invent a price, a date, a number or a feature/);
@@ -34,11 +38,12 @@ test('the copy is asked for as the engine, the client and the facts say, under t
 });
 
 test('copy is read out of whatever comes back, and a copy with no headline is refused', () => {
-  const c = parseCopy('Here it is:\n```json\n{"headline":"Navratri on the Creta","alternatives":["A","B"],"points":["x", 2],"hashtags":["#Creta"]}\n```');
+  const c = parseCopy('Here it is:\n```json\n{"headline":"Navratri on the Creta","alternatives":["A","B"],"points":["x", 2],"caption":"ignored"}\n```');
   assert.equal(c.headline, 'Navratri on the Creta');
   assert.deepEqual(c.alternatives, ['A', 'B']);
   assert.deepEqual(c.points, ['x', '2']);
   assert.equal(c.cta, '');
+  assert.ok(!('caption' in c), 'a caption that comes back anyway is dropped');
   assert.throws(() => parseCopy('{"headline": ""}'), /without a headline/);
   assert.throws(() => parseCopy('no json at all'), /cannot be read/);
 });

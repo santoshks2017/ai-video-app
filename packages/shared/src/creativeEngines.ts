@@ -44,9 +44,8 @@ export interface CreativeEngine {
   fields: CreativeField[];
   /** Fields a post of this kind cannot go without. */
   mandatory: string[];
-  /** How the words run, for the copy writer: what the picture says, then the caption's beats. */
+  /** How the words run, for the copy writer: what the picture says. */
   onImage: string;
-  caption: string[];
   avoid: string[];
   template: CreativeTemplateId;
   /** The scene the picture is set in when nothing else is said. */
@@ -99,7 +98,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: [],
     onImage: 'A congratulation with the customer\'s name, the model, and a welcome into the dealership family. No price, ever.',
-    caption: ['Congratulation + customer name + model', 'The family moment', 'Why it was a brilliant choice', 'Thanks for the journey from showroom to keys', 'The drives ahead', 'Welcome to the family + contact block'],
     avoid: ['price mentions', 'competitor references', 'stock phrases with no emotion'],
     template: 'delivery',
     scene: 'the car at the dealership delivery bay, decorated with a tasteful ribbon, warm light, a celebration mood',
@@ -122,7 +120,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['occasion'],
     onImage: 'A sincere greeting for the occasion, specific to it; the car is present but the wish leads. Any offer is a gift, never the headline.',
-    caption: ['Occasion greeting, specific and sincere', 'What the occasion means (not what the car means)', 'A light tie to the dealership', 'Warm closing wish', 'Minimal contact block'],
     avoid: ['leading with price', 'generic "season\'s greetings"', 'hard selling'],
     template: 'festival',
     scene: 'a festive setting for the occasion — decorations, lights and colours true to it — around the car',
@@ -140,7 +137,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['offers'],
     onImage: 'The benefit as a big, exact ₹ figure ("Benefits up to ₹X*"), the model, one urgency line, one call to action. Always "up to ₹X", never "₹X off"; no percentages.',
-    caption: ['Attention hook — a question or the value', 'Offer mechanics with exact numbers', 'Why this model at this offer', 'Urgency signal', 'Call to action + contact block'],
     avoid: ['percentage discounts', 'vague "great offer"', 'false scarcity'],
     template: 'offer',
     scene: 'the car on a bright, premium showroom floor or a clean city street, confident and aspirational',
@@ -157,7 +153,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['features'],
     onImage: 'A desire headline (the feeling, not the spec), then two to four features each written as the benefit to the owner.',
-    caption: ['Desire hook — the situation, not the spec', 'Two or three features as benefits', 'Who the car is for', 'Call to action + contact', 'Model-heavy hashtags'],
     avoid: ['raw spec lists', '"industry-first" without why', 'naming competitors'],
     template: 'feature',
     scene: 'the car in motion or parked where its strength shows — an open highway, a city at dusk, rough road for an SUV',
@@ -175,7 +170,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['highlight'],
     onImage: 'A future-forward headline, one concrete reassurance (range, charging or cost) with its number, and a line on what driving electric feels like.',
-    caption: ['Future-forward hook', 'One range or charging concern answered, or one key technology', 'What driving electric feels like', 'A credibility signal', 'Call to action + contact', 'EV hashtags'],
     avoid: ['eco-guilt', 'unverified range numbers'],
     template: 'hero',
     scene: 'the car in a clean, modern setting with a sense of the future — soft daylight, green surroundings or a sleek charging bay',
@@ -193,7 +187,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['phase'],
     onImage: 'A curiosity hook, one tantalising hint, the date or countdown, and the booking call.',
-    caption: ['Curiosity hook', 'One hint — design, tech or name', 'Date or countdown', 'Booking or notify call', 'Launch hashtags'],
     avoid: ['spoiling the reveal', 'unconfirmed prices'],
     template: 'launch',
     scene: 'a dramatic reveal — the car in a dark studio with a single beam of light, mysterious and premium',
@@ -210,7 +203,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: [],
     onImage: 'The feeling that makes someone want to try it, a no-obligation line, and how to book.',
-    caption: ['The feeling or question', 'What the drive is like — sensory', 'No-obligation framing', 'When, where, how to book', 'Contact + call to action'],
     avoid: ['pressure selling'],
     template: 'hero',
     scene: 'the car on an inviting open road in golden-hour light, as if waiting to be driven',
@@ -228,7 +220,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['campaign'],
     onImage: 'A relevance hook (the season or the mileage), what is included, a trust line (trained technicians, genuine parts), and booking.',
-    caption: ['Relevance hook', "What's included", 'Trust signal', 'Convenience — pick-up, express', 'Booking call + contact'],
     avoid: ['fear-mongering'],
     template: 'feature',
     scene: 'a clean, well-lit authorised service workshop, the car on a service bay',
@@ -247,7 +238,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['event'],
     onImage: 'The event name, date, time and venue, clearly, with an invitation.',
-    caption: ['What is happening', 'Why it matters to the community', 'Date, time, venue', 'Invitation + contact'],
     avoid: ['selling at a community event'],
     template: 'hero',
     scene: 'a lively, welcoming outdoor gathering with the car on display',
@@ -264,7 +254,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['quote'],
     onImage: "The customer's words, verbatim and short, their name, and the model.",
-    caption: ['Customer quote', 'Who they are, what they bought', 'The moment they loved', 'Thanks + welcome', 'Come see for yourself'],
     avoid: ['inventing quotes', 'editing the meaning'],
     template: 'hero',
     scene: 'the car in a warm, everyday family setting',
@@ -281,7 +270,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['milestone'],
     onImage: 'The number or award, large, with a line of thanks. Claims only as given — no "#1" without the citation.',
-    caption: ['The milestone', 'Thanks to customers and team', 'What it means', 'Contact'],
     avoid: ['unsubstantiated superlatives'],
     template: 'launch',
     scene: 'a celebratory, premium setting — soft spotlights and confetti-free elegance around the car',
@@ -299,7 +287,6 @@ export const CREATIVE_ENGINES: CreativeEngine[] = [
     ],
     mandatory: ['package'],
     onImage: 'What the package does in one or two benefits, why genuine / dealer-fitted matters, and the price if given.',
-    caption: ['Protection or before/after hook', 'One or two specific benefits', 'Why dealer-certified matters', 'Package price', 'Booking call + contact'],
     avoid: ['unbranded claims'],
     template: 'feature',
     scene: 'a detailing studio with a flawless mirror-like finish on the car under soft light',

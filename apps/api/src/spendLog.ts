@@ -27,6 +27,7 @@ export type UsageSection =
   | 'Vehicle checks'
   | 'Music'
   | 'Caption placement'
+  | 'Creative intake'
   | 'Creative copy'
   | 'Creative images'
   | 'Creative checks';

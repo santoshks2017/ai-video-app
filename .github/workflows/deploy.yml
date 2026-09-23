@@ -75,6 +75,13 @@ jobs:
             --set-secrets "GOOGLE_API_KEY=GOOGLE_API_KEY:${{ vars.GOOGLE_API_KEY_VERSION }}" \
             --set-env-vars "ALLOW_ORIGIN=https://${{ vars.FIREBASE_PROJECT_ID }}.web.app,OWNER_EMAILS=${{ vars.OWNER_EMAILS }}" \
             --quiet
+          # A preview deploy (--no-traffic --tag) pins live traffic to a fixed revision, and from
+          # then on a plain deploy leaves the pin alone — the new code sits at 0%. Live always
+          # follows the latest revision; the preview tag is untouched by --to-latest.
+          gcloud run services update-traffic ava-api \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --to-latest --quiet
           RUN_URL=$(gcloud run services describe ava-api \
             --project "${{ vars.GCP_PROJECT_ID }}" --region "${{ vars.GCP_REGION }}" \
             --format 'value(status.url)')

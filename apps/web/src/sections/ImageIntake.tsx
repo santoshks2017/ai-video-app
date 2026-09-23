@@ -219,9 +219,15 @@ export function ImageIntake({ p, set, clients, vehicleChoices, languageChoices, 
               <span className={`ip-check ${proof.checks.vehicle.checked ? (proof.checks.vehicle.same ? 'ok' : 'bad') : ''}`}>
                 {proof.checks.vehicle.checked ? (proof.checks.vehicle.same ? 'Same vehicle ✓' : 'Vehicle may differ') : 'Vehicle not checked'}
               </span>
-              <button type="button" className="btn primary" disabled={busy !== '' || proofState === 'working' || !sizesTodo} onClick={() => void onAllSizes()}>
-                {busy === 'design' ? 'Making…' : `Looks right — make all sizes · ${allCost}`}
-              </button>
+              {sizesTodo ? (
+                <button type="button" className="btn primary" disabled={busy !== '' || proofState === 'working'} onClick={() => void onAllSizes()}>
+                  {busy === 'design' ? 'Making…' : `Looks right — make all sizes · ${allCost}`}
+                </button>
+              ) : (
+                <button type="button" className="btn primary" onClick={onSkip}>
+                  Every size is made — to the workspace
+                </button>
+              )}
               <form className="ip-ask" onSubmit={(e) => { e.preventDefault(); if (change.trim()) { void onRevise(change.trim()); setChange(''); } }}>
                 <input value={change} onChange={(e) => setChange(e.target.value)} placeholder="Ask for a change — “make the headline gold”" maxLength={400} />
                 <button type="submit" className="btn small" disabled={!change.trim() || proofState === 'working' || busy !== ''}>Ask</button>

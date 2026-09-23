@@ -226,7 +226,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   /** Whether the one-shot understand call is in flight. */
   const [understanding, setUnderstanding] = useState(false);
   /** 'auto' shows the intake or the workspace, whichever the project calls for; 'work' pins the workspace. */
-  const [view, setView] = useState<'auto' | 'work'>('auto');
+  const [view, setView] = useState<'auto' | 'work' | 'intake'>('auto');
 
   // The record as stored arrives after the list loads; later, the server's totals come with it.
   useEffect(() => {
@@ -357,7 +357,8 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
    * only size is the square, opens on the workspace.
    */
   const intakeFits = showIntake(p) || (Boolean(p.intake) && proofOnly && missingDesigns.length > 0);
-  const intakeOpen = view === 'auto' && intakeFits;
+  // Opens on its own only while the intake has work left; a hand that asks for it is always obeyed.
+  const intakeOpen = view === 'intake' || (view === 'auto' && intakeFits);
 
   /* ---- actions ---- */
 
@@ -930,7 +931,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
           {second && <span className="chip on">{second.label}</span>}
           {p.intake.heard.length > 0 && <span className="hint">heard {p.intake.heard.map((h) => `"${h}"`).join(', ')}</span>}
           {p.intake.fallback && <span className="hint">read without the model</span>}
-          <button type="button" className="btn ghost small" onClick={() => setView('auto')} disabled={!intakeFits}>
+          <button type="button" className="btn ghost small" onClick={() => setView('intake')}>
             Back to the intake
           </button>
         </div>

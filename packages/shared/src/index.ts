@@ -42,4 +42,5 @@ export * from './creativeEngines.js';
 export * from './creativeCopy.js';
 export * from './creativeLayout.js';
 export * from './creativeDesign.js';
+export * from './creativeUnbake.js';
 export * from './imageProject.js';

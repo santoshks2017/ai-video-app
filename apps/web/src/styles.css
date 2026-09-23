@@ -3258,6 +3258,10 @@ fieldset.lock.inline { display: contents; }
 
 /* ---- the intake ---- */
 .intake { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+/* The pane clips on desktop (like the workspace columns), so the intake scrolls itself. */
+@media (min-width: 1081px) {
+  .editor-page.ip-page > .intake { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; }
+}
 .intake-head { display: flex; align-items: baseline; justify-content: space-between; }
 .intake-photos { display: flex; flex-wrap: wrap; gap: 10px; }
 .intake-photo { width: 132px; display: flex; flex-direction: column; gap: 4px; }

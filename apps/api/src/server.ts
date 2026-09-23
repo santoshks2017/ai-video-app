@@ -116,6 +116,8 @@ import {
   CreativeError,
   drawCreativeDesign,
   drawCreativeScene,
+  eraseCreativeDesign,
+  readCreativeBlocks,
   readCreativeWords,
   reviseCreativeDesign,
   writeCreativeCopy,
@@ -4520,6 +4522,38 @@ app.post<{ Body: { projectId?: string; design?: unknown; image?: { storagePath?:
     }
   },
 );
+
+/**
+ * A designed creative taken apart: Nano Banana 2 paints every word out and rebuilds the scene
+ * behind them, and the same design is read block by block — text, box, colour. The browser
+ * turns the two into a layered, editable creative.
+ */
+app.post<{ Body: { projectId?: string; format?: unknown; image?: { storagePath?: unknown } } }>('/api/creatives/unbake', async (req, reply) => {
+  const key = await googleKey();
+  if (!key) return reply.code(503).send({ code: 'script-no-key', message: 'Add a Google (Gemini) key in APIs & models first.' });
+  const format = req.body?.format;
+  const path = req.body?.image?.storagePath;
+  if (!isCreativeFormat(format) || typeof path !== 'string' || !STORED.test(path)) {
+    return reply.code(400).send({ code: 'bad-request', message: 'Pick the design to take apart first.' });
+  }
+  const current = await readObject(path).catch(() => null);
+  if (!current) return reply.code(404).send({ code: 'not-found', message: 'That creative is no longer stored. Make it again.' });
+  try {
+    const png = await sharp(current.bytes).png().toBuffer();
+    const [erased, read] = await Promise.all([
+      eraseCreativeDesign(format, { bytes: png, mimeType: 'image/png' }, key),
+      readCreativeBlocks(await asReadable(current.bytes), key),
+    ]);
+    const stored = await storeDesign(`clean-${format}`, erased);
+    const projectId = req.body?.projectId;
+    if (typeof projectId === 'string' && projectId) void addToTotals('imageProjects', projectId, erased.costInr + read.costInr).catch(() => {});
+    return { clean: stored.image, blocks: read.blocks, model: erased.model };
+  } catch (err) {
+    const e = err as CreativeError;
+    app.log.warn({ code: e.code, message: e.message }, 'creative unbake failed');
+    return reply.code(e.status && e.status >= 400 ? e.status : 502).send({ code: e.code ?? 'unbake-failed', message: e.message });
+  }
+});
 
 /**
  * Draw the storyboard's frames: one still per scene, from the same photographs

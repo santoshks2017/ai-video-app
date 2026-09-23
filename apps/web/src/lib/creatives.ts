@@ -9,6 +9,7 @@ import type {
   DesignedCreative,
   ImageRole,
   PictureAspect,
+  ReadBlock,
   ReferenceIntent,
   StoredImage,
 } from '@ava/shared';
@@ -106,3 +107,7 @@ export interface Interpretation {
 
 export const understandBrief = (projectId: string, request: UnderstandRequest, images: Array<{ storagePath: string; label?: string }>) =>
   post<{ interpretation: Interpretation; model: string }>('/api/creatives/understand', { projectId, request, images });
+
+/** A design taken apart on the server: the clean picture, and every block of words with its box. */
+export const unbakeCreativeDesign = (projectId: string, format: CreativeFormatId, image: { storagePath: string }) =>
+  post<{ clean: StoredImage; blocks: ReadBlock[]; model: string }>('/api/creatives/unbake', { projectId, format, image });

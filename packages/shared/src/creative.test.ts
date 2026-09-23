@@ -440,3 +440,55 @@ test('the CarDekho ad set: five banners at their own pixels, words never too sma
   assert.deepEqual(pictureTrim('cd-300x600').sides, 'left-right');
   assert.ok(Math.abs(pictureTrim('landscape').each - 0.035) < 0.002);
 });
+
+test('a design taken apart becomes layers: the clean picture under, each block in its role, the logos back on top', async () => {
+  const { unbakeDesign, roleOfBlock, applyCopyToCreative, emptyCopy } = await import('@ava/shared');
+  const words = {
+    kicker: 'Limited-period offer',
+    headline: 'Drive home the Creta',
+    sub: 'Offer valid till 31 October.',
+    badge: 'Benefits up to ₹50,000*',
+    points: [],
+    cta: 'Book a test drive',
+    terms: '*T&C apply',
+  };
+  const logos = [
+    { id: 'L1', kind: 'image', name: 'Dealer logo', role: 'dealer-logo', rotation: 0, opacity: 1, x: 10, y: 10, w: 100, h: 40, fit: 'contain', focusX: 0.5, focusY: 0.5, zoom: 1, src: '/api/refs/l/logo.png' },
+  ] as never[];
+  const doc = unbakeDesign({
+    format: 'ig-square',
+    words,
+    look: { panel: '#0F1E33', accent: '#E8590C' },
+    template: 'offer',
+    clean: { src: '/api/refs/c/clean.png', storagePath: 'refs/c/clean.png' },
+    blocks: [
+      { text: 'Drive home\nthe Creta', box: { x: 0.06, y: 0.1, w: 0.7, h: 0.2 }, color: '#FFFFFF', weight: 'bold', align: 'left', lines: 2 },
+      { text: 'Benefits up to ₹50,000*', box: { x: 0.06, y: 0.4, w: 0.4, h: 0.05 } },
+      { text: 'not among the words', box: { x: 0.5, y: 0.8, w: 0.3, h: 0.04 }, color: 'red' },
+    ],
+    logos,
+  });
+  const bg = doc.layers[0]!;
+  assert.equal(bg.role, 'background');
+  assert.equal((bg as { storagePath?: string }).storagePath, 'refs/c/clean.png');
+  const head = doc.layers.find((l) => l.role === 'headline');
+  assert.ok(head && head.kind === 'text', 'the headline block got its role');
+  assert.equal(head.x, Math.round(0.06 * 1080));
+  assert.equal(head.font, 'anton', 'the offer template’s headline face');
+  assert.equal(head.size, Math.round((0.2 * 1080) / 2 / 1.15), 'sized by its box and its lines');
+  const badge = doc.layers.find((l) => l.role === 'badge');
+  assert.ok(badge?.kind === 'text' && badge.pill, 'the badge keeps a pill');
+  assert.equal(badge.pill!.color, '#E8590C');
+  assert.equal(badge.color, '#FFFFFF');
+  const loose = doc.layers.find((l) => l.kind === 'text' && !l.role);
+  assert.ok(loose, 'an unmatched block still becomes an editable layer');
+  assert.equal(loose!.kind === 'text' && loose!.color, '#FFFFFF', 'a colour that is not #rrggbb falls back');
+  assert.equal(doc.layers[doc.layers.length - 1]!.role, 'dealer-logo', 'the logos land on top');
+  // Copy edits still reach the unbaked layers.
+  const edited = applyCopyToCreative(doc, { ...emptyCopy(), headline: 'New headline' });
+  assert.equal((edited.layers.find((l) => l.role === 'headline') as { text?: string }).text, 'New headline');
+  // The reading may split a block: a headline read in halves still finds its role.
+  assert.equal(roleOfBlock('Drive home', words), 'headline');
+  assert.equal(roleOfBlock('BOOK A TEST DRIVE', words), 'cta');
+  assert.equal(roleOfBlock('something else entirely', words), undefined);
+});

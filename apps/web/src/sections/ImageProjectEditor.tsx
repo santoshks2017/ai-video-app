@@ -24,6 +24,7 @@ import {
   sameDesignWords,
   showIntake,
   swapPicture,
+  unbakeDesign,
   wordsBand,
   logoLayout,
   occasionIn,
@@ -53,7 +54,7 @@ import {
 import { api, imageTabId, useApp } from '../state/appStore.js';
 import { isApiError, uploadRef } from '../lib/client.js';
 import { refUrl } from '../lib/api.js';
-import { drawCreativeDesign, drawCreativeScene, reviseCreativeDesign, understandBrief, writeCreativeCopy, type CopyRequest, type DesignRequest, type DesignResult } from '../lib/creatives.js';
+import { drawCreativeDesign, drawCreativeScene, reviseCreativeDesign, unbakeCreativeDesign, understandBrief, writeCreativeCopy, type CopyRequest, type DesignRequest, type DesignResult } from '../lib/creatives.js';
 import { Banner, Confirm, Field, ImageUpload, Lock, Section, useReadOnly } from '../components/ui.js';
 import { CreativeCanvas } from '../components/creative/CreativeCanvas.js';
 import { CreativeEditor, type EditorPicture } from '../components/creative/CreativeEditor.js';
@@ -217,6 +218,8 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
   const [designState, setDesignState] = useState<Partial<Record<CreativeFormatId, 'working' | 'failed'>>>({});
   /** A change being asked for, size by size. */
   const [changes, setChanges] = useState<Partial<Record<CreativeFormatId, string>>>({});
+  /** The size being taken apart into layers, if one is. */
+  const [unbaking, setUnbaking] = useState<CreativeFormatId | null>(null);
   /** The size open in the editor, with the document as it was when it opened. */
   const [editing, setEditing] = useState<{ format: CreativeFormatId; doc: CreativeDoc } | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -711,6 +714,42 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
     settle(format, false);
     setChanges((c) => ({ ...c, [format]: '' }));
     set((cur) => adoptDesign(cur, format, designed(r, d.skeleton, change)));
+    await refresh();
+  };
+
+  /**
+   * A designed size rebuilt as layers: the words painted out of the picture underneath, and
+   * every block laid back on top as its own editable layer — a close reconstruction, since the
+   * design's lettering becomes the app's nearest font.
+   */
+  const takeApart = async (format: CreativeFormatId): Promise<void> => {
+    const d = p.designs?.[format];
+    if (!d) return;
+    setUnbaking(format);
+    setError('');
+    const r = await unbakeCreativeDesign(p.id, format, { storagePath: d.image.storagePath });
+    if (isApiError(r)) {
+      setUnbaking(null);
+      return setError(r.message);
+    }
+    const logos = layoutDesigned(inputFor(format)).layers.filter((l) => l.role === 'dealer-logo' || l.role === 'brand-logo');
+    const doc = unbakeDesign({
+      format,
+      words: d.words,
+      look: { panel: look.panel, accent: look.accent },
+      template: p.templateId ?? engine.template,
+      clean: { src: refUrl(r.clean.storagePath), storagePath: r.clean.storagePath },
+      blocks: r.blocks,
+      logos,
+    });
+    try {
+      await saveCreative(format, doc);
+    } catch (e) {
+      setUnbaking(null);
+      return setError((e as Error).message);
+    }
+    setUnbaking(null);
+    setEditing({ format, doc });
     await refresh();
   };
 
@@ -1501,6 +1540,17 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                       {p.pictureMode === 'design' && !madeFor(format) && canCreate && !readOnly && (
                         <button type="button" className="btn small ghost" disabled={!canDesign} onClick={() => void makeDesigns([format])} title={blockedBy ?? 'Nano Banana 2 designs this size'}>
                           {designState[format] === 'working' ? 'Designing…' : 'Design it'}
+                        </button>
+                      )}
+                      {p.pictureMode === 'design' && designsWhole(format) && p.designs?.[format] && canCreate && !readOnly && (
+                        <button
+                          type="button"
+                          className="btn small ghost"
+                          disabled={busy !== '' || unbaking !== null || designState[format] === 'working'}
+                          onClick={() => void takeApart(format)}
+                          title="Rebuild this design as editable layers: the words painted out of the picture, and each block a layer of its own. The fonts are the app's nearest match. About ₹10."
+                        >
+                          {unbaking === format ? 'Taking it apart…' : 'Take it apart'}
                         </button>
                       )}
                     </div>

@@ -30,6 +30,7 @@ import {
   type DesignWords,
   type DesignZones,
   type PictureAspect,
+  type ReadBlock,
   type TokenUsage,
 } from '@ava/shared';
 import { requestImage, resolveNanoBanana2, resolveSheetImageModel, type ImagePart } from './sceneImage.js';
@@ -561,4 +562,93 @@ export async function readCreativeWords(image: Buffer, apiKey: string): Promise<
   } catch {
     return null;
   }
+}
+
+/* ============================== taking a design apart ============================== */
+
+/** The instruction to strip a finished design bare: no words, no graphics, the scene rebuilt behind them. */
+export function eraseInstruction(format: CreativeFormatId): string {
+  return [
+    '<IMAGE_REF_0> is a finished advertisement.',
+    '',
+    "Remove EVERYTHING that was laid over the photograph: every word and letter, every headline, badge, pill, button, list, price, small print, the dealership strip along the bottom and everything in it, and every logo, emblem and watermark (the maker's badge on the vehicle itself stays).",
+    'Rebuild the scene photorealistically behind what is removed, continuing its light, colours and textures.',
+    'Change nothing else: the same vehicle exactly as it is, the same scene, the same framing and light. The result is a clean photograph with no text or graphic of any kind.',
+    `Frame: ${CREATIVE_FORMAT_BY_ID[format].pictureAspect}.`,
+  ].join('\n');
+}
+
+/** The design with every word and logo painted out, so its blocks can be laid back as layers. */
+export async function eraseCreativeDesign(
+  format: CreativeFormatId,
+  current: { bytes: Buffer; mimeType: string },
+  apiKey: string,
+): Promise<{ bytes: Buffer; mimeType: string; model: string; costInr: number }> {
+  const model = await resolveNanoBanana2(apiKey);
+  const parts: ImagePart[] = [{ text: eraseInstruction(format) }, { inline_data: { mime_type: current.mimeType, data: current.bytes.toString('base64') } }];
+  const aspectRatio = CREATIVE_FORMAT_BY_ID[format].pictureAspect;
+  const out = await requestImage(model, parts, apiKey, [{ aspectRatio, imageSize: '2K' }, { aspectRatio }], 0.3, 'Creative images');
+  return { bytes: out.bytes, mimeType: out.mimeType, model: out.model, costInr: inr(out.model, out.usage) };
+}
+
+/** The blocks out of whatever came back: words and a sane box, or nothing. */
+export function parseBlocks(text: string): ReadBlock[] {
+  const from = text.indexOf('{');
+  const to = text.lastIndexOf('}');
+  if (from < 0 || to <= from) throw new CreativeError('blocks-unreadable', 'The design could not be read back. Try again.');
+  let raw: { blocks?: unknown };
+  try {
+    raw = JSON.parse(text.slice(from, to + 1)) as { blocks?: unknown };
+  } catch {
+    throw new CreativeError('blocks-unreadable', 'The design could not be read back. Try again.');
+  }
+  const unit = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? v : null);
+  return (Array.isArray(raw.blocks) ? raw.blocks : [])
+    .map((b): ReadBlock | null => {
+      const r = (b ?? {}) as Record<string, unknown>;
+      const words = str(r.text).trim().slice(0, 400);
+      const x = unit(r.x);
+      const y = unit(r.y);
+      const w = unit(r.w);
+      const h = unit(r.h);
+      if (!words || x === null || y === null || w === null || h === null || !w || !h) return null;
+      return {
+        text: words,
+        box: { x, y, w, h },
+        ...(typeof r.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(r.color) ? { color: r.color } : {}),
+        ...(r.weight === 'bold' || r.weight === 'regular' ? { weight: r.weight } : {}),
+        ...(r.align === 'left' || r.align === 'center' || r.align === 'right' ? { align: r.align } : {}),
+        ...(typeof r.lines === 'number' && r.lines >= 1 && r.lines <= 12 ? { lines: Math.round(r.lines) } : {}),
+      };
+    })
+    .filter((b): b is ReadBlock => Boolean(b))
+    .slice(0, 24);
+}
+
+/** Every block of writing on a design, with where and how it sits — the map for taking it apart. */
+export async function readCreativeBlocks(image: Buffer, apiKey: string): Promise<{ blocks: ReadBlock[]; costInr: number }> {
+  const instruction = [
+    'Find every separate block of text on this advertisement — a headline over two lines is one block, a button is one block, a badge is one block, each line of the dealer strip is one block.',
+    'For each block give: "text" — its exact words (same spelling, capitals, symbols ₹ and *, every digit); "x", "y", "w", "h" — its bounding box as fractions of the whole image, x,y the top-left corner; "color" — the letters\' colour as #rrggbb; "weight" — "bold" or "regular"; "align" — "left", "center" or "right"; "lines" — how many lines it runs over.',
+    "Ignore lettering that is part of a logo, an emblem or a wordmark, and the badges on the vehicle itself.",
+    'Answer JSON only: {"blocks": [{"text": "", "x": 0, "y": 0, "w": 0, "h": 0, "color": "#ffffff", "weight": "bold", "align": "left", "lines": 1}]}',
+  ].join('\n');
+  const model = await resolveTextModel(apiKey, 'transform');
+  const res = await fetch(`${GEMINI}/models/${model}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: instruction }, { inline_data: { mime_type: 'image/jpeg', data: image.toString('base64') } }] }],
+      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+    }),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    error?: { message?: string; status?: string };
+    usageMetadata?: TokenUsage;
+  };
+  if (!res.ok) throw new CreativeError(json.error?.status ?? 'blocks-failed', json.error?.message ?? `The text model returned ${res.status}.`);
+  recordUsage('Creative checks', model, json.usageMetadata);
+  const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join('');
+  return { blocks: parseBlocks(text), costInr: inr(model, json.usageMetadata) };
 }

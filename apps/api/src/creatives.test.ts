@@ -247,3 +247,21 @@ test('a scene can be asked to match the approved creative', () => {
   const plain = sceneInstruction({ ...req, match: false }, ['the Hyundai Creta, front']);
   assert.doesNotMatch(plain, /recomposed for this frame/);
 });
+
+test('a design is stripped bare to be taken apart, and its blocks are read with their boxes', async () => {
+  const { eraseInstruction, parseBlocks } = await import('../dist/creatives.js');
+  const p = eraseInstruction('ig-square');
+  assert.match(p, /Remove EVERYTHING that was laid over the photograph/);
+  assert.match(p, /maker's badge on the vehicle itself stays/);
+  assert.match(p, /Rebuild the scene photorealistically/);
+  assert.match(p, /Frame: 1:1/);
+  const blocks = parseBlocks(
+    '```json\n{"blocks":[{"text":"Drive home the Creta","x":0.06,"y":0.1,"w":0.7,"h":0.12,"color":"#FFFFFF","weight":"bold","align":"left","lines":1},{"text":"","x":0,"y":0,"w":0.2,"h":0.1},{"text":"off the frame","x":1.4,"y":0,"w":0.2,"h":0.1},{"text":"no box"},{"text":"odd extras","x":0.1,"y":0.5,"w":0.2,"h":0.05,"color":"red","weight":"heavy","align":"justify","lines":99}]}\n```',
+  );
+  assert.equal(blocks.length, 2, 'only blocks with words and a sane box survive');
+  assert.equal(blocks[0]!.text, 'Drive home the Creta');
+  assert.equal(blocks[0]!.box.w, 0.7);
+  assert.equal(blocks[0]!.color, '#FFFFFF');
+  assert.deepEqual([blocks[1]!.color, blocks[1]!.weight, blocks[1]!.align, blocks[1]!.lines], [undefined, undefined, undefined, undefined], 'junk attributes are dropped, the block kept');
+  assert.throws(() => parseBlocks('nothing here'), /could not be read back/);
+});

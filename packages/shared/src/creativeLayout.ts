@@ -671,8 +671,10 @@ function layoutAd(input: LayoutInput): CreativeDoc {
     const picW = pic ? Math.round(Math.min(H * (W >= 900 ? 2.33 : 1.7), W * 0.24)) : 0;
     const picX = W - pad - ctaW - (ctaW ? pad : 0) - picW;
     if (pic) {
-      out.push(adPicture(pic, { x: picX, y: 0, w: picW, h: H }, 0.72, 0.6));
-      out.push(shape('scrim', 'Shade, picture', { x: picX, y: 0, w: Math.round(picW * 0.4), h: H }, { gradient: { from: rgba(look.panel, 1), to: rgba(look.panel, 0), angle: 270 } }));
+      // The scene is drawn full-width with the car at its right and the left kept calm — it is
+      // the banner's own ground, not a slot; the panel colour fades over the words' side.
+      out.push(adPicture(pic, { x: 0, y: 0, w: W, h: H }, 0.7, 0.55));
+      out.push(shape('scrim', 'Shade, words', { x: 0, y: 0, w: picX + Math.round(picW * 0.6), h: H }, { gradient: { from: rgba(look.panel, 0.96), to: rgba(look.panel, 0), angle: 270 } }));
     }
     if (ctaW) out.push(textLayer('cta', 'Call to action', copy.cta, { x: W - pad - ctaW, y: Math.round((H - ctaH) / 2), w: ctaW, h: ctaH }, { font, size: ctaSize, minSize: 11, weight: 700, color: onAccent, align: 'center', valign: 'middle', pill: ctaPill(ctaSize), maxLines: 1 }));
     const tw = Math.max(40, (pic ? picX : W - pad - ctaW - pad) - pad - x);
@@ -688,16 +690,15 @@ function layoutAd(input: LayoutInput): CreativeDoc {
   }
 
   if (ratio >= 2) {
-    // A small banner: the car on the left; the logo, the words and the button on the right.
+    // A small banner: the scene full-bleed with the car at its right; the logo, the words and
+    // the button on the calm left, the panel colour fading over them so they read.
     const pad = Math.round(H * 0.08);
-    const picW = pic ? Math.round(W * 0.42) : 0;
     if (pic) {
-      out.push(adPicture(pic, { x: 0, y: 0, w: picW, h: H }, 0.78, 0.6));
-      out.push(shape('scrim', 'Shade, picture', { x: Math.round(picW * 0.6), y: 0, w: picW - Math.round(picW * 0.6), h: H }, { gradient: { from: rgba(look.panel, 0), to: rgba(look.panel, 1), angle: 270 } }));
-      if (terms) out.push(textLayer('terms', 'Small print', terms, { x: 4, y: H - 14, w: picW - 8, h: 11 }, { font, size: 8, minSize: 8, weight: 500, color: '#ffffff', opacity: 0.9, maxLines: 1, shadow: { color: 'rgba(0,0,0,0.6)', blur: 3, x: 0, y: 1 } }));
+      out.push(adPicture(pic, { x: 0, y: 0, w: W, h: H }, 0.72, 0.55));
+      out.push(shape('scrim', 'Shade, words', { x: 0, y: 0, w: Math.round(W * 0.7), h: H }, { gradient: { from: rgba(look.panel, 0.96), to: rgba(look.panel, 0), angle: 270 } }));
     }
-    const x = picW + pad;
-    const tw = W - x - pad;
+    const x = pad;
+    const tw = Math.round(W * 0.62) - pad;
     const logos = adLogos(input, dark, false);
     let y = pad;
     if (logos.length) {
@@ -708,8 +709,11 @@ function layoutAd(input: LayoutInput): CreativeDoc {
     const ctaH = Math.round(ctaSize * 1.2 + ctaPill(ctaSize).padY * 2);
     const ctaY = H - pad - (copy.cta.trim() ? ctaH : 0);
     out.push(textLayer('headline', 'Headline', copy.headline, { x, y, w: tw, h: Math.max(16, ctaY - 4 - y) }, { font, size: Math.max(13, Math.round(H * 0.17)), minSize: 11, weight: 800, color: fg, lineHeight: 1.08, maxLines: 2, shadow }));
-    if (copy.cta.trim()) out.push(textLayer('cta', 'Call to action', copy.cta, { x, y: ctaY, w: Math.min(tw, ctaWidth(copy.cta.trim(), ctaSize)), h: ctaH }, { font, size: ctaSize, minSize: 9, weight: 700, color: onAccent, valign: 'middle', pill: ctaPill(ctaSize), maxLines: 1 }));
-    if (!pic && terms) out.push(textLayer('terms', 'Small print', terms, { x, y: H - 12, w: tw, h: 11 }, { font, size: 8, minSize: 8, weight: 500, color: fg, opacity: 0.75, maxLines: 1 }));
+    if (copy.cta.trim()) out.push(textLayer('cta', 'Call to action', copy.cta, { x, y: ctaY, w: Math.min(Math.round(W * 0.45), ctaWidth(copy.cta.trim(), ctaSize)), h: ctaH }, { font, size: ctaSize, minSize: 9, weight: 700, color: onAccent, valign: 'middle', pill: ctaPill(ctaSize), maxLines: 1 }));
+    if (terms)
+      out.push(
+        textLayer('terms', 'Small print', terms, { x: W - pad - Math.round(W * 0.45), y: H - 13, w: Math.round(W * 0.45), h: 11 }, { font, size: 8, minSize: 8, weight: 500, color: '#ffffff', opacity: 0.9, align: 'right', maxLines: 1, shadow: { color: 'rgba(0,0,0,0.6)', blur: 3, x: 0, y: 1 } }),
+      );
     return doc();
   }
 

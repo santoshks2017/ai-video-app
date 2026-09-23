@@ -334,13 +334,14 @@ test('the words read back off a design are checked against the copy, as they are
 
   assert.equal(normWords('शुभ नवरात्रि!'), 'शुभनवरात्रि', 'an Indian script keeps its vowel signs');
   assert.equal(normWords('Only ₹9,999/month.'), 'only₹9,999month');
-  // With a full strip, the model sets the dealership's name, contact, button and small print too — and they are checked.
+  // With a full panel, the contact never goes to the model: the app lays its own panel over the
+  // design, so an address or a phone number cannot come back wrong — and it stays editable.
   const full = designWordsOf({ ...emptyCopy(), headline: 'x', cta: 'Book now', terms: '*T&C apply.' }, input({}));
-  assert.deepEqual(full.strip, { name: 'Garve Hyundai', lines: ['Baner Road, Pune', '+91 97643 79764  ·  garvehyundai.com'], cta: 'Book now' });
-  assert.equal(full.cta, '', 'the button is on the strip');
-  assert.equal(full.terms, '*T&C apply.');
-  const wrongPhone = compareWords(full, ['x', 'Garve Hyundai', 'Baner Road, Pune', '+91 97643 79746 · garvehyundai.com', 'Book now', '*T&C apply.']);
-  assert.deepEqual(wrongPhone.missing, ['+91 97643 79764  ·  garvehyundai.com'], 'a misdrawn phone number is caught');
+  assert.equal(full.strip, undefined, 'the full panel is the app’s own layers, not the model’s words');
+  assert.equal(full.cta, '', 'the button is the panel’s');
+  assert.equal(full.terms, '', 'the small print is the panel’s');
+  const wide = designWordsOf({ ...emptyCopy(), headline: 'x', cta: 'Book now', terms: '*T&C apply.' }, input({ format: 'landscape' }));
+  assert.deepEqual([wide.cta, wide.terms], ['Book now', '*T&C apply.'], 'a wide size keeps the button and the small print in its column');
   const compact = designWordsOf({ ...emptyCopy(), headline: 'x', cta: 'Book now' }, input({ panel: { style: 'compact', name: 'Garve Hyundai', details: ['+91 97643 79764', 'Pune'] } }));
   assert.deepEqual(compact.strip, { name: '', lines: ['Garve Hyundai  ·  +91 97643 79764  ·  Pune'], cta: '' });
   assert.equal(compact.cta, 'Book now', 'a one-line strip leaves the button to the words');
@@ -357,7 +358,15 @@ test('a design carries the client’s exact logos and nothing else; it is design
     assert.equal(validateCreativeDoc(doc), null, where);
     const pic = doc.layers[0]!;
     assert.ok(pic.kind === 'image' && pic.role === 'background' && pic.fit === 'cover' && pic.w === f.width && pic.h === f.height, `${where}: the design fills the frame`);
-    assert.ok(doc.layers.slice(1).every((l) => l.role === 'dealer-logo' || l.role === 'brand-logo'), `${where}: only the logos go on it`);
+    const overlay = doc.layers.slice(1);
+    const panelRoles = new Set(['panel', 'accent', 'panel-name', 'panel-details', 'panel-logo', 'cta', 'terms']);
+    const fullPanel = f.group === 'social' && f.id !== 'thumbnail';
+    if (fullPanel) {
+      assert.ok(overlay.some((l) => l.role === 'panel') && overlay.some((l) => l.role === 'panel-name'), `${where}: the dealer panel is the app's own layers`);
+      assert.ok(overlay.every((l) => l.role === 'dealer-logo' || l.role === 'brand-logo' || panelRoles.has(l.role as string)), `${where}: only the logos and the panel go on it`);
+    } else {
+      assert.ok(overlay.every((l) => l.role === 'dealer-logo' || l.role === 'brand-logo'), `${where}: only the logos go on it`);
+    }
     assert.ok(doc.layers.some((l) => l.role === 'dealer-logo'), `${where}: the dealer's logo`);
 
     const canvas = designSkeleton(input({ format: f.id }));
@@ -366,8 +375,8 @@ test('a design carries the client’s exact logos and nothing else; it is design
     assert.deepEqual([canvas.width, canvas.height], [at.width, at.height], `${where}: the canvas is the shape the model draws`);
     const drawn = PICTURE_ASPECT_RATIO[f.pictureAspect];
     assert.ok(Math.abs(canvas.width / canvas.height - drawn) < 0.01, `${where}: at ${f.pictureAspect}`);
-    const logos = doc.layers.slice(1);
-    assert.equal(canvas.layers.length, logos.length, `${where}: every logo, and nothing else`);
+    const logos = overlay.filter((l) => l.role === 'dealer-logo' || l.role === 'brand-logo');
+    assert.equal(canvas.layers.length, logos.length, `${where}: every logo, and nothing else — never the panel`);
     canvas.layers.forEach((l, i) => {
       assert.equal(l.x, logos[i]!.x + at.dx, `${where}: the logo sits where the frame sits in the canvas`);
       assert.equal(l.y, logos[i]!.y + at.dy);

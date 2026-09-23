@@ -823,7 +823,16 @@ export function layoutDesigned(input: LayoutInput): CreativeDoc {
     const f = CREATIVE_FORMAT_BY_ID[input.format];
     doc = { version: 1, format: input.format, width: f.width, height: f.height, background: input.look.panel, layers: basics(design, fr, 'none').layers };
   }
-  return { ...doc, layers: doc.layers.filter((l) => l.role === 'background' || l.role === 'dealer-logo' || l.role === 'brand-logo') };
+  // The design carries its own words; the app lays back only what is exactly its own — the
+  // logos, and the full dealer panel with everything it carries, editable like any layer.
+  const fullPanel = !isAdFormat(input.format) && panelStyleOn(input) === 'full' && Boolean(input.panel.name || input.panel.details.length);
+  const keep = new Set<LayerRole | undefined>([
+    'background',
+    'dealer-logo',
+    'brand-logo',
+    ...(fullPanel ? (['panel', 'accent', 'panel-name', 'panel-details', 'panel-logo', 'cta', 'terms'] as LayerRole[]) : []),
+  ]);
+  return { ...doc, layers: doc.layers.filter((l) => keep.has(l.role)) };
 }
 
 /**
@@ -851,7 +860,7 @@ export const DESIGN_GROUND = '#808080';
  */
 export function designSkeleton(input: LayoutInput): CreativeDoc {
   const c = designCanvasOf(input.format);
-  const logos = layoutDesigned({ ...input, picture: { src: '', mode: 'design' } }).layers.filter((l) => l.role !== 'background');
+  const logos = layoutDesigned({ ...input, picture: { src: '', mode: 'design' } }).layers.filter((l) => l.role === 'dealer-logo' || l.role === 'brand-logo');
   return {
     version: 1,
     format: input.format,

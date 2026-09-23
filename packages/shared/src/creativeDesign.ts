@@ -47,21 +47,22 @@ export function designWordsOf(copy: CreativeCopy, input: Pick<LayoutInput, 'form
   const roomy = f.height >= f.width * 1.5;
   const style = input.format === 'thumbnail' && input.panel.style === 'full' ? 'compact' : input.panel.style;
   const hasStrip = !ad && style !== 'none' && Boolean(input.panel.name || input.panel.details.length);
-  const carries = panelCarries({ ...(input as LayoutInput), copy }).cta;
-  const strip: DesignStrip | undefined = !hasStrip
-    ? undefined
-    : style === 'compact'
-      ? { name: '', lines: [[input.panel.name, ...input.panel.details].filter(Boolean).join('  ·  ')], cta: '' }
-      : { name: input.panel.name, lines: input.panel.details.slice(0, 2), cta: carries ? copy.cta.trim() : '' };
+  const carries = panelCarries({ ...(input as LayoutInput), copy });
+  // A full dealer panel is the app's own layers, laid over the design exactly as on a scene —
+  // never painted, so an address or a phone number cannot come back wrong. Only the compact
+  // one-line strip is still the model's to set.
+  const strip: DesignStrip | undefined =
+    hasStrip && style === 'compact' ? { name: '', lines: [[input.panel.name, ...input.panel.details].filter(Boolean).join('  ·  ')], cta: '' } : undefined;
+  const fullPanel = hasStrip && style !== 'compact';
   return {
     kicker: copy.kicker.trim(),
     headline: copy.headline.trim(),
     sub: ad && !roomy ? '' : copy.sub.trim(),
     badge: copy.badge.trim(),
     points: ad ? [] : copy.points.map((p) => p.trim()).filter(Boolean),
-    cta: strip?.cta ? '' : copy.cta.trim(),
+    cta: fullPanel && carries.cta ? '' : copy.cta.trim(),
     ...(strip ? { strip } : {}),
-    terms: ad ? adTerms(copy.terms) : copy.terms.trim(),
+    terms: ad ? adTerms(copy.terms) : fullPanel && carries.terms ? '' : copy.terms.trim(),
   };
 }
 

@@ -265,3 +265,23 @@ test('a design is stripped bare to be taken apart, and its blocks are read with 
   assert.deepEqual([blocks[1]!.color, blocks[1]!.weight, blocks[1]!.align, blocks[1]!.lines], [undefined, undefined, undefined, undefined], 'junk attributes are dropped, the block kept');
   assert.throws(() => parseBlocks('nothing here'), /could not be read back/);
 });
+
+test('with no strip to set, the design is told the panel covers the foot, and every amount is spelled comma for comma', async () => {
+  const { designInstruction } = await import('../dist/creatives.js');
+  const base: DesignRequest = {
+    format: 'ig-square',
+    engine: 'offer',
+    vehicle: { name: 'Toyota Urban Cruiser Hyryder', kind: 'car' },
+    words: { kicker: '', headline: 'Festive benefits up to ₹1,50,000*', sub: '', badge: '₹1,50,000*', points: [], cta: 'Book now', terms: '' },
+    language: { name: 'English', script: 'latin' },
+    look: { panel: '#0F1E33', accent: '#E8590C' },
+    zones: { logoBand: 0.12, stripTop: 0.8, logoTone: 'dark', textSide: 'top' },
+  };
+  const p = designInstruction(base, ['the Toyota, front']);
+  assert.match(p, /contact panel is laid over the bottom 20% of the frame afterwards/);
+  assert.match(p, /put no words there/);
+  assert.match(p, /Every amount keeps its digits and its commas exactly as written — "₹1,50,000" — never regrouped/);
+  const withStrip = designInstruction({ ...base, words: { ...base.words, strip: { name: 'Grand Toyota', lines: ['Baral, 698, NH58, Meerut'], cta: '' } } }, ['the Toyota, front']);
+  assert.doesNotMatch(withStrip, /laid over the bottom/, 'a legacy strip still belongs to the design');
+  assert.match(withStrip, /The dealership strip/, 'and is still asked for');
+});

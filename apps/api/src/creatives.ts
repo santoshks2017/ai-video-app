@@ -27,6 +27,7 @@ import {
   type CreativeEngineId,
   type CreativeFormatId,
   type CreativeTemplateId,
+  designLines,
   type DesignWords,
   type DesignZones,
   type PictureAspect,
@@ -332,6 +333,14 @@ function wordsBrief(w: DesignWords): string[] {
   return out;
 }
 
+/** Every ₹ amount on the creative, named — the commas land exactly where Indian grouping puts them. */
+function amountsBrief(w: DesignWords): string[] {
+  const amounts = [...new Set(designLines(w).flatMap((l) => l.match(/₹[\d,]+/g) ?? []))];
+  return amounts.length
+    ? [`Every amount keeps its digits and its commas exactly as written — ${amounts.map(quoted).join(', ')} — never regrouped, never a comma moved, never a digit more or less.`]
+    : [];
+}
+
 /** The dealership's strip and the small print. */
 function stripBrief(req: DesignRequest): string[] {
   const w = req.words;
@@ -362,6 +371,12 @@ function layoutBrief(req: DesignRequest, noun: string): string[] {
     `Nothing overlaps: no word on the ${noun}, no word on a logo, no word on another word, and nothing touching the edges.`,
   ];
   if (f.safeTop > 0) out.push(`Keep every word out of the top ${pct(f.safeTop) + 2}% and the bottom ${pct(f.safeBottom) + 2}% — the platform's own controls cover them.`);
+  // With no strip to set, the app lays its own dealer panel over the foot afterwards.
+  if (!req.words.strip && req.zones.stripTop < 0.99) {
+    out.push(
+      `The dealership's own contact panel is laid over the bottom ${100 - pct(req.zones.stripTop)}% of the frame afterwards: put no words there, keep the whole ${noun} above that band, and leave the band as simple, calm ground.`,
+    );
+  }
   // A size not drawn at its own shape is cut from the picture: nothing that matters may sit where it is cut.
   const trim = pictureTrim(req.format);
   if (trim.each > 0.015) {
@@ -451,6 +466,7 @@ export function designInstruction(req: DesignRequest, carLabels: string[]): stri
     '',
     '## The words — set exactly these, and nothing else',
     'Spell every word exactly as written between the quotes: the same letters and capitals, the ₹ sign, the commas in numbers, every digit of a phone number, and every asterisk (*).',
+    ...amountsBrief(req.words),
     ...wordsBrief(req.words),
     ...stripBrief(req),
     '',

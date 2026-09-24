@@ -11,6 +11,7 @@ import {
 import { useApp, api } from '../state/appStore.js';
 import { Field, Panel, PickList, Confirm, Banner, Empty } from '../components/ui.js';
 import { isApiError, post, del } from '../lib/client.js';
+import { EngineKeys } from './EngineKeys.js';
 
 function blankCred(): ApiCredential {
   const now = Date.now();
@@ -41,7 +42,7 @@ function blankModel(credentialId: string): VideoModelProfile {
 
 export function ModelsSection() {
   const { credentials, models, refresh } = useApp();
-  const [tab, setTab] = useState<'models' | 'apis'>('models');
+  const [tab, setTab] = useState<'models' | 'apis' | 'keys'>('models');
   const [cred, setCred] = useState<ApiCredential | null>(null);
   const [model, setModel] = useState<VideoModelProfile | null>(null);
   const [keyInput, setKeyInput] = useState('');
@@ -134,11 +135,16 @@ export function ModelsSection() {
         <button className={`btn small${tab === 'apis' ? ' primary' : ''}`} onClick={() => setTab('apis')}>
           API connections
         </button>
+        <button className={`btn small${tab === 'keys' ? ' primary' : ''}`} onClick={() => setTab('keys')}>
+          Engine keys
+        </button>
       </div>
 
       {note && <Banner kind="ok">{note}</Banner>}
 
-      {tab === 'apis' ? (
+      {tab === 'keys' ? (
+        <EngineKeys />
+      ) : tab === 'apis' ? (
         <div className="grid two">
           <Panel
             title="API connections"

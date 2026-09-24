@@ -3273,3 +3273,21 @@ fieldset.lock.inline { display: contents; }
 .intake-proof img { width: 100%; border-radius: 10px; }
 .intake-proof-side { display: flex; flex-direction: column; gap: 10px; }
 @media (max-width: 760px) { .intake-proof { grid-template-columns: 1fr; } }
+
+/* ---- Engine keys ---- */
+.ek-made { display: grid; gap: 8px; }
+.ek-made code { display: block; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--line); font-size: 12px; overflow-wrap: anywhere; }
+.ek-made small { color: var(--ink-muted); font-size: 11px; }
+.ek-new { display: grid; gap: 4px; margin-bottom: 14px; }
+.ek-scopes { display: flex; gap: 14px; align-items: center; font-size: 13px; }
+.ek-scopes label { display: flex; align-items: center; gap: 6px; }
+.ek-list { display: grid; gap: 8px; }
+.ek-key { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.ek-key.off { opacity: 0.55; }
+.ek-key-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ek-key-head code { font-size: 11px; color: var(--ink-faint); }
+.ek-key-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ek-code {
+  margin: 4px 0 12px; padding: 10px; border-radius: var(--radius-sm); background: var(--surface-2);
+  border: 1px solid var(--line); font-size: 11.5px; line-height: 1.5; overflow-x: auto; white-space: pre;
+}

@@ -30,7 +30,8 @@ export type UsageSection =
   | 'Creative intake'
   | 'Creative copy'
   | 'Creative images'
-  | 'Creative checks';
+  | 'Creative checks'
+  | 'Engine API';
 
 /** Log one call. `fixedUsd` is for what is priced per item rather than per token — a song. */
 export function recordUsage(section: UsageSection, model: string, usage: TokenUsage | undefined, fixedUsd?: number): void {

@@ -62,6 +62,8 @@ import { importWebsite } from './siteImport.js';
 import { drawActorSheet, fillActorProfile } from './actorProfile.js';
 import { cleanLogo, findBrandLogo } from './logos.js';
 import { checkVehicleFrame } from './vehicleCheck.js';
+import { registerEngine } from './engine.js';
+import { deleteApiKey, issueApiKey, listApiKeys, updateApiKey, type ApiScope } from './apiKeys.js';
 import { listRunFacts, listAllJobs,
   saveJob,
   updateJob,
@@ -304,6 +306,10 @@ function requiredRole(method: string, url: string): Role | null {
   ) {
     return method === 'GET' ? null : 'creator';
   }
+
+  // The engine's keys: who may call this app from another one, and what it may
+  // spend. Reading the list is as sensitive as changing it.
+  if (url.startsWith('/api/api-keys')) return 'admin';
 
   // Library records: read freely, change only as a creator.
   if (method !== 'GET' && method !== 'HEAD') return 'creator';
@@ -1511,6 +1517,12 @@ async function renderSegment(
     actorRef?: LabelledRef;
     /** The maker's emblem, in the design it wears today. */
     emblemRef?: LabelledRef;
+    /**
+     * A clip with no film behind it — the engine API's callers, who send a prompt
+     * and their own references. The words about the vehicle, the presenter and the
+     * dealership have nothing to point at, so they are left out.
+     */
+    plain?: boolean;
     /** The dealership. Given a slot on every part. */
     placeRef?: LabelledRef;
     /** Everything else in scope — project extras, further showroom photos. */
@@ -1583,8 +1595,9 @@ async function renderSegment(
   const seedRef: LabelledRef | undefined = seeded
     ? {
         ref: { data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg', kind: 'image' },
-        label:
-          'where the part before this one ended — carry the framing, the place, the presenter and the light straight on from here. It is a frame a model drew, not a record of the vehicle: where it and the photographs disagree about the vehicle, the photographs are right',
+        label: req.plain
+          ? 'the last frame of the part before this one — carry straight on from here: the same subject, the same place, the same light and the same motion'
+          : 'where the part before this one ended — carry the framing, the place, the presenter and the light straight on from here. It is a frame a model drew, not a record of the vehicle: where it and the photographs disagree about the vehicle, the photographs are right',
         filename: 'seed-frame.jpg',
       }
     : undefined;
@@ -1650,7 +1663,11 @@ async function renderSegment(
         '',
         // Said where the images are named, as well as in the rules: a ranking the
         // model reads beside the pictures is a ranking it applies to them.
-        'The photographs of the vehicle outrank every other image here. A drawn frame of a shot, and the frame the part before this one ended on, show only where the camera is, how the shot is framed and how it is lit. Where any of them disagrees with the photographs about the vehicle — its shape, face, grille, lamps, wheels, badges or emblems — the photographs are right: build the vehicle from the photographs and correct it back to them.',
+        ...(req.plain
+          ? []
+          : [
+              'The photographs of the vehicle outrank every other image here. A drawn frame of a shot, and the frame the part before this one ended on, show only where the camera is, how the shot is framed and how it is lit. Where any of them disagrees with the photographs about the vehicle — its shape, face, grille, lamps, wheels, badges or emblems — the photographs are right: build the vehicle from the photographs and correct it back to them.',
+            ]),
         '',
       ].join('\n')
     : '';
@@ -4723,6 +4740,48 @@ app.post<{
   }
   return { scenes: results, made };
 });
+
+/* ============================ the engine's keys ============================ */
+
+/**
+ * Keys another app calls the engine with. Admin only, and the secret is shown
+ * once: what is stored is its hash, so a key that is lost is replaced, not read.
+ */
+app.get('/api/api-keys', async () => ({ items: await listApiKeys() }));
+
+app.post<{ Body: { name?: string; scopes?: ApiScope[]; dailyCapInr?: number } }>('/api/api-keys', async (req, reply) => {
+  const name = String(req.body?.name ?? '').trim();
+  if (!name) return reply.code(400).send({ code: 'bad-request', message: 'Give the key a name — whose app it is for.' });
+  const scopes = (Array.isArray(req.body?.scopes) ? req.body!.scopes : []).filter((s): s is ApiScope => s === 'images' || s === 'videos');
+  const { key, secret } = await issueApiKey(name, {
+    scopes,
+    dailyCapInr: Number(req.body?.dailyCapInr) || 0,
+    createdBy: req.caller?.email,
+  });
+  // The only time the secret exists outside the caller's hands.
+  return { key, secret };
+});
+
+app.patch<{ Params: { id: string }; Body: { name?: string; enabled?: boolean; scopes?: ApiScope[]; dailyCapInr?: number } }>(
+  '/api/api-keys/:id',
+  async (req) => {
+    const patch: Record<string, unknown> = {};
+    if (typeof req.body?.name === 'string' && req.body.name.trim()) patch.name = req.body.name.trim().slice(0, 80);
+    if (typeof req.body?.enabled === 'boolean') patch.enabled = req.body.enabled;
+    if (Array.isArray(req.body?.scopes)) patch.scopes = req.body.scopes.filter((x) => x === 'images' || x === 'videos');
+    if (req.body?.dailyCapInr !== undefined) patch.dailyCapInr = Math.max(0, Math.round(Number(req.body.dailyCapInr) || 0));
+    await updateApiKey(req.params.id, patch);
+    return { ok: true };
+  },
+);
+
+app.delete<{ Params: { id: string } }>('/api/api-keys/:id', async (req) => {
+  await deleteApiKey(req.params.id);
+  return { ok: true };
+});
+
+/** The engine API itself: /v1, with its own keys. */
+registerEngine(app, { resolveModel, renderSegment: renderSegment as never, googleKey });
 
 app.get<{ Params: { refId: string; name: string } }>('/api/refs/:refId/:name', async (req, reply) => {
   // Links saved before this fix carry the original upload name; storage has the

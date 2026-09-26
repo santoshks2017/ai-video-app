@@ -1934,6 +1934,15 @@ function carRefsForPart(
   const take = (r: CarRef | undefined) => {
     if (r && !picked.includes(r)) picked.push(r);
   };
+  /*
+   * The face first, then the photograph this part's scene is built on.
+   *
+   * A part whose scene is the cabin led with the cabin photograph, and the
+   * reference a model weighs most showed it nothing of the grille, the lamps or
+   * the badge — so it filled them in from memory. Identity lives in the face; the
+   * scene's own photograph follows right behind it, where composition is decided.
+   */
+  take(carRefs.find((r) => r.angle === 'front'));
   for (const filename of wanted) take(carRefs.find((r) => r.filename === filename));
   for (const angle of ANGLE_PRIORITY) take(carRefs.find((r) => r.angle === angle));
   for (const r of carRefs) take(r);
@@ -2248,7 +2257,16 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   /** What each join measured once the dead air was taken out of it. */
   let joins: { part: number; headTrim: number; tailTrim: number; echo?: number }[] = [];
   /** Retakes cost money, so a run buys at most this many of them. */
-  let retakesLeft = 2;
+  /*
+   * A retake for every part that needs one.
+   *
+   * This was two for the whole film, and a film is four or five parts: the early
+   * parts spent the budget and the last ones kept whatever came back, however
+   * wrong. A film with the wrong car in it is worth nothing at all, so the ceiling
+   * is one retake per part — the worst case costs a second film, and the common
+   * case costs nothing.
+   */
+  let retakesLeft = Math.max(2, parts.length);
 
   // No `extend` — each segment is an independent create, seeded with the
   // PREVIOUS segment's last frame so the presenter / car / setting stay
@@ -2335,27 +2353,34 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
         const refPhoto = outside.ref.data ? Buffer.from(outside.ref.data, 'base64') : null;
         const moments = [part.duration * 0.35, part.duration * 0.85].map((t) => Math.max(0.2, Math.min(t, part.duration - 0.2)));
         const frames = (await Promise.all(moments.map((t) => posterFrame(bytes, t).catch(() => null)))).filter((f): f is Buffer => Boolean(f));
-        if (frames.length && refPhoto) {
-          const verdicts = await Promise.all(frames.map((f) => checkVehicleFrame(f, refPhoto, resolved.apiKey)));
-          const judged = verdicts.filter((v) => v.checked);
+        /** Two moments of a part against the vehicle's own photograph. */
+        const judge = async (clip: Buffer): Promise<{ same: boolean; checked: boolean; why: string }> => {
+          const moments = [part.duration * 0.35, part.duration * 0.85].map((t) => Math.max(0.2, Math.min(t, part.duration - 0.2)));
+          const shots = (await Promise.all(moments.map((t) => posterFrame(clip, t).catch(() => null)))).filter((f): f is Buffer => Boolean(f));
+          if (!shots.length || !refPhoto) return { same: true, checked: false, why: '' };
+          const verdicts = (await Promise.all(shots.map((f) => checkVehicleFrame(f, refPhoto, resolved.apiKey)))).filter((v) => v.checked);
           // One clear mismatch anywhere in the part is a wrong car in the film.
-          const wrong = judged.find((v) => !v.same);
-          const verdict = wrong ?? judged[0] ?? { same: true, checked: false, why: '' };
-          if (verdict.checked) {
-            const remade = !verdict.same && retakesLeft > 0;
-            vehicleChecks.push({ part: part.partNum, same: verdict.same, why: verdict.why, remade });
-            if (remade) {
-              remadeHere = true;
-              retakesLeft -= 1;
-              app.log.warn(
-                { jobId, part: part.partNum, why: verdict.why },
-                'wrong vehicle on screen — making this part again',
-              );
-              const second = await ask();
-              bytes = second.bytes;
-              interactionId = second.interactionId;
+          return verdicts.find((v) => !v.same) ?? verdicts[0] ?? { same: true, checked: false, why: '' };
+        };
+        if (refPhoto) {
+          let verdict = await judge(bytes);
+          if (verdict.checked && !verdict.same && retakesLeft > 0) {
+            remadeHere = true;
+            retakesLeft -= 1;
+            app.log.warn({ jobId, part: part.partNum, why: verdict.why }, 'wrong vehicle on screen — making this part again');
+            const second = await ask().catch(() => null);
+            if (second) {
+              // The retake is judged as well, and the one that shows the right car is
+              // the one that is kept: before this, a worse second take was kept blind.
+              const secondVerdict = await judge(second.bytes);
+              if (!secondVerdict.checked || secondVerdict.same) {
+                bytes = second.bytes;
+                interactionId = second.interactionId;
+                verdict = secondVerdict;
+              }
             }
           }
+          if (verdict.checked) vehicleChecks.push({ part: part.partNum, same: verdict.same, why: verdict.why, remade: remadeHere });
         }
       }
 
@@ -4692,12 +4717,16 @@ app.post<{
         if (!sc) return;
         try {
           const refs = shot(sc);
+          // The shot a designer typed, and the scene's title, go to the image model
+          // as they are — so a model name typed into either used to reach it. It is
+          // taken out here for the same reason it is taken out of the film's prompt.
+          const plainly = (t: string): string => unnamed(t, brief.carModel, brief.vehicleKind === 'bike' ? 'bike' : 'car');
           const draw = () =>
             drawSceneFrame(
               {
                 ...ctx,
-                shot: String(sc.shot),
-                title: sc.title,
+                shot: plainly(String(sc.shot)),
+                ...(sc.title ? { title: plainly(sc.title) } : {}),
                 onCameraPerson,
                 references: refs,
               },

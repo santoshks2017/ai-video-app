@@ -880,7 +880,7 @@ export function Storyboard({
                   'On-screen text',
                   'Scene image',
                 ].map((label, i) => (
-                  <th key={label}>
+                  <th key={label} title={i === 0 ? 'Write "the car". A model name is taken out before the film is made — it sends the video model looking the name up, and what it finds is the car it replaced.' : undefined}>
                     {label}
                     {/* Drag to give this column room; the one beside it gives it up,
                         so the table never grows past the screen. */}

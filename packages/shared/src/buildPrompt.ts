@@ -26,22 +26,54 @@ import { sceneVisual, sceneVisualLine } from './visuals.js';
  * them. So it is stripped from the labels and filenames that travel beside the
  * photographs, as well as from the rules.
  */
+/** Every letter reduced to its base, so "Škoda" reads as "Skoda" — and letter for letter, so a
+ * position in the folded copy is the same position in the real one. */
+const fold = (s: string): string => [...s].map((ch) => ch.normalize('NFD')[0] ?? ch).join('');
+
 export function unnamed(text: string, carModel: string | undefined, noun: 'car' | 'bike' = 'car'): string {
   const name = (carModel ?? '').trim();
   if (!name || !text) return text;
-  const words = name.split(/\s+/).filter(Boolean);
-  const forms = new Set<string>();
-  for (let i = 0; i < words.length; i++) {
-    const tail = words.slice(i);
-    // "Facelift Skoda Slavia", "Skoda Slavia", "Slavia" — and the same in a filename.
-    if (tail.join('').length >= 4) forms.add(tail.join(' '));
-  }
+  const words = fold(name).split(/\s+/).filter((w) => w.length >= 2);
+  if (!words.length) return text;
+  // "Skoda Slavia" before "Slavia", so the longer name goes first and the shorter
+  // one mops up what is left.
+  const forms = words
+    .map((_, i) => words.slice(i))
+    .filter((tail) => tail.join('').length >= 4)
+    .sort((a, b) => b.join(' ').length - a.join(' ').length);
+
+  // Found on a folded copy, cut from the real one: the two run character for character.
   let out = text;
-  for (const form of [...forms].sort((a, b) => b.length - a.length)) {
-    const pattern = form.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s_-]+');
-    out = out.replace(new RegExp(`\\b${pattern}\\b`, 'gi'), noun);
+  for (const form of forms) {
+    const pattern = new RegExp(`\\b${form.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s_-]+')}\\b`, 'gi');
+    for (;;) {
+      const hit = pattern.exec(fold(out));
+      if (!hit) break;
+      out = `${out.slice(0, hit.index)}${noun}${out.slice(hit.index + hit[0].length)}`;
+      pattern.lastIndex = 0;
+    }
   }
-  return out.replace(/\b(the|a)\s+(the|a)\b/gi, '$1').replace(/\s{2,}/g, ' ').trim();
+
+  /*
+   * What a name leaves behind.
+   *
+   * "the Škoda Slavia 2026 facelift" becomes "the Škoda car 2026 facelift" if only
+   * the name goes: the maker, the year and the word facelift are the same kind of
+   * cue, and a year the model has never seen sends it to the car it has — which is
+   * the old one. So the words that were holding on to the name go with it.
+   */
+  const maker = words[0]!;
+  const trailing = String.raw`\d{4}|facelift|face-?lift|new|all-?new|mk\s?\d+|gen(?:eration)?\s?\d*|model|edition`;
+  const passes: Array<[RegExp, string]> = [
+    [new RegExp(String.raw`\b${maker}\s+(?=${noun}\b)`, 'gi'), ''],
+    [new RegExp(String.raw`\b(?:${trailing})\s+(?=${noun}\b)`, 'gi'), ''],
+    [new RegExp(String.raw`\b${noun}(?:[\s,]+(?:${trailing}))+\b`, 'gi'), noun],
+    [new RegExp(String.raw`\b(the|this|its)\s+(?:\d{4}\s+)?(?:facelift|face-?lift)\b`, 'gi'), `$1 ${noun}`],
+    [new RegExp(String.raw`\b${noun}(\s+${noun})+\b`, 'gi'), noun],
+    [/\b(the|a|this|its)\s+(the|a|this|its)\b/gi, '$1'],
+  ];
+  for (const [pattern, to] of passes) out = out.replace(pattern, to);
+  return out.replace(/\s+([,.;:])/g, '$1').replace(/\s{2,}/g, ' ').trim();
 }
 import { plainSpoken } from './spoken.js';
 import { CATEGORY_BY_ID } from './categories.js';
@@ -734,7 +766,18 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
         (mode.onCameraPerson
           ? 'same presenter (identical face, hair, skin tone, make-up, wardrobe and body), '
           : '') +
-        'same car (identical model, colour, wheels, badges), same showroom and background, same framing, lens, lighting and colour grade. Then continue the motion naturally — no cut back to an intro, no titles, no restart.',
+        `same ${ctx.vehicle === 'bike' ? 'bike' : 'car'} (identical colour, wheels, badges), same showroom and background, same framing, lens, lighting and colour grade. Then continue the motion naturally — no cut back to an intro, no titles, no restart.`,
+    );
+    /*
+     * One exception, and only one.
+     *
+     * A part is told to match the frame before it exactly, and it obeys — including
+     * where that frame had already drifted off the photographs. Copied part after
+     * part, one wrong grille becomes a whole film's worth. The frame decides the
+     * framing, the light and the motion; the photographs decide the vehicle.
+     */
+    C.push(
+      `The one exception: where the ${ctx.vehicle === 'bike' ? 'bike' : 'car'} in that frame differs from the supplied photographs — its face, grille, lamps, wheels, badges or proportions — the photographs are right and the frame is wrong. Correct it back to the photographs in this segment rather than carrying the difference on.`,
     );
     C.push('');
     continuityLock(brief, mode, ctx.vehicle).forEach((line) => C.push(line));

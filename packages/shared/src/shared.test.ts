@@ -848,6 +848,12 @@ test('every part is held to the photographs, and no part is told what the car is
     // The name is what sent it looking the car up, so the name is not there at all.
     assert.doesNotMatch(text, /XUV 3XO|XUV3XO/i);
   }
+  // A later part is told to match the frame before it — except where that frame
+  // has drifted off the photographs, which is how one wrong grille spread.
+  for (const part of res.parts.slice(1)) {
+    assert.match(part.continuationText ?? '', /The one exception: where the car in that frame differs from the supplied photographs/);
+    assert.match(part.continuationText ?? '', /Correct it back to the photographs in this segment rather than carrying the difference on/);
+  }
 });
 
 test('a brief fills the blanks, checks what it is told, and never overwrites an answer', () => {
@@ -1068,6 +1074,18 @@ test('a name is taken out of whatever a model is about to read', () => {
   assert.equal(car('Skoda Slavia front'), 'car front');
   assert.equal(car('Facelift Skoda Slavia — every photograph of the front in one image'), 'car — every photograph of the front in one image');
   assert.equal(car('A wide shot of the Slavia on the road'), 'A wide shot of the car on the road', 'and a shot direction somebody typed');
+  /*
+   * The scene that kept coming back as the older car, word for word from the film
+   * that showed it: the maker spelled the way the maker spells it, and a model year
+   * the video model has never seen — which is what sends it to the car it has.
+   */
+  assert.equal(
+    car('Presenter standing beside the Škoda Slavia 2026 facelift, showcasing its exterior design, front profile, grille, and sleek body lines.'),
+    'Presenter standing beside the car, showcasing its exterior design, front profile, grille, and sleek body lines.',
+  );
+  assert.equal(car('Clean graphic beat over a dark frame or the covered car.'), 'Clean graphic beat over a dark frame or the covered car.', 'a scene that never named it is left alone');
+  assert.equal(unnamed('Wide shot of the all-new Hyundai Creta 2026 on the road', 'Hyundai Creta'), 'Wide shot of the car on the road');
+  assert.equal(unnamed('The new Mahindra XUV 3XO facelift pulls up', 'Mahindra XUV 3XO'), 'The car pulls up');
   assert.equal(car('The presenter opens the door'), 'The presenter opens the door', 'anything else is left exactly as it was');
   assert.equal(unnamed('A Hero Splendor on the road', 'Hero Splendor', 'bike'), 'A bike on the road');
   assert.equal(unnamed('nothing to take out', undefined), 'nothing to take out');

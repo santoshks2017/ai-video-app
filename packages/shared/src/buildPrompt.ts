@@ -15,6 +15,34 @@ import { buildBeats, collectStrings, storyGuidance, storyTheme, themeDirection }
 import { planScenes, fmtTime, speakingSeconds } from './planScenes.js';
 import type { Beat, Scene, ScenePlan } from './types.js';
 import { sceneVisual, sceneVisualLine } from './visuals.js';
+
+/**
+ * The vehicle's name, taken out of anything a model is about to read.
+ *
+ * A name is not a description to an image or video model, it is a way of looking
+ * something up — and what "Skoda Slavia" looks up is every picture of the car
+ * that wore the name longest, which is the one before the facelift. The
+ * photographs say what this vehicle looks like; the name only ever argues with
+ * them. So it is stripped from the labels and filenames that travel beside the
+ * photographs, as well as from the rules.
+ */
+export function unnamed(text: string, carModel: string | undefined, noun: 'car' | 'bike' = 'car'): string {
+  const name = (carModel ?? '').trim();
+  if (!name || !text) return text;
+  const words = name.split(/\s+/).filter(Boolean);
+  const forms = new Set<string>();
+  for (let i = 0; i < words.length; i++) {
+    const tail = words.slice(i);
+    // "Facelift Skoda Slavia", "Skoda Slavia", "Slavia" — and the same in a filename.
+    if (tail.join('').length >= 4) forms.add(tail.join(' '));
+  }
+  let out = text;
+  for (const form of [...forms].sort((a, b) => b.length - a.length)) {
+    const pattern = form.split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s_-]+');
+    out = out.replace(new RegExp(`\\b${pattern}\\b`, 'gi'), noun);
+  }
+  return out.replace(/\b(the|a)\s+(the|a)\b/gi, '$1').replace(/\s{2,}/g, ' ').trim();
+}
 import { plainSpoken } from './spoken.js';
 import { CATEGORY_BY_ID } from './categories.js';
 import { rulebookText } from './rulebook.js';
@@ -87,18 +115,25 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
     `- NUMBER PLATES ARE PLAIN WHITE AND BLANK — A HARD RULE FOR EVERY SHOT OF EVERY PART. Whenever the front or the back of the ${noun} is in frame, its number plate is there, mounted where a plate belongs, as a plain white plate with nothing on it: no letters, no numbers, no state code, no brand or model name, no dealer name, no sticker, no logo, no border lettering. The same holds for every other vehicle anywhere in the frame. Never leave a plate off, never show an empty holder or a dark recess where it belongs, never make it any colour but white, and never hide it by cropping around it or blurring it. The supplied photographs may show writing on a plate: that writing is not part of the ${noun} — never copy it, and never write anything else in its place.`,
   );
   if (brief.carModel) {
-    // The opening part is built on the reference photos and comes out right; a later
-    // part, working from one frame, reached for the older generation it has seen more
-    // of — an XUV300 in a film about the XUV 3XO.
+    /*
+     * The vehicle is never named here, and that is the point.
+     *
+     * Every instruction about how it should look used to carry the name: "Car
+     * model: Facelift Skoda Slavia. Match the current-generation Facelift Skoda
+     * Slavia exactly…" — and then a rule saying not to draw what the name brings
+     * to mind. A name is not a description to a model, it is a way of looking
+     * something up, and what it looks up is years of pictures of the older car.
+     * Telling it the name and then telling it to ignore the name is asking it to
+     * un-see. So the name is not in any line about the ${noun}'s appearance at
+     * all: the photographs are the whole description.
+     */
     lines.push(
-      `- The ${noun} is the ${brief.carModel} and nothing else: the exact vehicle in ${
+      `- The ${noun} in this film is the one in ${
         brief.attachedCarPhotos ? 'the attached photos' : 'the supplied reference images and reference frame'
-      } — same generation, same face, same grille, same lamps, same wheels, same badges, same proportions. Never an earlier generation, never a facelift, never another model from the same family however similar it looks, and never a generic ${noun}. If a shot cannot show it accurately, show less of it — a detail, or the ${noun} out of focus — rather than a different ${noun}.`,
+      }, and no other — the same generation, the same face, grille, lamps, wheels, badges and proportions as they show. Never an earlier version of it, never a later one, never another ${noun} that looks like it, and never a generic ${noun}. If a shot cannot show it accurately, show less of it — a detail, or the ${noun} out of focus — rather than a different ${noun}.`,
     );
-    // The name is a label on a photograph, not a design to be recalled: a model
-    // that has seen the name on an older car will draw the older car from it.
     lines.push(
-      `- Take the ${noun}'s design from the supplied images only. The name "${brief.carModel}" is a label, not a description — do not build the ${noun} from what the name brings to mind, and do not fill in any part of it from another ${noun} of that name.`,
+      `- You are not told what this ${noun} is called, and you do not need to know: the photographs are its only description. A model name may appear in the words the presenter speaks or in a shot direction — that is a word to say, never a design to recall. Build nothing about this ${noun}, and no badge on it, from a name.`,
     );
   }
   /*
@@ -323,6 +358,9 @@ const CLOSING_BEAT =
 export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildPromptResult | null {
   if (brief.categories.length === 0) return null;
   const ctx = buildContext(brief);
+  // Every line the model reads about the picture goes through this: the vehicle's
+  // name is a lookup key, and what it looks up is the car it replaced.
+  const plain = (text: string): string => unnamed(text, brief.carModel, ctx.vehicle === 'bike' ? 'bike' : 'car');
   const beats = buildBeats(ctx);
   if (!beats.length) return null;
   const overrides = opts.sceneOverrides ?? {};
@@ -450,12 +488,14 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       }
       if (brief.modelSpecific && brief.alsoFeatured?.length) {
         L.push(
-          `This film features more than one vehicle: ${[brief.carModel, ...brief.alsoFeatured].join(', ')}. Give each its own moment on screen and keep every one of them true to its supplied reference images — do not blend two models into one vehicle.`,
+          `This film features ${brief.alsoFeatured.length + 1} vehicles. Give each its own moment on screen, and build each one only from its own reference photographs — never blend two of them into one vehicle.`,
         );
       }
       if (brief.modelSpecific && brief.carModel) {
+        // Named, this line sent the model looking the name up; the photographs say
+        // everything it needs, and say it about the right car.
         L.push(
-          `Car model: ${brief.carModel}. Match the current-generation ${brief.carModel} exactly as shown in the supplied car-model reference set — body shape, face, lamps, wheels and proportions. Do not substitute an older generation or invent a design.`,
+          `The ${ctx.vehicle === 'bike' ? 'bike' : 'car'} on camera is the one in the supplied reference photographs: match it exactly — body shape, face, lamps, grille, wheels, badges and proportions. Take nothing about it from a name, from memory, or from any vehicle you have seen elsewhere.`,
         );
       }
       if (brief.modelSpecific && brief.carModel && brief.carColour) {
@@ -477,7 +517,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
           'These supplied reference images show exactly how things look — copy the car\'s design, colour and details and the showroom\'s look from them faithfully, but film them as real things in the scene. Never paste, hang, display or frame a reference photo itself inside the video. Refer to each by its filename:',
         );
         for (const a of attachments) {
-          L.push(`- ${a.filename} — ${a.label}${a.kind === 'logo' ? ' (overlay / end card only)' : ''}`);
+          // Name-free, like every other line the model reads: the label beside a
+          // photograph used to say "Skoda Slavia front", which is the name again.
+          L.push(`- ${plain(a.filename)} — ${plain(a.label)}${a.kind === 'logo' ? ' (overlay / end card only)' : ''}`);
         }
       }
     }
@@ -580,12 +622,12 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       );
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       const shotText = ov.shot?.trim() || baseShot;
-      if (shotText) L.push(`Shot: ${shotText}`);
+      if (shotText) L.push(`Shot: ${plain(shotText)}`);
       // The photo this shot is built on: the designer's pick, a photo of the part the
       // shot frames, or a plain instruction to render that part generically rather
       // than bend a photo of something else into it.
       const visualLine = sceneVisualLine(sceneVisual(shotText ?? '', ov.ref, attachments, ctx.vehicle), ctx.vehicle);
-      if (visualLine) L.push(visualLine);
+      if (visualLine) L.push(plain(visualLine));
       // Plain words only: no stress capitals, no syllable hyphens, no doubled word.
       const scripted = (ov.phonetic?.trim() ? plainSpoken(ov.phonetic.trim(), ov.dialogue) : '') || ov.dialogue?.trim();
       const dialogue = scripted || sc.beat.dialogue;
@@ -770,12 +812,12 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       const ov = sceneEditFor(overrides, plan, sc) ?? {};
       C.push(`Scene ${i + 1} (~${sc.duration}s) — ${sc.beat.title}`);
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
-      if (ov.shot?.trim() || baseShot) C.push(`  Shot: ${ov.shot?.trim() || baseShot}`);
+      if (ov.shot?.trim() || baseShot) C.push(`  Shot: ${plain(ov.shot?.trim() || baseShot || '')}`);
       const contVisual = sceneVisualLine(
         sceneVisual(ov.shot?.trim() || baseShot || '', ov.ref, attachments, ctx.vehicle),
         ctx.vehicle,
       );
-      if (contVisual) C.push(`  ${contVisual}`);
+      if (contVisual) C.push(`  ${plain(contVisual)}`);
       const scriptedC = (ov.phonetic?.trim() ? plainSpoken(ov.phonetic.trim(), ov.dialogue) : '') || ov.dialogue?.trim();
       const d = scriptedC || sc.beat.dialogue;
       if (d) {

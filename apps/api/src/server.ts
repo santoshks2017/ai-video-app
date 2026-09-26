@@ -153,6 +153,7 @@ import {
   storyTheme,
   themeDirection,
   plainSpoken,
+  unnamed,
   orderReferences,
   type ClientProfile,
   DEALER_VIEWS,
@@ -1783,6 +1784,8 @@ async function loadBriefAssets(brief: Brief): Promise<{
   const videoRefs: LabelledRef[] = [];
   let actorRef: LabelledRef | undefined;
   let emblemRef: LabelledRef | undefined;
+  /** Whatever the model reads, with the vehicle's name taken out of it. */
+  const plain = (t: string): string => unnamed(t, brief.carModel, brief.vehicleKind === 'bike' ? 'bike' : 'car');
   let dealerLogo: Buffer | undefined;
   let brandLogo: Buffer | undefined;
   const noun = brief.vehicleKind === 'bike' ? 'the bike' : 'the car';
@@ -1831,12 +1834,14 @@ async function loadBriefAssets(brief: Brief): Promise<{
       // Another model in the range. It keeps its own words, and never a slot among
       // the vehicle's photographs: taken for one, its face and its emblem end up on
       // the vehicle the film is actually about.
-      references.push({ ref, filename: a.filename, label: a.label });
+      references.push({ ref, filename: plain(a.filename), label: plain(a.label) });
     } else if (a.kind === 'car-model') {
       // A sheet carries its own warning in the label the brief wrote for it; a
-      // single photograph just needs naming by the side it shows.
-      const side = a.sheet ? a.label : a.angle ? `${noun}, ${a.angle}` : `${noun} — ${a.label}`;
-      carRefs.push({ ref, filename: a.filename, label: side, angle: a.angle, sheet: a.sheet });
+      // single photograph just needs naming by the side it shows. Neither carries
+      // the vehicle's name: "Skoda Slavia front" beside a photograph is the name
+      // again, and the name is what fetches the car this one replaced.
+      const side = a.sheet ? plain(a.label) : a.angle ? `${noun}, ${a.angle}` : `${noun} — ${plain(a.label)}`;
+      carRefs.push({ ref, filename: plain(a.filename), label: side, angle: a.angle, sheet: a.sheet });
     } else if (a.kind === 'actor') {
       // First of the rest: the same face, hair and clothes in every part.
       actorRef = {
@@ -2331,7 +2336,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
         const moments = [part.duration * 0.35, part.duration * 0.85].map((t) => Math.max(0.2, Math.min(t, part.duration - 0.2)));
         const frames = (await Promise.all(moments.map((t) => posterFrame(bytes, t).catch(() => null)))).filter((f): f is Buffer => Boolean(f));
         if (frames.length && refPhoto) {
-          const verdicts = await Promise.all(frames.map((f) => checkVehicleFrame(f, refPhoto, brief.carModel!, resolved.apiKey)));
+          const verdicts = await Promise.all(frames.map((f) => checkVehicleFrame(f, refPhoto, resolved.apiKey)));
           const judged = verdicts.filter((v) => v.checked);
           // One clear mismatch anywhere in the part is a wrong car in the film.
           const wrong = judged.find((v) => !v.same);
@@ -4267,11 +4272,11 @@ app.post<{
     try {
       let out = await drawCreativeScene(scene, refs, key);
       let spent = out.costInr;
-      let check = await checkVehicleFrame(await asJpeg(out.bytes), refs[0]!.bytes, scene.vehicle.name, key);
+      let check = await checkVehicleFrame(await asJpeg(out.bytes), refs[0]!.bytes, key);
       if (check.checked && !check.same) {
         const again = await drawCreativeScene(scene, refs, key);
         spent += again.costInr;
-        const second = await checkVehicleFrame(await asJpeg(again.bytes), refs[0]!.bytes, scene.vehicle.name, key);
+        const second = await checkVehicleFrame(await asJpeg(again.bytes), refs[0]!.bytes, key);
         out = again;
         check = second;
       }
@@ -4417,7 +4422,7 @@ async function checkDesign(
   key: string,
 ): Promise<{ vehicle: { same: boolean; checked: boolean; why?: string }; words: WordsVerdict; logos: LogosVerdict; costInr: number }> {
   const [vehicle, read, drift] = await Promise.all([
-    reference ? checkVehicleFrame(await asJpeg(bytes), reference, design.vehicle.name, key) : Promise.resolve({ same: true, checked: false, why: '' }),
+    reference ? checkVehicleFrame(await asJpeg(bytes), reference, key) : Promise.resolve({ same: true, checked: false, why: '' }),
     readCreativeWords(await asReadable(bytes), key),
     canvas ? logoDrift(canvas, bytes) : Promise.resolve(null),
   ]);
@@ -4675,7 +4680,7 @@ app.post<{
     // Judge against an outside photograph: a cabin shot says nothing about the face or the badge.
     const photo = cars.find((r) => !/interior|cabin|dashboard|boot/i.test(r.label)) ?? cars[0];
     if (!brief.carModel || !photo) return { same: true, checked: false };
-    return await checkVehicleFrame(await asJpeg(drawn).catch(() => drawn), Buffer.from(photo.data, 'base64'), brief.carModel, apiKey);
+    return await checkVehicleFrame(await asJpeg(drawn).catch(() => drawn), Buffer.from(photo.data, 'base64'), apiKey);
   };
   let next = 0;
   const LANES = 3;

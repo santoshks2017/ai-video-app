@@ -39,18 +39,19 @@ const UNCHECKED: VehicleVerdict = { same: true, why: '', checked: false };
 export async function checkVehicleFrame(
   frame: Buffer,
   reference: Buffer,
-  vehicleName: string,
   apiKey: string,
 ): Promise<VehicleVerdict> {
   if (!apiKey) return UNCHECKED;
   const instruction = [
-    `The first image is a reference photograph of a ${vehicleName}.`,
+    // Not named: told what it is looking at, a judge starts agreeing that a car
+    // wearing that name is that car — which is the mistake being checked for.
+    'The first image is a reference photograph of a vehicle.',
     'The second is a frame from a video that is supposed to show that same vehicle.',
     '',
     'Compare only the vehicle. Look at the shape of the face and grille, the lamp signatures,',
     'the roofline and proportions, the wheels and the badges. Paint colour, lighting, angle,',
     'background and image quality do not matter — a different colour of the same model is a match.',
-    'A different generation or facelift of the same nameplate is NOT a match. A different model is not a match.',
+    'A different generation or facelift of the same vehicle is NOT a match — judge by what you see, not by what the vehicle is called.',
     "Look at the maker's emblem as well, on the grille and the tailgate: a different design of that maker's",
     'logo — an older or a newer one than the reference shows — is NOT a match. Judge the emblem only where it',
     'is legible in both images; where it is too small or too soft to read in either, ignore it.',

@@ -132,7 +132,6 @@ export interface SceneImageRequest {
   cast?: string;
   /** The look the whole film is graded to. */
   style?: string;
-  vehicle: string;
   vehicleKind: 'car' | 'bike';
   /** Whether a person is on camera in this film at all. */
   onCameraPerson: boolean;
@@ -292,13 +291,12 @@ export async function drawSceneFrame(
  */
 export function sceneImageContext(
   brief: Brief,
-): Pick<SceneImageRequest, 'aspect' | 'style' | 'vehicle' | 'vehicleKind' | 'rules' | 'cast'> {
+): Pick<SceneImageRequest, 'aspect' | 'style' | 'vehicleKind' | 'rules' | 'cast'> {
   const mode = narrationMode(brief.narration);
   const who = brief.actor?.name?.trim();
   return {
     aspect: brief.aspect,
     style: brief.visualStyle,
-    vehicle: brief.carModel || brief.lineup?.models.join(' / ') || brief.dealer.brandModel || 'the vehicle',
     vehicleKind: brief.vehicleKind ?? 'car',
     rules: sceneRules(brief),
     cast: mode.onCameraPerson

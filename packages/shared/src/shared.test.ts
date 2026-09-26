@@ -40,6 +40,7 @@ import {
   orderReferences,
   refRole,
   referencePlan,
+  unnamed,
   speechRate,
   DEFAULT_WPM,
   pacificDay,
@@ -829,7 +830,7 @@ test('spoken lines reach the model as plain words — no stress capitals, no syl
   }
 });
 
-test('every part names the car and rules out an earlier generation of it', () => {
+test('every part is held to the photographs, and no part is told what the car is called', () => {
   const b = base({
     categories: ['feature'],
     narration: 'presenter',
@@ -842,8 +843,10 @@ test('every part names the car and rules out an earlier generation of it', () =>
   const res = buildPrompt(b)!;
   assert.ok(res.parts.length > 1);
   for (const text of [res.parts[0]!.text, ...res.parts.slice(1).map((p) => p.continuationText ?? '')]) {
-    assert.match(text, /The car is the Mahindra XUV 3XO and nothing else/);
-    assert.match(text, /Never an earlier generation/);
+    assert.match(text, /The car in this film is the one in the supplied reference images/);
+    assert.match(text, /Never an earlier version of it, never a later one/);
+    // The name is what sent it looking the car up, so the name is not there at all.
+    assert.doesNotMatch(text, /XUV 3XO|XUV3XO/i);
   }
 });
 
@@ -1058,6 +1061,43 @@ test('the vehicle, the presenter and the dealership each keep a slot', () => {
   );
 });
 
+test('a name is taken out of whatever a model is about to read', () => {
+  const car = (t: string) => unnamed(t, 'Facelift Skoda Slavia', 'car');
+  assert.equal(car('slavia-front-1.jpg'), 'car-front-1.jpg', 'a filename carries the name too');
+  assert.equal(car('skoda__slavia-sheet-front.jpg'), 'car-sheet-front.jpg');
+  assert.equal(car('Skoda Slavia front'), 'car front');
+  assert.equal(car('Facelift Skoda Slavia — every photograph of the front in one image'), 'car — every photograph of the front in one image');
+  assert.equal(car('A wide shot of the Slavia on the road'), 'A wide shot of the car on the road', 'and a shot direction somebody typed');
+  assert.equal(car('The presenter opens the door'), 'The presenter opens the door', 'anything else is left exactly as it was');
+  assert.equal(unnamed('A Hero Splendor on the road', 'Hero Splendor', 'bike'), 'A bike on the road');
+  assert.equal(unnamed('nothing to take out', undefined), 'nothing to take out');
+});
+
+test('the vehicle is never named to the model that draws it', () => {
+  const img = (label: string, filename: string) => ({ label, filename, storagePath: `refs/x/${filename}`, refId: 'r', url: `/api/refs/r/${filename}` });
+  const car = {
+    id: 'skoda__slavia', brand: 'Skoda', model: 'Slavia', slug: 'skoda/slavia',
+    images: { front: [img('Skoda Slavia front', 'slavia-front-1.jpg')], side: [img('Skoda Slavia side', 'slavia-side-1.jpg')] },
+    colours: [], variants: [],
+  } as unknown as CarModelProfile;
+  const project = { ...emptyProject(), useCases: ['walkaround'], carId: car.id, carIds: [car.id] };
+  const brief = composeBrief(project as never, { car });
+  const built = buildPrompt(brief)!;
+
+  for (const [i, part] of built.parts.entries()) {
+    // The words the presenter says are the one place a name belongs: it is spoken.
+    const visual = part.text.split('## SPOKEN LINES')[0]!;
+    assert.doesNotMatch(visual, /Slavia/i, `part ${i + 1} names the model where it describes how it looks`);
+    assert.doesNotMatch(visual, /current-generation/i, `part ${i + 1} still argues about generations by name`);
+  }
+  const first = built.parts[0]!.text;
+  assert.match(first, /The car in this film is the one in the supplied reference images/);
+  assert.match(first, /You are not told what this car is called, and you do not need to know/);
+  assert.match(first, /A model name may appear in the words the presenter speaks or in a shot direction — that is a word to say, never a design to recall/);
+  // The reference photographs are still labelled by what they show, so a scene can be matched to one.
+  assert.ok(brief.attachments.some((a) => a.kind === 'car-model'));
+});
+
 test('the maker’s emblem is shown to the model, right behind the vehicle’s face', () => {
   const img = (label: string, filename: string) => ({ label, filename, storagePath: `refs/x/${filename}`, refId: 'r', url: `/api/refs/r/${filename}` });
   const car = { id: 'renault__kiger', brand: 'Renault', model: 'Kiger', slug: 'renault/kiger', images: { front: [img('Kiger front', 'kiger-front-1.jpg')] }, colours: [], variants: [] } as unknown as CarModelProfile;
@@ -1066,7 +1106,8 @@ test('the maker’s emblem is shown to the model, right behind the vehicle’s f
 
   const emblem = brief.attachments.find((a) => a.emblem)!;
   assert.ok(emblem, 'the client’s own artwork of the emblem travels with the brief');
-  assert.match(emblem.label, /Renault emblem as it is today/);
+  assert.match(emblem.label, /the maker's emblem as it is today/);
+  assert.doesNotMatch(emblem.label, /Renault/, 'a maker’s name fetches its older logo, so it is not there either');
   assert.match(emblem.label, /Never an older version of it/);
   assert.match(emblem.label, /on the sign over the showroom/);
   assert.equal(refRole(emblem), 'emblem', 'and it is shown to the model, not laid over the cut');

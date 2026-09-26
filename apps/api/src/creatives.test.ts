@@ -53,8 +53,11 @@ test('the picture is asked for with this vehicle, a blank plate, room for the wo
     { aspect: '9:16', engine: 'festival', occasion: 'Diwali', vehicle: { name: 'Hyundai Creta', colour: 'Abyss Black' }, textBand: 'top', panel: true, mood: { panel: '#5C0A0A', accent: '#FFC53D' } },
     ['the Hyundai Creta, front three-quarter', 'the Hyundai Creta, side'],
   );
-  assert.match(p, /<IMAGE_REF_0> — the Hyundai Creta, front three-quarter\n<IMAGE_REF_1> — the Hyundai Creta, side/);
-  assert.match(p, /<IMAGE_REF_0> is the Hyundai Creta in Abyss Black\. Put THIS car/);
+  // The labels beside the photographs are name-free too: a label is the name again.
+  assert.match(p, /<IMAGE_REF_0> — the car, front three-quarter\n<IMAGE_REF_1> — the car, side/);
+  assert.doesNotMatch(p, /Hyundai Creta/, 'the vehicle is never named to the model that draws it');
+  assert.match(p, /<IMAGE_REF_0> is the car this picture is about, in Abyss Black\. Put THIS car/);
+  assert.doesNotMatch(p, /Hyundai Creta/, 'the vehicle is never named to the model that draws it');
   assert.match(p, /NUMBER PLATES ARE PLAIN WHITE AND BLANK/);
   assert.match(p, /diyas/, 'dressed for the occasion');
   assert.match(p, /keep the top third calm/);
@@ -96,11 +99,13 @@ test('Nano Banana 2 designs the whole creative on the canvas with the logos in p
   const p = designInstruction(req, ['the Hyundai Creta, front', 'the Hyundai Creta, side']);
   assert.match(p, /Instagram square post .*1080×1080 pixels, aspect 1:1/);
   assert.match(p, /top automotive advertising agency/);
-  assert.match(p, /<IMAGE_REF_0> — the canvas: this creative's exact shape, with the client's logos already in their final places\n<IMAGE_REF_1> — the Hyundai Creta, front\n<IMAGE_REF_2> — the Hyundai Creta, side/);
+  assert.match(p, /<IMAGE_REF_0> — the canvas: this creative's exact shape, with the client's logos already in their final places\n<IMAGE_REF_1> — the car, front\n<IMAGE_REF_2> — the car, side/);
   assert.match(p, /keep each one exactly where it is — the same place, the same size, the same colours/);
   assert.match(p, /The grey is empty canvas: replace every bit of it/);
   assert.match(p, /Add no other logo, emblem, brand name or wordmark anywhere/);
-  assert.match(p, /<IMAGE_REF_1> is the Hyundai Creta in Abyss Black\. Put THIS car/, 'the car is the first photo after the canvas');
+  assert.match(p, /<IMAGE_REF_1> is the car this creative is about, in Abyss Black\. Put THIS car/, 'the car is the first photo after the canvas');
+  assert.doesNotMatch(p, /Hyundai Creta/, 'a name fetches the car it replaced; the photographs are the only description');
+  assert.match(p, /A model name may appear in the words you set — that is a word to set, never a description to draw from/);
   assert.match(p, /NUMBER PLATES ARE PLAIN WHITE AND BLANK/);
   assert.match(p, /Navratri night/, 'dressed for the occasion');
   assert.match(p, /Headline — the largest, boldest words on the creative by far: "Celebrate Navratri in the Creta"/);
@@ -119,7 +124,7 @@ test('Nano Banana 2 designs the whole creative on the canvas with the logos in p
 
   const bare = designInstruction({ ...req, canvas: undefined }, ['x']);
   assert.doesNotMatch(bare, /IMAGE_REF_0> — the canvas/);
-  assert.match(bare, /<IMAGE_REF_0> is the Hyundai Creta/, 'without a canvas the car comes first');
+  assert.match(bare, /<IMAGE_REF_0> is the car this creative is about/, 'without a canvas the car comes first');
 
   const wide = designInstruction({ ...req, format: 'landscape', zones: { logoBand: 0.2, stripTop: 0.83, logoTone: 'light', textSide: 'left' } }, ['x']);
   assert.match(wide, /words in the left half of the frame and the whole car in the right half/);
@@ -139,7 +144,7 @@ test('Nano Banana 2 designs the whole creative on the canvas with the logos in p
   assert.match(banner, /The left and right 7% may be trimmed/, '300×600 is cut from 9:16');
 
   const r = reviseInstruction(req, 'make the headline gold', 2);
-  assert.match(r, /<IMAGE_REF_0> is a finished social media advertisement\.\n<IMAGE_REF_1>, <IMAGE_REF_2> are photographs of the Hyundai Creta/);
+  assert.match(r, /<IMAGE_REF_0> is a finished social media advertisement\.\n<IMAGE_REF_1>, <IMAGE_REF_2> are photographs of the car in it/);
   assert.match(r, /Make this one change to the advertisement: "make the headline gold"/);
   assert.match(r, /the logos exactly where they are, and every word exactly as written/);
   assert.match(r, /plain white and blank/);
@@ -160,11 +165,11 @@ test('a reference joins the design: a style to follow, a master to match, or the
 
   const style = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind: 'style', changes: 'swap the offer to ₹75,000' } }, ['the Hyundai Creta, front']);
   assert.match(style, /<IMAGE_REF_0> — an earlier advertisement to design this one after/);
-  assert.match(style, /<IMAGE_REF_1> — the Hyundai Creta, front/, 'the car moves down one');
+  assert.match(style, /<IMAGE_REF_1> — the car, front/, 'the car moves down one');
   assert.match(style, /<IMAGE_REF_0> is an earlier advertisement\. Design this one in its image/);
   assert.match(style, /a fresh render in this frame, never a copy of its pixels/);
   assert.match(style, /One thing changes from it: "swap the offer to ₹75,000"/);
-  assert.match(style, /<IMAGE_REF_1> is the Hyundai Creta/, 'the car block still points at the right image');
+  assert.match(style, /<IMAGE_REF_1> is the car this creative is about/, 'the car block still points at the right image');
 
   const master = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind: 'master' } }, ['the Hyundai Creta, front']);
   assert.match(master, /this same advertisement, already approved at another size/);
@@ -214,7 +219,7 @@ test('with no photographs of the vehicle, an earlier advertisement or the approv
     assert.match(p, /No people in the foreground/, `${kind}: only a photograph of people lets people in`);
   }
   const withCar = designInstruction({ ...base, reference: { storagePath: 'refs/a/b.png', kind: 'style' } }, ['the Hyundai Creta, front']);
-  assert.match(withCar, /<IMAGE_REF_1> is the Hyundai vehicle in the photograph\. Put THIS car/, 'with photographs, the car block stands as before');
+  assert.match(withCar, /<IMAGE_REF_1> is the car this creative is about/, 'with photographs, the car block stands as before');
   assert.doesNotMatch(withCar, /one in the reference advertisement/);
 });
 
@@ -235,8 +240,8 @@ test('with a canvas and a reference, the canvas stays first and everything shift
   );
   assert.match(withBoth, /<IMAGE_REF_0> — the canvas/);
   assert.match(withBoth, /<IMAGE_REF_1> — an earlier advertisement/);
-  assert.match(withBoth, /<IMAGE_REF_2> — the Hyundai Creta, front/);
-  assert.match(withBoth, /<IMAGE_REF_2> is the Hyundai Creta/);
+  assert.match(withBoth, /<IMAGE_REF_2> — the car, front/);
+  assert.match(withBoth, /<IMAGE_REF_2> is the car this creative is about/);
 });
 
 test('a scene can be asked to match the approved creative', () => {

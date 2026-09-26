@@ -475,7 +475,9 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
     attachments.push({
       ...toDealerPhoto(emblemArt, 'extra'),
       emblem: true,
-      label: `the ${brandName ? `${brandName} ` : ''}emblem as it is today — this exact design, wherever the emblem appears: on the ${kindNoun}'s grille, tailgate, wheel centres and steering wheel, and on the sign over the showroom. Never an older version of it. A record of the design, never a thing to place in the frame`,
+      // Not "the Renault emblem": a maker's name fetches its older logo as surely as
+      // a model's name fetches its older car. The artwork itself says which it is.
+      label: `the maker's emblem as it is today — this exact design, wherever the emblem appears: on the ${kindNoun}'s grille, tailgate, wheel centres and steering wheel, and on the sign over the showroom. Never an older version of it. A record of the design, never a thing to place in the frame`,
     });
   }
   /*

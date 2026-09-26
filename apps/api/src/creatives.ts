@@ -18,6 +18,7 @@ import {
   DEFAULT_USD_TO_INR,
   isAdFormat,
   pictureTrim,
+  unnamed,
   emptyCopy,
   isCreativeEngine,
   tidyCopy,
@@ -223,8 +224,11 @@ export interface SceneRequest {
 }
 
 /** The instruction for the picture: this vehicle, this scene, room for the words, no writing at all. */
-export function sceneInstruction(req: SceneRequest, refLabels: string[]): string {
+export function sceneInstruction(req: SceneRequest, rawLabels: string[]): string {
   const noun = req.vehicle.kind === 'bike' ? 'motorcycle' : 'car';
+  // A label beside a photograph is the name again — "the Hyundai Creta, front" —
+  // and a name is what fetches the car that wore it longest.
+  const refLabels = rawLabels.map((l) => unnamed(l, req.vehicle.name, req.vehicle.kind === 'bike' ? 'bike' : 'car'));
   const e = CREATIVE_ENGINE_BY_ID[req.engine];
   const scene = (req.occasion && OCCASION_SCENES[req.occasion]) || e?.scene || 'a clean, premium setting';
   const tall = req.aspect === '9:16' || req.aspect === '4:5';
@@ -242,7 +246,7 @@ export function sceneInstruction(req: SceneRequest, refLabels: string[]): string
     ...refLabels.map((l, i) => `<IMAGE_REF_${i}> — ${l}`),
     '',
     `## The ${noun}`,
-    `<IMAGE_REF_0> is the ${req.vehicle.name}${req.vehicle.colour ? ` in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the photograph: the same model generation, body shape, grille, headlamps, tail-lamps, badges, alloy wheels, colour and trim as in the reference photographs${refLabels.length > 1 ? ', which show its other sides' : ''}. Build it only from these photographs — never from what the name brings to mind, and never an older or different model.`,
+    `<IMAGE_REF_0> is the ${noun} this picture is about${req.vehicle.colour ? `, in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the photograph: the same body shape, grille, headlamps, tail-lamps, badges, alloy wheels and trim as in the reference photographs${refLabels.length > 1 ? ', which show its other sides' : ''}. You are not told what it is called and you do not need to know: the photographs are its only description. Build it only from them — never from a name, and never from an older or different model.`,
     `NUMBER PLATES ARE PLAIN WHITE AND BLANK — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is there, as a plain white plate with nothing on it: no letters, no numbers, no state code, no dealer name, no sticker. The same for any other vehicle in the frame. Writing on a plate in the reference photographs is not part of the ${noun}; never copy it.`,
     `The ${noun} is whole and uncropped, sharp, the hero of the picture${tall ? '' : ', about half the width of the frame'}, seen three-quarters from the front unless the reference angle suggests otherwise, on the ground with correct contact shadows under the tyres and true reflections in the paint and glass.`,
     '',
@@ -387,8 +391,9 @@ function layoutBrief(req: DesignRequest, noun: string): string[] {
 }
 
 /** The instruction for a whole creative: the canvas, this vehicle, these words exactly and nothing else. */
-export function designInstruction(req: DesignRequest, carLabels: string[]): string {
+export function designInstruction(req: DesignRequest, rawLabels: string[]): string {
   const noun = req.vehicle.kind === 'bike' ? 'motorcycle' : 'car';
+  const carLabels = rawLabels.map((l) => unnamed(l, req.vehicle.name, req.vehicle.kind === 'bike' ? 'bike' : 'car'));
   const f = CREATIVE_FORMAT_BY_ID[req.format];
   const ad = isAdFormat(req.format);
   const e = CREATIVE_ENGINE_BY_ID[req.engine];
@@ -455,7 +460,7 @@ export function designInstruction(req: DesignRequest, carLabels: string[]): stri
       : [
           '',
           `## The ${noun}`,
-          `<IMAGE_REF_${car}> is the ${req.vehicle.name}${req.vehicle.colour ? ` in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the creative: the same model generation, body shape, grille, headlamps, tail-lamps, badges, alloy wheels, colour and trim as in the reference photographs${carLabels.length > 1 ? ', which show its other sides' : ''}. Build it only from these photographs — never from what the name brings to mind, and never an older or different model.`,
+          `<IMAGE_REF_${car}> is the ${noun} this creative is about${req.vehicle.colour ? `, in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the creative: the same body shape, grille, headlamps, tail-lamps, badges, alloy wheels and trim as in the reference photographs${carLabels.length > 1 ? ', which show its other sides' : ''}. You are not told what it is called and you do not need to know: the photographs are its only description. A model name may appear in the words you set — that is a word to set, never a description to draw from. Build the ${noun} only from the photographs — never from a name, and never from an older or different model.`,
           `The ${noun} is whole and uncropped, sharp, the hero of the picture, on the ground with correct contact shadows and true reflections in the paint and glass.`,
           `NUMBER PLATES ARE PLAIN WHITE AND BLANK — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is a plain white plate with nothing on it: no letters, no numbers, no state code, no dealer name. Writing on a plate in the reference photographs is not part of the ${noun}; never copy it.`,
         ]),
@@ -492,7 +497,7 @@ export function reviseInstruction(req: DesignRequest, change: string, carRefs: n
   const noun = req.vehicle.kind === 'bike' ? 'motorcycle' : 'car';
   return [
     '<IMAGE_REF_0> is a finished social media advertisement.',
-    carRefs ? `${Array.from({ length: carRefs }, (_, i) => `<IMAGE_REF_${i + 1}>`).join(', ')} ${carRefs === 1 ? 'is a photograph' : 'are photographs'} of the ${req.vehicle.name} in it.` : '',
+    carRefs ? `${Array.from({ length: carRefs }, (_, i) => `<IMAGE_REF_${i + 1}>`).join(', ')} ${carRefs === 1 ? 'is a photograph' : 'are photographs'} of the ${noun} in it.` : '',
     '',
     `Make this one change to the advertisement: ${quoted(change.trim())}`,
     '',

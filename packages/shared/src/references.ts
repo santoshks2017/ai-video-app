@@ -39,12 +39,24 @@ export function sentLabel(a: DealerPhoto, opts: { carModel?: string; vehicleKind
   return a.sheet ? a.label : `${a.kind === 'extra' ? 'a reference for this film' : 'the dealership'} — ${a.label}`;
 }
 
+/**
+ * What the close crop of the vehicle's face is called beside it.
+ *
+ * One string, because the renderer sends it and the editor's list shows it, and a
+ * label that drifts between the two is a designer checking something else.
+ */
+export const faceLabel = (kind: 'car' | 'bike' = 'car'): string =>
+  kind === 'bike'
+    ? 'the front of the bike, close — the headlamp, the cowl around it and the badge, exactly as they are here'
+    : "the face of the car, close — the grille, the trim that borders it, the lamps and the badge, exactly as they are here. This is the same car as the photograph above it, near enough to read: where a shot shows the front, copy this.";
+
 /** What a reference is a picture of. */
-export type RefRole = 'scene' | 'vehicle' | 'emblem' | 'presenter' | 'dealership' | 'extra' | 'video' | 'overlay';
+export type RefRole = 'scene' | 'vehicle' | 'face' | 'emblem' | 'presenter' | 'dealership' | 'extra' | 'video' | 'overlay';
 
 export const ROLE_LABEL: Record<RefRole, string> = {
   scene: 'Scene',
   vehicle: 'Vehicle',
+  face: 'The face, close',
   emblem: "Maker's emblem",
   presenter: 'Presenter',
   dealership: 'Dealership',
@@ -78,6 +90,15 @@ export interface RefSlots<T> {
   frames?: T[];
   /** Photographs of the vehicle, best first. These outrank everything. */
   car: T[];
+  /**
+   * The vehicle's face, cropped out of its own front photograph and sent again
+   * life size: the grille, the trim around it, the lamps and the badge.
+   *
+   * A generation is told from the one before it by exactly those few hundred
+   * pixels, and in a press shot they are a small part of a picture the model also
+   * has to read a showroom out of. Sent close, they are the size of the question.
+   */
+  face?: T;
   /** The maker's emblem, in the design it wears today. Right behind the vehicle's face. */
   emblem?: T;
   /** The presenter. Reserved a slot on every part. */
@@ -116,6 +137,8 @@ export function orderReferences<T>(s: RefSlots<T>): T[] {
   const out: T[] = [];
   const [lead, ...moreCars] = s.car;
   if (lead) out.push(lead);
+  // The same face, close enough to read: second, where the detail is still weighed.
+  if (s.face) out.push(s.face);
   if (s.emblem) out.push(s.emblem);
   if (s.seed) out.push(s.seed);
   // At most two: a part holds two or three scenes, and a reference set that is
@@ -187,7 +210,21 @@ export function referencePlan(
   const place = rest[0];
   const videos = live.filter((r) => r.role === 'video');
 
-  const ordered = orderReferences({ car, emblem, actor, place, rest, videos, max, maxVideos });
+  /*
+   * The close crop of the face, as the renderer will make it.
+   *
+   * It is not an attachment — it is cut out of the vehicle's own front photograph
+   * at render time — but it takes a slot, so a list that leaves it out numbers
+   * everything after it wrongly. Held back the photograph it comes from, and it
+   * goes with it.
+   */
+  const front = car.find((r) => r.photo.angle === 'front') ?? car[0];
+  const label = faceLabel(brief.vehicleKind === 'bike' ? 'bike' : 'car');
+  const face: (typeof all)[number] | undefined = front
+    ? { photo: { ...front.photo, filename: `${front.photo.filename}#face`, label }, label, role: 'face', slot: null, held: false }
+    : undefined;
+
+  const ordered = orderReferences({ car, face, emblem, actor, place, rest, videos, max, maxVideos });
   ordered.forEach((r, i) => {
     r.slot = i;
   });

@@ -178,7 +178,7 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
     lines.push(
       `- The ${noun} in this film is the one in ${
         brief.attachedCarPhotos ? 'the attached photos' : 'the supplied reference images and reference frame'
-      }, and no other — the same generation, the same face, grille, lamps, wheels, badges and proportions as they show. Never an earlier version of it, never a later one, never another ${noun} that looks like it, and never a generic ${noun}. If a shot cannot show it accurately, show less of it — a detail, or the ${noun} out of focus — rather than a different ${noun}.`,
+      }, and no other — the same generation, the same face, grille, lamps, wheels, badges and proportions as they show — the trim that borders the grille included, in the same shape, the same width and the same finish, whether that is chrome, black or body colour. Never an earlier version of it, never a later one, never another ${noun} that looks like it, and never a generic ${noun}. If a shot cannot show it accurately, show less of it — a detail, or the ${noun} out of focus — rather than a different ${noun}.`,
     );
     lines.push(
       `- You are not told what this ${noun} is called, and you do not need to know: the photographs are its only description. A model name may appear in the words the presenter speaks or in a shot direction — that is a word to say, never a design to recall. Build nothing about this ${noun}, and no badge on it, from a name.`,
@@ -239,11 +239,11 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
     `- Where the paint is a colour the photographs do not show, only the paint changes. The face, the grille, the emblem, the lamps, the wheels, the glass and every line stay exactly as photographed — a colour is not a different ${noun}.`,
   );
   lines.push(
-    `- THE PHOTOGRAPHS OUTRANK EVERY OTHER IMAGE. The photographs of the ${noun} are the only record of what it looks like. A drawn frame of the shot, or the frame the part before this one ended on, says where the camera is, how the shot is framed and how it is lit — nothing more. Where any of them disagrees with the photographs about the ${noun}'s shape, face, grille, lamps, wheels, badges or proportions, the photographs are right and the other image is wrong: follow the photographs and correct the ${noun} back to them.`,
+    `- THE PHOTOGRAPHS OUTRANK EVERY OTHER IMAGE. The photographs of the ${noun} are the only record of what it looks like. A drawn frame of the shot, or the frame the part before this one ended on, says where the camera is, how the shot is framed and how it is lit — nothing more. Where any of them disagrees with the photographs about the ${noun}'s shape, face, grille, the trim that borders the grille, lamps, wheels, badges or proportions, the photographs are right and the other image is wrong: follow the photographs and correct the ${noun} back to them.`,
     `- The maker's emblem on the grille, the tailgate, the wheels and the steering wheel is exactly the emblem in the photographs and in the emblem artwork supplied with them, in that exact design — never an older or a newer version of that maker's logo, and never another maker's. The same emblem, the same design, on the sign over the showroom and anywhere else in the scene that carries it. Makers redraw their emblems, and the one you have seen most is the one they have stopped using: copy what is supplied, not what you remember. Where an emblem is not legible in the photographs and none is supplied, leave that surface plain.`,
   );
   lines.push(
-    `- Build this ${noun} only from the supplied photographs. Every panel, lamp, badge, wheel and surface is copied from them — all but the number plates, which stay plain white and blank — and nothing about it comes from anywhere else — not from another ${noun} of this name, not from an earlier generation, not from anything you have seen elsewhere. If a shot would need a view of the ${noun} the photographs do not cover, film an angle they do cover, or hold the camera closer, or let the ${noun} sit out of focus — never fill the gap from memory.`,
+    `- Build this ${noun} only from the supplied photographs. Every panel, lamp, badge, wheel, surface and piece of trim is copied from them — the moulding around the grille most of all, because that is where one generation of a ${noun} differs from the one before it and where a wrong one is spotted first — all but the number plates, which stay plain white and blank — and nothing about it comes from anywhere else — not from another ${noun} of this name, not from an earlier generation, not from anything you have seen elsewhere. If a shot would need a view of the ${noun} the photographs do not cover, film an angle they do cover, or hold the camera closer, or let the ${noun} sit out of focus — never fill the gap from memory.`,
   );
   lines.push(
     `- Every lamp on the ${noun} is complete and lit exactly as in the photographs — the full headlamp signature, the daytime running lamps and the connected tail bar, each one present, the right shape and the right length, and glowing. Never leave a dark panel, a blank recess or a half-drawn lamp where a light belongs.`,
@@ -849,11 +849,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
      * carrying on — is asked for without handing the vehicle over with it.
      */
     C.push(
-      `The photographs supplied with this segment are the only record of what the ${noun} looks like. Its shape, face, grille, lamps, wheels, badges and its paint all come from them and from nowhere else — copy them exactly.`,
+      `The photographs supplied with this segment are the only record of what the ${noun} looks like. Its shape, face, grille, the trim that borders the grille, lamps, wheels, badges and its paint all come from them and from nowhere else — copy them exactly.`,
     );
     if (scenes.some((sc) => usableFrame(sceneEditFor(overrides, plan, sc)))) {
       C.push(
-        `A still of this segment's shot is supplied with them. It is a drawing, not a record of the ${noun}: take from it where the camera stands, how the shot is framed and lit, where the presenter is and what the place looks like. Where it and the photographs disagree about the ${noun} — its face, grille, lamps, wheels, badges, proportions or colour — the photographs are right and it is wrong, and this segment corrects the ${noun} back to them rather than carrying the difference on.`,
+        `A still of this segment's shot is supplied with them. It is a drawing, not a record of the ${noun}: take from it where the camera stands, how the shot is framed and lit, where the presenter is and what the place looks like. Where it and the photographs disagree about the ${noun} — its face, grille, the trim around the grille, lamps, wheels, badges, proportions or colour — the photographs are right and it is wrong, and this segment corrects the ${noun} back to them rather than carrying the difference on.`,
       );
     }
     C.push(

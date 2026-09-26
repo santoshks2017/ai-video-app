@@ -1130,15 +1130,22 @@ test('the vehicle, the presenter and the dealership each keep a slot', () => {
   assert.equal(sentImages.length, 5, 'the image budget is spent exactly');
   assert.ok(sentImages.includes('actor'), 'the presenter is never squeezed out by the car');
   assert.ok(sentImages.includes('place'), 'nor is the dealership');
-  assert.deepEqual(sentImages, ['c1', 'c2', 'c3', 'actor', 'place'], 'the car fills what is left, best first');
+  assert.deepEqual(
+    sentImages,
+    ['c1', 'c1#face', 'c2', 'actor', 'place'],
+    "the car fills what is left, best first — and its face, cropped close, rides right behind its own photograph",
+  );
 
   // Videos ride on their own allowance, and logos never reach the model at all.
   assert.deepEqual(plan.sent.filter((e) => e.role === 'video').map((e) => e.photo.filename), ['clip']);
   assert.deepEqual(plan.overlays.map((e) => e.photo.filename), ['logo']);
   assert.ok(
-    plan.spare.some((e) => e.photo.filename === 'c4'),
+    plan.spare.some((e) => e.photo.filename === 'c3'),
     'what did not fit is listed rather than silently dropped',
   );
+  // The crop is cut from a photograph at render time, so it is never listed as
+  // something a designer could hold back on its own.
+  assert.ok(!plan.spare.some((e) => e.role === 'face'));
 });
 
 test('the list a designer checks carries the words the model is actually given', () => {
@@ -1159,7 +1166,11 @@ test('the list a designer checks carries the words the model is actually given',
   };
   const plan = referencePlan(brief, { max: 10 });
   const said = plan.sent.map((e) => e.label);
-  assert.deepEqual(said, ['the car, front', 'car — every photograph of the side in one image', 'the dealership — the showroom floor']);
+  assert.deepEqual(said.filter((_, i) => plan.sent[i]!.role !== 'face'), [
+    'the car, front',
+    'car — every photograph of the side in one image',
+    'the dealership — the showroom floor',
+  ]);
   for (const label of said) assert.doesNotMatch(label, /slavia/i);
 });
 
@@ -1230,8 +1241,9 @@ test('the maker’s emblem is shown to the model, right behind the vehicle’s f
 
   const plan = referencePlan(brief, { max: 10 });
   const sent = plan.sent.map((e) => e.photo.filename);
-  assert.equal(sent[0], 'kiger-front-1.jpg', 'the vehicle’s face leads');
-  assert.equal(sent[1], 'renault-logo.png', 'the emblem is right behind it');
+  assert.equal(sent[0], 'kiger-front-1.jpg', 'the vehicle’s own photograph leads');
+  assert.equal(sent[1], 'kiger-front-1.jpg#face', 'then the same face, cropped close enough to read its trim');
+  assert.equal(sent[2], 'renault-logo.png', 'and the emblem right behind those');
 
   const text = buildPrompt(brief)!.parts[0]!.text;
   assert.match(text, /the emblem artwork supplied with them/);
@@ -1333,7 +1345,14 @@ test('a reference held back is listed, not deleted', () => {
   const brief = { attachments: [photo('front', 'car-model'), photo('rear', 'car-model')] };
 
   const plan = referencePlan(brief, { max: 10, held: ['front'] });
-  assert.deepEqual(plan.sent.map((e) => e.photo.filename), ['rear'], 'the held one is not sent');
+  assert.deepEqual(
+    plan.sent.filter((e) => e.role !== 'face').map((e) => e.photo.filename),
+    ['rear'],
+    'the held one is not sent',
+  );
+  // The close crop follows whichever photograph is leading, so holding one back
+  // moves the crop rather than leaving a crop of a photograph nobody is sending.
+  assert.equal(plan.sent.find((e) => e.role === 'face')?.photo.filename, 'rear#face');
   const held = plan.spare.find((e) => e.photo.filename === 'front');
   assert.ok(held?.held, 'it is still on the list, marked held');
   assert.equal(held?.slot, null, 'and it has no slot');

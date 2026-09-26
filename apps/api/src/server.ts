@@ -156,6 +156,7 @@ import {
   unnamed,
   orderReferences,
   sentLabel,
+  faceLabel,
   usableFrame,
   type ClientProfile,
   DEALER_VIEWS,
@@ -182,7 +183,7 @@ import {
   type WordsVerdict,
 } from '@ava/shared';
 import { syncVehicleModel, listBrandModels, title, syncColours } from './carSync.js';
-import { seePhotos, seeDealerPhotos, findPeople } from './vision.js';
+import { seePhotos, seeDealerPhotos, findPeople, findVehicleFace } from './vision.js';
 import {
   drawSceneFrame,
   sceneImageContext,
@@ -1518,6 +1519,8 @@ async function renderSegment(
     carRefs?: LabelledRef[];
     /** The presenter. Given a slot on every part, whatever else is competing for one. */
     actorRef?: LabelledRef;
+    /** The vehicle's face, cropped close: the grille, its trim, the lamps and the badge. */
+    faceRef?: LabelledRef;
     /** The maker's emblem, in the design it wears today. */
     emblemRef?: LabelledRef;
     /**
@@ -1577,7 +1580,7 @@ async function renderSegment(
         resolution: veoRes,
         duration: req.duration,
         firstFrame: seeded ? { data: req.seedFrame!.toString('base64'), mimeType: 'image/jpeg' } : undefined,
-        references: [...(req.carRefs ?? []), ...req.references]
+        references: [...(req.carRefs ?? []).slice(0, 1), ...(req.faceRef ? [req.faceRef] : []), ...(req.carRefs ?? []).slice(1), ...req.references]
           .filter((r) => r.ref.kind === 'image' && r.ref.data)
           .slice(0, Math.min(3, model.maxReferenceImages))
           .map((r) => ({ data: r.ref.data!, mimeType: r.ref.mimeType })),
@@ -1636,6 +1639,7 @@ async function renderSegment(
     seed: seedRef,
     frames: req.frames ?? [],
     car: req.carRefs ?? [],
+    face: req.faceRef,
     emblem: req.emblemRef,
     actor: req.actorRef,
     place: req.placeRef,
@@ -1669,7 +1673,7 @@ async function renderSegment(
         ...(req.plain
           ? []
           : [
-              'The photographs of the vehicle outrank every other image here. A drawn frame of a shot, and the frame the part before this one ended on, show only where the camera is, how the shot is framed and how it is lit. Where any of them disagrees with the photographs about the vehicle — its shape, face, grille, lamps, wheels, badges or emblems — the photographs are right: build the vehicle from the photographs and correct it back to them.',
+              'The photographs of the vehicle outrank every other image here. A drawn frame of a shot, and the frame the part before this one ended on, show only where the camera is, how the shot is framed and how it is lit. Where any of them disagrees with the photographs about the vehicle — its shape, face, grille, the trim that borders the grille, lamps, wheels, badges or emblems — the photographs are right: build the vehicle from the photographs and correct it back to them.',
             ]),
         '',
       ].join('\n')
@@ -1880,6 +1884,75 @@ async function loadBriefAssets(brief: Brief): Promise<{
  * was drawn from a photograph of the showroom floor, and the film opened on
  * somebody else's forecourt.
  */
+/*
+ * The vehicle's face, cut out of its own front photograph and sent again close.
+ *
+ * The films that still came back wrong were not wearing another car any more —
+ * they were wearing this car with the previous one's chrome around the grille.
+ * That difference lives in a few hundred pixels of a press shot the model also
+ * has to read a showroom, a floor and a sky out of, and a video model draws what
+ * it can resolve. So the face is found once, cropped, and sent as its own
+ * reference at a size where the trim is legible.
+ *
+ * Kept for the life of the instance: the crop depends only on the photograph, and
+ * a render and its storyboard ask for the same one within seconds of each other.
+ */
+const faceCrops = new Map<string, LabelledRef | null>();
+
+async function faceRefFor(carRefs: CarRef[], kind: 'car' | 'bike'): Promise<LabelledRef | undefined> {
+  const front = carRefs.find((r) => r.angle === 'front' && !r.sheet) ?? carRefs.find((r) => !r.sheet);
+  if (!front?.ref.data) return undefined;
+  const key = `${front.filename}:${front.ref.data.length}`;
+  const known = faceCrops.get(key);
+  if (known !== undefined) return known ?? undefined;
+  const apiKey = await scriptKey().catch(() => undefined);
+  if (!apiKey) return undefined;
+  try {
+    const bytes = Buffer.from(front.ref.data, 'base64');
+    const box = await findVehicleFace(bytes, apiKey, kind);
+    const meta = box ? await sharp(bytes).metadata() : null;
+    const W = meta?.width ?? 0;
+    const H = meta?.height ?? 0;
+    if (!box || !W || !H) {
+      faceCrops.set(key, null);
+      return undefined;
+    }
+    // A little air around it, so the crop is not cut flush through the trim.
+    const pad = 0.05;
+    const left = Math.max(0, Math.round((box.x0 - pad) * W));
+    const top = Math.max(0, Math.round((box.y0 - pad) * H));
+    const width = Math.min(W - left, Math.round((box.x1 - box.x0 + pad * 2) * W));
+    const height = Math.min(H - top, Math.round((box.y1 - box.y0 + pad * 2) * H));
+    /*
+     * A crop worth sending.
+     *
+     * Too small and enlarging it invents detail rather than showing it; nearly the
+     * whole photograph and nothing was found, so the photograph already says it.
+     */
+    const tooSmall = width < 260 || width < W * 0.08 || height < 120;
+    const notACrop = width * height > W * H * 0.85;
+    if (tooSmall || notACrop) {
+      faceCrops.set(key, null);
+      return undefined;
+    }
+    const cropped = await sharp(bytes)
+      .extract({ left, top, width, height })
+      .resize({ width: Math.max(width, Math.min(1400, width * 3)), withoutEnlargement: false })
+      .jpeg({ quality: 94 })
+      .toBuffer();
+    const ref: LabelledRef = {
+      ref: { data: cropped.toString('base64'), mimeType: 'image/jpeg', kind: 'image' },
+      filename: `${front.filename}#face`,
+      label: faceLabel(kind),
+    };
+    faceCrops.set(key, ref);
+    return ref;
+  } catch {
+    // A crop is an improvement, never a requirement: a film still renders without one.
+    return undefined;
+  }
+}
+
 const PLACE_WORDS: [DealerView, RegExp][] = [
   ['exterior', /exterior|facade|fa\u00e7ade|forecourt|outside|street|entrance|signage|building|kerb|curb|frontage|drive-?way|car park/i],
   ['delivery', /delivery|handover|hand-?over|keys?\b|garland|ribbon|ceremony|collect/i],
@@ -2252,6 +2325,8 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   const musicBed = makeMusicBed(brief, jobId, cost.totalSeconds / clampPace(brief.pace) + (brief.endCardOn ? 3 : 0));
   const { references, carRefs, actorRef, placeRef, emblemRef, videoRefs, dealerLogo, brandLogo } =
     await loadBriefAssets(brief);
+  // The face, close: the same photograph again at a size where the grille's trim reads.
+  const faceRef = await faceRefFor(carRefs, brief.vehicleKind === 'bike' ? 'bike' : 'car');
   const scenePlan = buildPrompt(brief, { sceneOverrides: req.body?.sceneOverrides })?.scenePlan ?? null;
   /** What each part was actually shown, kept on the record so a wrong car is traceable. */
   const sentRefs: { part: number; files: string[] }[] = parts.map((p) => ({ part: p.partNum, files: [] }));
@@ -2342,6 +2417,7 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
           frames: partFrames,
           carRefs: partCars,
           actorRef,
+          faceRef,
           placeRef: partPlace,
           emblemRef,
           references,
@@ -2796,6 +2872,7 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
         : Promise.resolve(null);
     const { references, carRefs, actorRef, placeRef, emblemRef, videoRefs, dealerLogo, brandLogo } =
       await loadBriefAssets(brief);
+    const faceRef = await faceRefFor(carRefs, brief.vehicleKind === 'bike' ? 'bike' : 'car');
     const scenePlan = buildPrompt(brief, { sceneOverrides: req.body?.sceneOverrides })?.scenePlan ?? null;
     // Images attached to this retake: "the car is wrong in these frames — here is the car".
     const attached: LabelledRef[] = [];
@@ -2864,6 +2941,9 @@ app.post<{ Params: { jobId: string }; Body: RefineBody }>(
               ? attached
               : carRefsForPart(part, scenePlan, brief, req.body?.sceneOverrides, carRefs),
             actorRef,
+            // An image attached to a retake replaces the project's photographs, so the
+            // crop of one of them would be arguing with it.
+            ...(attached.length ? {} : { faceRef }),
             placeRef,
             emblemRef,
             references: attached.length ? [...attached, ...references] : references,
@@ -4652,6 +4732,9 @@ app.post<{
   }
 
   const { carRefs, actorRef, references, emblemRef } = await loadBriefAssets(brief);
+  // The same close crop the film is given: a still drawn without it comes back with
+  // the right car wearing the trim of the one before it, and the film copies the still.
+  const faceRef = await faceRefFor(carRefs, brief.vehicleKind === 'bike' ? 'bike' : 'car');
   const ctx = sceneImageContext(brief);
   const onCameraPerson = narrationMode(brief.narration).onCameraPerson;
 
@@ -4692,7 +4775,7 @@ app.post<{
      * car, the photograph of the presenter never reached the model at all, and it
      * drew whoever it liked into the still the film is then built from.
      */
-    const reserved = (actorRef?.ref.data ? 1 : 0) + (emblemRef?.ref.data ? 1 : 0);
+    const reserved = (actorRef?.ref.data ? 1 : 0) + (emblemRef?.ref.data ? 1 : 0) + (faceRef?.ref.data ? 1 : 0);
     const room = Math.max(2, FRAME_REFS - reserved);
     if (placeViewFor(text)) {
       places.slice(0, Math.max(1, room - 2)).forEach(add);
@@ -4720,6 +4803,16 @@ app.post<{
      */
     if (emblemRef?.ref.data && !out.some((x) => x.data === emblemRef.ref.data)) {
       out.splice(Math.min(1, out.length), 0, { data: emblemRef.ref.data, mimeType: emblemRef.ref.mimeType, label: emblemRef.label });
+    }
+    /*
+     * The face, closer than any of the photographs shows it.
+     *
+     * Second, right behind the photograph it was cut from, because that is where a
+     * model still weighs what it is looking at — and what it is looking at here is
+     * the one part of the car that says which generation this is.
+     */
+    if (faceRef?.ref.data && !out.some((x) => x.data === faceRef.ref.data)) {
+      out.splice(Math.min(1, out.length), 0, { data: faceRef.ref.data, mimeType: faceRef.ref.mimeType, label: faceRef.label });
     }
     /*
      * The photograph this still is judged against.

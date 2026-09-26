@@ -12,7 +12,7 @@
  * So every photo is looked at, and what it shows is what it is filed under.
  */
 
-import type { TokenUsage, PeopleInShot } from '@ava/shared';
+import type { TokenUsage, PeopleInShot, FrameBox } from '@ava/shared';
 import { boxesFrom1000 } from '@ava/shared';
 import { recordUsage } from './spendLog.js';
 import type { CarAngle } from '@ava/shared';
@@ -234,5 +234,71 @@ export async function seeDealerPhotos(
     return out;
   } catch {
     return [];
+  }
+}
+
+/**
+ * Where the vehicle's face is in a photograph.
+ *
+ * The grille, the trim that borders it and the lamp signature are what tell one
+ * generation of a car from the one before it — and in a press shot they are a
+ * few hundred pixels of a picture the model also has to read a showroom, a road
+ * and a sky out of. Films kept coming back with the right car wearing the old
+ * car's chrome around its grille: not a wrong vehicle, a detail too small to
+ * read. So the face is found once and sent again on its own, life size.
+ *
+ * Null when the front is not really in the picture, or is too small or too
+ * oblique to be worth cropping — a bad crop is worse than none, because it is
+ * sent as the thing to copy exactly.
+ */
+export async function findVehicleFace(
+  photo: Buffer,
+  apiKey: string,
+  kind: 'car' | 'bike' = 'car',
+): Promise<FrameBox | null> {
+  if (!apiKey || !photo.length) return null;
+  const noun = kind === 'bike' ? 'motorcycle or scooter' : 'car';
+  const instruction = [
+    `This is a photograph of a ${noun}.`,
+    kind === 'bike'
+      ? 'Mark the front of it: the headlamp, the cowl or fairing around it, the forks and the front badge.'
+      : 'Mark the face of it: the grille together with the trim or moulding that borders the grille, both headlamps, the badge and the bumper immediately below them.',
+    'One box, as tight as you can make it while keeping all of that inside.',
+    '',
+    'Mark the vehicle the photograph is of — the one in front, the one the picture is about — never a',
+    'vehicle behind it or beside it.',
+    '',
+    'A box is [ymin, xmin, ymax, xmax], whole numbers from 0 to 1000 measured on the photograph.',
+    `Return {"face": null} when the front of the ${noun} is not visible, is cut off, is turned so far away`,
+    'that the grille is barely there, or is too small in the frame to see clearly.',
+    '',
+    'Return JSON only: {"face": [ymin, xmin, ymax, xmax]} or {"face": null}. No commentary.',
+  ].join('\n');
+  try {
+    const model = await resolveTextModel(apiKey, 'transform');
+    const res = await fetch(`${GEMINI}/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: instruction }, { inline_data: { mime_type: 'image/jpeg', data: photo.toString('base64') } }],
+          },
+        ],
+        generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+      }),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      usageMetadata?: TokenUsage;
+    };
+    recordUsage('Vehicle checks', model, body.usageMetadata);
+    const text = body.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+    const face = (JSON.parse(text) as { face?: unknown }).face;
+    return boxesFrom1000([face])[0] ?? null;
+  } catch {
+    return null;
   }
 }

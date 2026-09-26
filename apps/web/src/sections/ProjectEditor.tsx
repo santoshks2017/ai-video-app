@@ -75,20 +75,29 @@ function RefRow({
   entry: PlannedRef;
   onHold?: (filename: string, hold: boolean) => void;
 }) {
-  const { photo, role, slot, held } = entry;
+  const { photo, label, role, slot, held } = entry;
   const src =
     abs(photo.src ?? (photo.refId && photo.filename ? `/api/refs/${photo.refId}/${photo.filename}` : null)) ??
     undefined;
-  // The label is a sentence, because the model reads it beside the image. The
-  // list shows the front of it and keeps the whole thing on hover.
-  const short = photo.label.split(' — ')[0] ?? photo.label;
+  /*
+   * The words the model is given, not the words the library uses.
+   *
+   * This panel is titled "What the model is handed", and it was showing the
+   * library's own name for the car — "Skoda-Auto Slavia" against every photograph
+   * — while the renderer sent "the car, front". Anyone checking whether the name
+   * still goes out read it here and concluded that it does.
+   *
+   * The label is a sentence, because the model reads it beside the image. The
+   * list shows the front of it and keeps the whole thing on hover.
+   */
+  const short = label.split(' — ')[0] ?? label;
   const tags = [
     photo.sheet ? 'a sheet of several photographs' : '',
     photo.angle ?? '',
     photo.view ? dealerViewLabel(photo.view) : '',
   ].filter(Boolean);
   return (
-    <div className={`ref-row${held ? ' held' : slot === null ? ' spare' : ''}`} title={photo.label}>
+    <div className={`ref-row${held ? ' held' : slot === null ? ' spare' : ''}`} title={`${label}\n\n${photo.label}`}>
       <span className="ref-slot">{held || slot === null ? '—' : slot + 1}</span>
       <span className="ref-shot">
         {photo.kind === 'reference-video' ? (
@@ -488,13 +497,19 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
     }
     set({ sceneEdits: next });
     const failed = r.scenes.filter((row) => row.error);
+    // A still in the wrong paint is withheld from the film exactly like a still of
+    // the wrong car, so it is reported the same way.
     const wrongCar = r.scenes.filter((row) => row.check?.checked && !row.check.same);
+    const wrongPaint = r.scenes.filter((row) => row.check?.checked && row.check.same && row.check.colour === 'different');
     return [
       `Drew ${r.made} scene${r.made === 1 ? '' : 's'}.`,
       failed.length ? `${failed.length} did not come back — ${failed[0]!.error}` : '',
       // A frame drawn with the wrong car is kept to look at, but never sent to the film.
       wrongCar.length
         ? `${wrongCar.length} came back with the wrong vehicle even after a second try — ${wrongCar[0]!.check!.why ?? ''} Those are not sent to the video; draw them again or change the shot.`
+        : '',
+      wrongPaint.length
+        ? `${wrongPaint.length} came back in a colour the photographs do not show, even after a second try. Those are not sent to the video either — draw them again, or pick the colour on the project so it is asked for by name.`
         : '',
     ]
       .filter(Boolean)
@@ -1474,7 +1489,7 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
             step="What the model is handed"
             note={`The vehicle, the presenter and the dealership come in on their own — there is nothing to pick. The list below is everything in scope, in the order ${
               activeModel?.name ?? 'the model'
-            } is given it and numbered the way the prompt numbers it. Cross one out to leave it out of the next run: it stays on the list, struck through, until you put it back.`}
+            } is given it and numbered the way the prompt numbers it — each row named the way the model is told it, which for the vehicle is never its name. Cross one out to leave it out of the next run: it stays on the list, struck through, until you put it back.`}
             {...fold('refs')}
           >
             {refPlan &&

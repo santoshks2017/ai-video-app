@@ -72,7 +72,7 @@ export interface GenerationDetail {
   status: string;
   vehicle?: GenerationHistoryItem['vehicle'];
   /** What the vehicle checker made of each part, and whether it had to be made again. */
-  vehicleChecks: { part: number; same: boolean; why: string; remade?: boolean }[];
+  vehicleChecks: { part: number; same: boolean; why: string; remade?: boolean; colour?: 'same' | 'different' }[];
   /** Dead air taken out of each join, and how alike the two sides sound. */
   joins?: { part: number; headTrim: number; tailTrim: number; echo?: number }[];
   referenceFiles: { part: number; files: string[] }[];
@@ -345,7 +345,7 @@ export const api = {
         key: string;
         frame?: { refId: string; storagePath: string; url?: string; filename: string; label: string };
         /** What the vehicle check made of it — a frame with the wrong car is never sent to the film. */
-        check?: { same: boolean; checked: boolean; why?: string };
+        check?: { same: boolean; checked: boolean; why?: string; colour?: 'same' | 'different' };
         error?: string;
       }[];
     }>('/api/scene-images', { method: 'POST', body: JSON.stringify({ brief, scenes }) });

@@ -61,7 +61,7 @@ import { drawLayer, fitReplacementLogo, type DrawnLayer } from './layerDraw.js';
 import { importWebsite } from './siteImport.js';
 import { drawActorSheet, fillActorProfile } from './actorProfile.js';
 import { cleanLogo, findBrandLogo } from './logos.js';
-import { checkVehicleFrame } from './vehicleCheck.js';
+import { checkVehicleFrame, type VehicleVerdict } from './vehicleCheck.js';
 import { registerEngine } from './engine.js';
 import { deleteApiKey, issueApiKey, listApiKeys, updateApiKey, type ApiScope } from './apiKeys.js';
 import { listRunFacts, listAllJobs,
@@ -155,6 +155,8 @@ import {
   plainSpoken,
   unnamed,
   orderReferences,
+  sentLabel,
+  usableFrame,
   type ClientProfile,
   DEALER_VIEWS,
   type DealerView,
@@ -1786,9 +1788,17 @@ async function loadBriefAssets(brief: Brief): Promise<{
   let emblemRef: LabelledRef | undefined;
   /** Whatever the model reads, with the vehicle's name taken out of it. */
   const plain = (t: string): string => unnamed(t, brief.carModel, brief.vehicleKind === 'bike' ? 'bike' : 'car');
+  /*
+   * What each picture is called beside the picture.
+   *
+   * The wording lives in shared, because the editor's "What the model is handed"
+   * panel labels the same photographs with the same function — a designer was
+   * reading "Skoda-Auto Slavia" there while the renderer sent "the car, front",
+   * and had every reason to believe the name was still going out.
+   */
+  const say = (a: DealerPhoto): string => sentLabel(a, { carModel: brief.carModel, vehicleKind: brief.vehicleKind });
   let dealerLogo: Buffer | undefined;
   let brandLogo: Buffer | undefined;
-  const noun = brief.vehicleKind === 'bike' ? 'the bike' : 'the car';
 
   for (const a of brief.attachments ?? []) {
     if (!a.storagePath) continue;
@@ -1810,7 +1820,7 @@ async function loadBriefAssets(brief: Brief): Promise<{
           kind: 'video',
         },
         filename: a.filename,
-        label: `a reference video — ${a.label}`,
+        label: say(a),
       });
       continue;
     }
@@ -1827,36 +1837,25 @@ async function loadBriefAssets(brief: Brief): Promise<{
       const flat = await sharp(obj.bytes).flatten({ background: '#9e9e9e' }).jpeg({ quality: 92 }).toBuffer().catch(() => null);
       emblemRef = {
         ref: flat ? { data: flat.toString('base64'), mimeType: 'image/jpeg', kind: 'image' } : ref,
-        filename: a.filename,
-        label: a.label,
+        filename: plain(a.filename),
+        label: say(a),
       };
     } else if (a.kind === 'car-model' && a.otherModel) {
       // Another model in the range. It keeps its own words, and never a slot among
       // the vehicle's photographs: taken for one, its face and its emblem end up on
       // the vehicle the film is actually about.
-      references.push({ ref, filename: plain(a.filename), label: plain(a.label) });
+      references.push({ ref, filename: plain(a.filename), label: say(a) });
     } else if (a.kind === 'car-model') {
       // A sheet carries its own warning in the label the brief wrote for it; a
       // single photograph just needs naming by the side it shows. Neither carries
       // the vehicle's name: "Skoda Slavia front" beside a photograph is the name
       // again, and the name is what fetches the car this one replaced.
-      const side = a.sheet ? plain(a.label) : a.angle ? `${noun}, ${a.angle}` : `${noun} — ${plain(a.label)}`;
-      carRefs.push({ ref, filename: plain(a.filename), label: side, angle: a.angle, sheet: a.sheet });
+      carRefs.push({ ref, filename: plain(a.filename), label: say(a), angle: a.angle, sheet: a.sheet });
     } else if (a.kind === 'actor') {
       // First of the rest: the same face, hair and clothes in every part.
-      actorRef = {
-        ref,
-        filename: a.filename,
-        label: `${a.label} — the same face, hair and clothes in every shot`,
-      };
+      actorRef = { ref, filename: a.filename, label: say(a) };
     } else {
-      references.push({
-        ref,
-        filename: a.filename,
-        label: a.sheet ? a.label : `${a.kind === 'extra' ? 'a reference for this film' : 'the dealership'} — ${a.label}`,
-        sheet: a.sheet,
-        view: a.view,
-      });
+      references.push({ ref, filename: a.filename, label: say(a), sheet: a.sheet, view: a.view });
     }
   }
 
@@ -1969,14 +1968,18 @@ async function framesForPart(
     const frame = edit?.frame;
     if (!frame?.storagePath || out.some((r) => r.filename === frame.filename)) continue;
     // A frame that came back with the wrong vehicle is a drawing of the wrong car:
-    // it would hand the model that car as the shot to match.
-    if (edit?.frameCheck?.checked && !edit.frameCheck.same) continue;
+    // it would hand the model that car as the shot to match. A frame in the wrong
+    // paint goes the same way when the photographs are the paint — the colour is
+    // how the drift shows up first, and a part told to match it copies it. The
+    // prompt asks the same question, so a part is never told a still was supplied
+    // when it was held back.
+    if (!usableFrame(edit)) continue;
     const obj = await readObject(frame.storagePath).catch(() => null);
     if (!obj) continue;
     out.push({
       ref: { data: obj.bytes.toString('base64'), mimeType: obj.contentType || 'image/png', kind: 'image' },
       filename: frame.filename,
-      label: `how the shot "${sc.beat.title}" is framed — the camera, the distance and where everything sits. Match this composition; take the vehicle itself from the photographs, not from this drawing.`,
+      label: `how the shot "${sc.beat.title}" is framed — the camera, the distance and where everything sits. Match this composition; take the vehicle itself, its paint included, from the photographs and not from this drawing.`,
     });
   }
   return out;
@@ -2253,7 +2256,18 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
   /** What each part was actually shown, kept on the record so a wrong car is traceable. */
   const sentRefs: { part: number; files: string[] }[] = parts.map((p) => ({ part: p.partNum, files: [] }));
   /** What the checker made of the vehicle in each part. */
-  const vehicleChecks: { part: number; same: boolean; why: string; remade?: boolean }[] = [];
+  const vehicleChecks: { part: number; same: boolean; why: string; remade?: boolean; colour?: 'same' | 'different' }[] = [];
+  /*
+   * When the paint counts as part of being the right car.
+   *
+   * With no colour chosen, the photographs are the colour — so a part that comes
+   * back in another colour came from somewhere other than the photographs, and
+   * that is the same failure as a wrong grille wearing a different name. Where a
+   * designer did pick a paint, the film is meant to differ from the photographs
+   * and only the shape is judged.
+   */
+  const photoColour = !brief.carColour;
+  const wrongVehicle = (v: VehicleVerdict): boolean => v.checked && (!v.same || (photoColour && v.colour === 'different'));
   /** What each join measured once the dead air was taken out of it. */
   let joins: { part: number; headTrim: number; tailTrim: number; echo?: number }[] = [];
   /** Retakes cost money, so a run buys at most this many of them. */
@@ -2351,36 +2365,44 @@ app.post<{ Body: GenerateBody }>('/api/generate', async (req, reply) => {
         // the face, the badge or the wheels.
         const outside = partCars.find((r) => r.angle && r.angle !== 'interior') ?? partCars[0]!;
         const refPhoto = outside.ref.data ? Buffer.from(outside.ref.data, 'base64') : null;
-        const moments = [part.duration * 0.35, part.duration * 0.85].map((t) => Math.max(0.2, Math.min(t, part.duration - 0.2)));
-        const frames = (await Promise.all(moments.map((t) => posterFrame(bytes, t).catch(() => null)))).filter((f): f is Buffer => Boolean(f));
         /** Two moments of a part against the vehicle's own photograph. */
-        const judge = async (clip: Buffer): Promise<{ same: boolean; checked: boolean; why: string }> => {
+        const judge = async (clip: Buffer): Promise<VehicleVerdict> => {
           const moments = [part.duration * 0.35, part.duration * 0.85].map((t) => Math.max(0.2, Math.min(t, part.duration - 0.2)));
           const shots = (await Promise.all(moments.map((t) => posterFrame(clip, t).catch(() => null)))).filter((f): f is Buffer => Boolean(f));
-          if (!shots.length || !refPhoto) return { same: true, checked: false, why: '' };
+          if (!shots.length || !refPhoto) return { same: true, checked: false, why: '', colour: 'unknown' };
           const verdicts = (await Promise.all(shots.map((f) => checkVehicleFrame(f, refPhoto, resolved.apiKey)))).filter((v) => v.checked);
           // One clear mismatch anywhere in the part is a wrong car in the film.
-          return verdicts.find((v) => !v.same) ?? verdicts[0] ?? { same: true, checked: false, why: '' };
+          return verdicts.find(wrongVehicle) ?? verdicts[0] ?? { same: true, checked: false, why: '', colour: 'unknown' };
         };
         if (refPhoto) {
           let verdict = await judge(bytes);
-          if (verdict.checked && !verdict.same && retakesLeft > 0) {
+          if (wrongVehicle(verdict) && retakesLeft > 0) {
             remadeHere = true;
             retakesLeft -= 1;
-            app.log.warn({ jobId, part: part.partNum, why: verdict.why }, 'wrong vehicle on screen — making this part again');
+            app.log.warn(
+              { jobId, part: part.partNum, why: verdict.why, colour: verdict.colour },
+              verdict.same ? 'wrong paint on screen — making this part again' : 'wrong vehicle on screen — making this part again',
+            );
             const second = await ask().catch(() => null);
             if (second) {
               // The retake is judged as well, and the one that shows the right car is
               // the one that is kept: before this, a worse second take was kept blind.
               const secondVerdict = await judge(second.bytes);
-              if (!secondVerdict.checked || secondVerdict.same) {
+              if (!wrongVehicle(secondVerdict)) {
                 bytes = second.bytes;
                 interactionId = second.interactionId;
                 verdict = secondVerdict;
               }
             }
           }
-          if (verdict.checked) vehicleChecks.push({ part: part.partNum, same: verdict.same, why: verdict.why, remade: remadeHere });
+          if (verdict.checked)
+            vehicleChecks.push({
+              part: part.partNum,
+              same: verdict.same,
+              why: verdict.why,
+              remade: remadeHere,
+              ...(photoColour && verdict.colour !== 'unknown' ? { colour: verdict.colour } : {}),
+            });
         }
       }
 
@@ -4633,7 +4655,10 @@ app.post<{
   const ctx = sceneImageContext(brief);
   const onCameraPerson = narrationMode(brief.narration).onCameraPerson;
 
-  const shot = (sc: (typeof scenes)[number]): SceneImageRef[] => {
+  /** How many pictures one still is drawn from. */
+  const FRAME_REFS = 6;
+
+  const shot = (sc: (typeof scenes)[number]): { refs: SceneImageRef[]; judge?: CarRef } => {
     const out: SceneImageRef[] = [];
     const add = (r: LabelledRef | undefined): void => {
       if (!r?.ref.data || out.some((x) => x.data === r.ref.data)) return;
@@ -4648,7 +4673,7 @@ app.post<{
       visual.kind === 'picked' || visual.kind === 'matched'
         ? carRefs.find((r) => r.filename === visual.photo.filename)
         : undefined;
-    const cars = [wantedCar, ...carRefs].filter(Boolean) as LabelledRef[];
+    const cars = [wantedCar, ...carRefs].filter(Boolean) as CarRef[];
     // The room this shot is set in, rather than whichever dealership photograph
     // came first — a wide exterior of the building was being drawn from a picture
     // of the showroom floor, so the film opened on somebody else's forecourt.
@@ -4660,15 +4685,22 @@ app.post<{
      * A shot that names the place is a shot about the place: it leads with the
      * photographs of it and keeps one of the vehicle, so the car in the background
      * is still the right car. Everything else leads with the vehicle.
+     *
+     * The presenter and the emblem are counted out of the budget before the
+     * vehicle fills it. They used to be added afterwards and then cut by the slice
+     * that trimmed the list to six — so on any film with four photographs of the
+     * car, the photograph of the presenter never reached the model at all, and it
+     * drew whoever it liked into the still the film is then built from.
      */
+    const reserved = (actorRef?.ref.data ? 1 : 0) + (emblemRef?.ref.data ? 1 : 0);
+    const room = Math.max(2, FRAME_REFS - reserved);
     if (placeViewFor(text)) {
-      places.slice(0, 3).forEach(add);
+      places.slice(0, Math.max(1, room - 2)).forEach(add);
       cars.slice(0, 2).forEach(add);
     } else {
-      cars.slice(0, 4).forEach(add);
+      cars.slice(0, Math.max(1, room - 1)).forEach(add);
       places.slice(0, 1).forEach(add);
     }
-
     /*
      * The presenter, whenever there is one.
      *
@@ -4689,10 +4721,24 @@ app.post<{
     if (emblemRef?.ref.data && !out.some((x) => x.data === emblemRef.ref.data)) {
       out.splice(Math.min(1, out.length), 0, { data: emblemRef.ref.data, mimeType: emblemRef.ref.mimeType, label: emblemRef.label });
     }
-    return out.slice(0, 6);
+    /*
+     * The photograph this still is judged against.
+     *
+     * It is chosen here, from the photographs themselves, rather than found again
+     * later by reading the labels: the check used to look for a label starting
+     * with "car", the labels start with "the car", and so the check quietly never
+     * ran. Every wrong still went into the film unnoticed and unredrawn.
+     */
+    const outside = cars.find((r) => r.angle && r.angle !== 'interior' && !r.sheet) ?? cars.find((r) => r.angle !== 'interior') ?? cars[0];
+    return { refs: out.slice(0, FRAME_REFS), ...(outside ? { judge: outside } : {}) };
   };
 
-  type Result = { key: string; frame?: StoredImage; check?: { same: boolean; checked: boolean; why?: string }; error?: string };
+  type Result = {
+    key: string;
+    frame?: StoredImage;
+    check?: { same: boolean; checked: boolean; why?: string; colour?: 'same' | 'different' };
+    error?: string;
+  };
   const results: Result[] = scenes.map((sc) => ({ key: sc.key }));
   /**
    * The drawn frame goes to the video model as the shot to match, so a frame with
@@ -4700,13 +4746,18 @@ app.post<{
    * vehicle's own photograph and drawn once more when it comes back wrong; a frame
    * that is wrong twice is kept for the designer to see, and not sent to the film.
    */
-  const judgeFrame = async (drawn: Buffer, refs: SceneImageRef[]): Promise<{ same: boolean; checked: boolean; why?: string }> => {
-    const cars = refs.filter((r) => /^(car|bike)\b/i.test(r.label) || /vehicle/i.test(r.label));
-    // Judge against an outside photograph: a cabin shot says nothing about the face or the badge.
-    const photo = cars.find((r) => !/interior|cabin|dashboard|boot/i.test(r.label)) ?? cars[0];
-    if (!brief.carModel || !photo) return { same: true, checked: false };
-    return await checkVehicleFrame(await asJpeg(drawn).catch(() => drawn), Buffer.from(photo.data, 'base64'), apiKey);
+  const judgeFrame = async (drawn: Buffer, photo: CarRef | undefined): Promise<VehicleVerdict> => {
+    if (!brief.carModel || !photo?.ref.data) return { same: true, checked: false, why: '', colour: 'unknown' };
+    return await checkVehicleFrame(await asJpeg(drawn).catch(() => drawn), Buffer.from(photo.ref.data, 'base64'), apiKey);
   };
+  /*
+   * With no paint chosen, the photographs are the paint — so a still in another
+   * colour is as wrong as a still of another car, and for the same reason: it came
+   * from somewhere other than the photographs, and it brings that car's face with
+   * it. A chosen paint is a deliberate difference, and only the shape is judged.
+   */
+  const framePhotoColour = !brief.carColour;
+  const frameWrong = (v: VehicleVerdict): boolean => v.checked && (!v.same || (framePhotoColour && v.colour === 'different'));
   let next = 0;
   const LANES = 3;
   await Promise.all(
@@ -4716,7 +4767,7 @@ app.post<{
         const sc = scenes[i];
         if (!sc) return;
         try {
-          const refs = shot(sc);
+          const { refs, judge } = shot(sc);
           // The shot a designer typed, and the scene's title, go to the image model
           // as they are — so a model name typed into either used to reach it. It is
           // taken out here for the same reason it is taken out of the film's prompt.
@@ -4733,13 +4784,16 @@ app.post<{
               apiKey,
             );
           let drawn = await draw();
-          let check = await judgeFrame(drawn.bytes, refs);
-          if (check.checked && !check.same) {
-            app.log.warn({ key: sc.key, why: check.why }, 'wrong vehicle in the drawn frame — drawing it again');
+          let check = await judgeFrame(drawn.bytes, judge);
+          if (frameWrong(check)) {
+            app.log.warn(
+              { key: sc.key, why: check.why, colour: check.colour },
+              check.same ? 'wrong paint in the drawn frame — drawing it again' : 'wrong vehicle in the drawn frame — drawing it again',
+            );
             const again = await draw().catch(() => null);
             if (again) {
-              const second = await judgeFrame(again.bytes, refs);
-              if (!second.checked || second.same || !check.checked) {
+              const second = await judgeFrame(again.bytes, judge);
+              if (!frameWrong(second)) {
                 drawn = again;
                 check = second;
               }
@@ -4757,7 +4811,12 @@ app.post<{
               url: `/api/refs/${refId}/${filename}`,
               label: `${sc.title || 'Scene'} — how this shot is framed`,
             },
-            check: { same: check.same, checked: check.checked, ...(check.why ? { why: check.why } : {}) },
+            check: {
+              same: check.same,
+              checked: check.checked,
+              ...(check.why ? { why: check.why } : {}),
+              ...(framePhotoColour && check.colour !== 'unknown' ? { colour: check.colour } : {}),
+            },
           };
         } catch (e) {
           const err = e as SceneImageError;

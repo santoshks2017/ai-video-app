@@ -140,7 +140,7 @@ export interface JobRecord {
   /** The project exactly as it stood when this ran — what "restore this version" puts back. */
   projectSnapshot?: unknown;
   /** What the vehicle checker made of each part, and whether it was made again. */
-  vehicleChecks?: { part: number; same: boolean; why: string; remade?: boolean }[];
+  vehicleChecks?: { part: number; same: boolean; why: string; remade?: boolean; colour?: 'same' | 'different' }[];
   /**
    * What each join measured: the dead air trimmed off either side, and how alike
    * the end of the part before sounds to the start of this one — the signature a

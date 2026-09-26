@@ -442,7 +442,7 @@ export interface Project {
       /** The still this scene is framed on, drawn by the image model. */
       frame?: { refId: string; storagePath: string; url?: string; filename: string; label: string };
       /** What the vehicle check made of that still: a wrong car in it is never sent to the film. */
-      frameCheck?: { same: boolean; checked: boolean; why?: string };
+      frameCheck?: { same: boolean; checked: boolean; why?: string; colour?: 'same' | 'different' };
       shot?: string;
       ref?: string;
       card?: string;

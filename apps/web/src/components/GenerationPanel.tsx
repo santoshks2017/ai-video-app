@@ -954,12 +954,20 @@ export function GenerationPanel({
                             <>
                               <dt>Vehicle check</dt>
                               <dd>
-                                {detail.vehicleChecks.map((v) => (
-                                  <div key={v.part} className={v.same ? undefined : 'hist-err'}>
-                                    Part {v.part}: {v.same ? 'the right vehicle' : `wrong vehicle — ${v.why}`}
-                                    {v.remade ? ' · made again' : ''}
-                                  </div>
-                                ))}
+                                {detail.vehicleChecks.map((v) => {
+                                  const paintOff = v.same && v.colour === 'different';
+                                  return (
+                                    <div key={v.part} className={v.same && !paintOff ? undefined : 'hist-err'}>
+                                      Part {v.part}:{' '}
+                                      {!v.same
+                                        ? `wrong vehicle — ${v.why}`
+                                        : paintOff
+                                          ? 'the right vehicle, in a colour the photographs do not show'
+                                          : 'the right vehicle'}
+                                      {v.remade ? ' · made again' : ''}
+                                    </div>
+                                  );
+                                })}
                               </dd>
                             </>
                           )}

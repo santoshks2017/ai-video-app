@@ -840,6 +840,16 @@ test('every part is held to the photographs, and no part is told what the car is
     carModel: 'Mahindra XUV 3XO',
     fieldValues: { feature: { feature1: 'Sunroof', feature2: '6 airbags' } },
   });
+  /*
+   * The name goes in everywhere a person can type one.
+   *
+   * The first version of this test planted it only in `carModel`, which is the
+   * one field the prompt never reads out — so it passed while the branding line
+   * and the designer's own direction carried "Mahindra XUV 3XO 2026 facelift"
+   * into every part of every film.
+   */
+  b.dealer.brandModel = 'Mahindra XUV 3XO';
+  b.extraDirection = ['Introduce the new Mahindra XUV 3XO 2026 facelift, not the old car.'];
   const res = buildPrompt(b)!;
   assert.ok(res.parts.length > 1);
   for (const text of [res.parts[0]!.text, ...res.parts.slice(1).map((p) => p.continuationText ?? '')]) {
@@ -847,13 +857,77 @@ test('every part is held to the photographs, and no part is told what the car is
     assert.match(text, /Never an earlier version of it, never a later one/);
     // The name is what sent it looking the car up, so the name is not there at all.
     assert.doesNotMatch(text, /XUV 3XO|XUV3XO/i);
+    // Nor the words that stand in for it: a year and a facelift fetch the same car.
+    assert.doesNotMatch(text, /2026 facelift/i);
   }
-  // A later part is told to match the frame before it — except where that frame
-  // has drifted off the photographs, which is how one wrong grille spread.
+  // The designer's direction is still given — only the name is taken out of it,
+  // and the year and the "new" that were holding on to it.
+  assert.match(res.parts[0]!.text, /## ADDITIONAL DIRECTION/);
+  assert.match(res.parts[0]!.text, /Introduce the car, not the old car\./);
+});
+
+test('a later part takes its vehicle from the photographs, not from the still drawn for it', () => {
+  const b = base({
+    categories: ['feature'],
+    narration: 'presenter',
+    durationSec: 40,
+    maxChunkSec: 10,
+    modelSpecific: true,
+    carModel: 'Mahindra XUV 3XO',
+    fieldValues: { feature: { feature1: 'Sunroof', feature2: '6 airbags' } },
+  });
+  const res = buildPrompt(b)!;
+  /*
+   * Part one was right and every part after it was wrong, film after film.
+   *
+   * A continuation opened by ordering the model to match the supplied frame
+   * EXACTLY — "same car (identical colour, wheels, badges)" — and the only frame
+   * supplied is a still an image model drew. So a still that came back with the
+   * older car handed the older car to the film, in its own colour, and the line
+   * saying the photographs outrank it came several paragraphs later. The
+   * photographs are named first now, and the still is called what it is.
+   */
   for (const part of res.parts.slice(1)) {
-    assert.match(part.continuationText ?? '', /The one exception: where the car in that frame differs from the supplied photographs/);
-    assert.match(part.continuationText ?? '', /Correct it back to the photographs in this segment rather than carrying the difference on/);
+    const text = part.continuationText ?? '';
+    assert.doesNotMatch(text, /match the supplied reference frame EXACTLY/);
+    assert.match(text, /the only record of what the car looks like/);
+    assert.match(text, /THE PHOTOGRAPHS OUTRANK EVERY OTHER IMAGE/);
+    // The continuity it does carry: the place, the light and the person.
+    assert.match(text, /no cut back to an intro, no titles, no restart/);
   }
+
+  // A film whose storyboard was never drawn is not told a still was supplied.
+  assert.doesNotMatch(res.parts[1]!.continuationText ?? '', /A still of this segment's shot is supplied/);
+
+  // And where the stills exist, the photographs are named before them.
+  const drawn = Object.fromEntries(
+    res.scenePlan.scenes.map((sc) => [
+      sc.beat.key,
+      { frame: { refId: 'r', storagePath: 's', filename: 'f.png', label: 'a still' } },
+    ]),
+  );
+  const withStills = buildPrompt(b, { sceneOverrides: drawn })!;
+  for (const part of withStills.parts.slice(1)) {
+    const text = part.continuationText ?? '';
+    assert.match(text, /a drawing, not a record of the car/);
+    assert.match(text, /the photographs are right and it is wrong/);
+    assert.ok(text.indexOf('the only record of what the car looks like') < text.indexOf('a drawing, not a record of the car'));
+  }
+
+  // A still the check found the wrong car in is held back, so it is not claimed either.
+  const rejected = Object.fromEntries(
+    res.scenePlan.scenes.map((sc) => [
+      sc.beat.key,
+      {
+        frame: { refId: 'r', storagePath: 's', filename: 'f.png', label: 'a still' },
+        frameCheck: { same: false, checked: true, why: 'an older grille' },
+      },
+    ]),
+  );
+  assert.doesNotMatch(
+    buildPrompt(b, { sceneOverrides: rejected })!.parts[1]!.continuationText ?? '',
+    /A still of this segment's shot is supplied/,
+  );
 });
 
 test('a brief fills the blanks, checks what it is told, and never overwrites an answer', () => {
@@ -1065,6 +1139,28 @@ test('the vehicle, the presenter and the dealership each keep a slot', () => {
     plan.spare.some((e) => e.photo.filename === 'c4'),
     'what did not fit is listed rather than silently dropped',
   );
+});
+
+test('the list a designer checks carries the words the model is actually given', () => {
+  /*
+   * The panel is titled "What the model is handed", and it was showing the
+   * library's own name for the car — "Skoda-Auto Slavia" beside every photograph
+   * — while the renderer sent "the car, front". A designer reading that panel had
+   * every reason to believe the name was still going out.
+   */
+  const brief = {
+    carModel: 'Skoda-Auto Slavia',
+    vehicleKind: 'car' as const,
+    attachments: [
+      { filename: 'front.png', label: 'Skoda-Auto Slavia', kind: 'car-model' as const, angle: 'front' },
+      { filename: 'sheet.png', label: 'Skoda-Auto Slavia — every photograph of the side in one image', kind: 'car-model' as const, sheet: true },
+      { filename: 'showroom.png', label: 'the showroom floor', kind: 'dealer' as const },
+    ],
+  };
+  const plan = referencePlan(brief, { max: 10 });
+  const said = plan.sent.map((e) => e.label);
+  assert.deepEqual(said, ['the car, front', 'car — every photograph of the side in one image', 'the dealership — the showroom floor']);
+  for (const label of said) assert.doesNotMatch(label, /slavia/i);
 });
 
 test('a name is taken out of whatever a model is about to read', () => {

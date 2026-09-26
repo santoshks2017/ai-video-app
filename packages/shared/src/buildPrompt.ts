@@ -61,11 +61,27 @@ export function unnamed(text: string, carModel: string | undefined, noun: 'car' 
    * the name goes: the maker, the year and the word facelift are the same kind of
    * cue, and a year the model has never seen sends it to the car it has — which is
    * the old one. So the words that were holding on to the name go with it.
+   *
+   * The maker goes first, and on the folded copy — because the library calls this
+   * car "Skoda-Auto Slavia" while the sentence a designer typed says "Škoda", and
+   * matched letter for letter the two never met. Its leading word counts as the
+   * maker too, so "Skoda-Auto" also catches a plain "Skoda".
    */
   const maker = words[0]!;
+  const makers = [...new Set([maker, maker.split(/[^a-z0-9]+/i)[0] ?? maker].filter((w) => w.length >= 3))]
+    .sort((a, b) => b.length - a.length)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  for (const m of makers) {
+    const pattern = new RegExp(String.raw`\b${m}\s+(?=${noun}\b)`, 'gi');
+    for (let guard = 0; guard < 20; guard += 1) {
+      pattern.lastIndex = 0;
+      const hit = pattern.exec(fold(out));
+      if (!hit) break;
+      out = `${out.slice(0, hit.index)}${out.slice(hit.index + hit[0].length)}`;
+    }
+  }
   const trailing = String.raw`\d{4}|facelift|face-?lift|new|all-?new|mk\s?\d+|gen(?:eration)?\s?\d*|model|edition`;
   const passes: Array<[RegExp, string]> = [
-    [new RegExp(String.raw`\b${maker}\s+(?=${noun}\b)`, 'gi'), ''],
     [new RegExp(String.raw`\b(?:${trailing})\s+(?=${noun}\b)`, 'gi'), ''],
     [new RegExp(String.raw`\b${noun}(?:[\s,]+(?:${trailing}))+\b`, 'gi'), noun],
     [new RegExp(String.raw`\b(the|this|its)\s+(?:\d{4}\s+)?(?:facelift|face-?lift)\b`, 'gi'), `$1 ${noun}`],
@@ -205,6 +221,18 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
     lines.push(
       `- The paint is the colour the photographs show, in every shot and in every part — the same colour, the same finish. Never another colour, however well it would suit the scene: a ${noun} in a colour the photographs do not show is a ${noun} taken from somewhere other than the photographs, and it comes with the wrong face and the wrong badge. Where a shot direction names a colour the photographs do not show, the photographs win.`,
     );
+  } else {
+    /*
+     * A chosen paint, said in the rules rather than only in the film's own prompt.
+     *
+     * The storyboard's stills are drawn from these rules and nothing else, so a
+     * colour that lived only in the film's prompt never reached them: the stills
+     * came back in the photographs' paint, the film was told to paint it something
+     * else, and the two disagreed in every frame the film was built on.
+     */
+    lines.push(
+      `- The paint is ${brief.carColour}, in every shot and in every part — the same colour and the same finish on every painted body panel. The photographs may show another colour: everything else about the ${noun} comes from them, and only the paint comes from this line.`,
+    );
   }
   lines.push(
     `- Photographs of other models may be attached, for the scenes that name them. They are not this ${noun}: never take its face, grille, emblem, lamps, wheels or lines from one of them, and never blend two vehicles into one.`,
@@ -325,7 +353,7 @@ export interface SceneOverride {
    * an older generation, another maker's emblem — is not sent to the video model,
    * which would otherwise be handed the wrong car as the shot to match.
    */
-  frameCheck?: { same: boolean; checked: boolean; why?: string };
+  frameCheck?: { same: boolean; checked: boolean; why?: string; colour?: 'same' | 'different' };
   shot?: string;
   /**
    * Filename of the reference image this shot is built on. The prompt cites
@@ -356,6 +384,18 @@ export interface SceneOverride {
    */
   locked?: ('dialogue' | 'shot' | 'card')[];
 }
+
+/**
+ * Whether this scene's drawn still is one the film may be built on.
+ *
+ * A still that came back with the wrong vehicle — or, where nobody chose a paint,
+ * in a colour the photographs do not show — is a drawing of a different car, and
+ * handing it to the video model hands that car to the film. The renderer holds it
+ * back, and the prompt asks this too, so a part is never told a still was supplied
+ * when none was.
+ */
+export const usableFrame = (edit: Pick<SceneOverride, 'frame' | 'frameCheck'> | undefined): boolean =>
+  Boolean(edit?.frame?.storagePath) && !(edit?.frameCheck?.checked && (!edit.frameCheck.same || edit.frameCheck.colour === 'different'));
 
 /**
  * The storyboard edit for a scene. Edits are filed under the scene's beat key.
@@ -393,6 +433,8 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
   // Every line the model reads about the picture goes through this: the vehicle's
   // name is a lookup key, and what it looks up is the car it replaced.
   const plain = (text: string): string => unnamed(text, brief.carModel, ctx.vehicle === 'bike' ? 'bike' : 'car');
+  /** A film about one vehicle, which the photographs describe and no line names. */
+  const named = Boolean(brief.modelSpecific && brief.carModel);
   const beats = buildBeats(ctx);
   if (!beats.length) return null;
   const overrides = opts.sceneOverrides ?? {};
@@ -570,10 +612,22 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
           '.',
       );
     } else {
+      /*
+       * The one line that undid all the others.
+       *
+       * "Brand and model: Škoda Slavia" sat under a heading that reads like an
+       * instruction, in every part of every film, while every other line about the
+       * car had been made name-free on purpose. Whose film it is does not depend on
+       * it: the vehicle is the photographs, and the dealership is the only name the
+       * film needs. A range film keeps the line — there is no single older car for
+       * a name to fetch, and the range is the subject.
+       */
       L.push(
-        `Brand and model: ${ctx.displayBrandModel}. ${
-          brief.dealer.kind === 'oem' ? 'Manufacturer' : 'Dealership'
-        }: ${ctx.displayDealer}.`,
+        named
+          ? `${brief.dealer.kind === 'oem' ? 'Manufacturer' : 'Dealership'}: ${ctx.displayDealer}.`
+          : `Brand and model: ${ctx.displayBrandModel}. ${
+              brief.dealer.kind === 'oem' ? 'Manufacturer' : 'Dealership'
+            }: ${ctx.displayDealer}.`,
       );
     }
 
@@ -634,11 +688,20 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       L.push(themeDirection(theme));
     }
 
+    /*
+     * The designer's own direction, with the name taken out of it.
+     *
+     * This block reached the model exactly as it was typed, and what a person
+     * types here is the brief in their head: "introduce the new Škoda Slavia 2026
+     * facelift". Every other line about the car had been made name-free, and this
+     * one handed the name back — with a model year attached, which is the surest
+     * way to fetch the car that name used to mean.
+     */
     const direction = (brief.extraDirection ?? []).filter((x) => x.trim());
     if (direction.length) {
       L.push('');
       L.push('## ADDITIONAL DIRECTION');
-      direction.forEach((d) => L.push(d));
+      direction.forEach((d) => L.push(plain(d)));
     }
 
     L.push('');
@@ -647,10 +710,12 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       const ov = sceneEditFor(overrides, plan, sc) ?? {};
       const localStart = Math.round((sc.start - partStart) * 10) / 10;
       const localEnd = Math.round((sc.end - partStart) * 10) / 10;
+      // A scene's own title is read the same way its shot is — "Slavia walkaround"
+      // is the name again, in the heading the model reads first.
       L.push(
         `### Scene ${i + 1} — ${fmtTime(localStart)}–${fmtTime(localEnd)} (${sc.duration}s)${
           totalParts > 1 ? ` — video time ${fmtTime(sc.start)}–${fmtTime(sc.end)}` : ''
-        } — ${sc.beat.title}`,
+        } — ${plain(sc.beat.title)}`,
       );
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       const shotText = ov.shot?.trim() || baseShot;
@@ -673,7 +738,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
           `Speaks in ${brief.language?.name ?? 'Hindi/Hinglish'}, at most ~${wordBudget(speakingSeconds(plan, sc), 1, brief.speechWpm)} words. NO SCRIPT WAS WRITTEN for this scene, so compose the line yourself from this intent, then speak it naturally: ${dialogue}`,
         );
       } else if (dialogue) {
-        L.push(`Story beat, told visually with no speech: ${dialogue}`);
+        L.push(`Story beat, told visually with no speech: ${plain(dialogue)}`);
       }
       if (sceneCard(sc.beat, ov)) {
         // Room, not words: a caption is laid over this moment in post.
@@ -681,7 +746,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
           'A caption is composited over this shot afterwards — leave the lower third uncluttered and draw no text here yourself.',
         );
       }
-      if (sc.beat.note) L.push(`Note: ${sc.beat.note}`);
+      if (sc.beat.note) L.push(`Note: ${plain(sc.beat.note)}`);
       L.push('---');
     });
 
@@ -751,48 +816,61 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       }
     }
 
-    // Prompt for segments 2+. Each is an independent `create` call seeded with
-    // the PREVIOUS segment's last frame as a reference image, then ffmpeg-stitched.
-    // So it must be self-sufficient (branding, style, identity) AND lock onto the
-    // reference frame so the character / car / setting don't change across the cut.
+    /*
+     * Prompt for segments 2+.
+     *
+     * Every part is its own `create` call built from the same photographs — the
+     * parts render side by side rather than one seeding the next — so a
+     * continuation has to be self-sufficient about branding, style and identity,
+     * and has to carry the place, the light and the person across the cut without
+     * taking the vehicle from anything but the photographs.
+     */
+    const noun = ctx.vehicle === 'bike' ? 'bike' : 'car';
     const C: string[] = [];
     C.push(
       `Generate a ${partDuration}-second ${ctx.aspect} segment that continues an ongoing Indian ${
         brief.dealer.kind === 'oem' ? 'automotive brand film' : 'car-dealership video'
       }.`,
     );
-    C.push(
-      'The FIRST frame must match the supplied reference frame EXACTLY: ' +
-        (mode.onCameraPerson
-          ? 'same presenter (identical face, hair, skin tone, make-up, wardrobe and body), '
-          : '') +
-        `same ${ctx.vehicle === 'bike' ? 'bike' : 'car'} (identical colour, wheels, badges), same showroom and background, same framing, lens, lighting and colour grade. Then continue the motion naturally — no cut back to an intro, no titles, no restart.`,
-    );
     /*
-     * One exception, and only one.
+     * Why part one came back right and every part after it came back wrong.
      *
-     * A part is told to match the frame before it exactly, and it obeys — including
-     * where that frame had already drifted off the photographs. Copied part after
-     * part, one wrong grille becomes a whole film's worth. The frame decides the
-     * framing, the light and the motion; the photographs decide the vehicle.
+     * A continuation opened on this line: "The FIRST frame must match the supplied
+     * reference frame EXACTLY — same car (identical colour, wheels, badges)". Part
+     * one is never told that. And the frame it named is a still an image model
+     * drew for the shot, so a still that came back with the older car handed the
+     * older car to the film, in the still's own paint, under the strongest and
+     * earliest instruction in the prompt — while the line saying the photographs
+     * outrank it sat several paragraphs below.
+     *
+     * So the order is reversed. The photographs are named first and named as what
+     * they are; the still is named second and called a drawing; and the continuity
+     * the segment does owe the film — the place, the light, the person, the motion
+     * carrying on — is asked for without handing the vehicle over with it.
      */
     C.push(
-      `The one exception: where the ${ctx.vehicle === 'bike' ? 'bike' : 'car'} in that frame differs from the supplied photographs — its face, grille, lamps, wheels, badges or proportions — the photographs are right and the frame is wrong. Correct it back to the photographs in this segment rather than carrying the difference on.`,
+      `The photographs supplied with this segment are the only record of what the ${noun} looks like. Its shape, face, grille, lamps, wheels, badges and its paint all come from them and from nowhere else — copy them exactly.`,
+    );
+    if (scenes.some((sc) => usableFrame(sceneEditFor(overrides, plan, sc)))) {
+      C.push(
+        `A still of this segment's shot is supplied with them. It is a drawing, not a record of the ${noun}: take from it where the camera stands, how the shot is framed and lit, where the presenter is and what the place looks like. Where it and the photographs disagree about the ${noun} — its face, grille, lamps, wheels, badges, proportions or colour — the photographs are right and it is wrong, and this segment corrects the ${noun} back to them rather than carrying the difference on.`,
+      );
+    }
+    C.push(
+      'Carry the film straight on: ' +
+        (mode.onCameraPerson
+          ? 'the same presenter (identical face, hair, skin tone, make-up, wardrobe and body), '
+          : '') +
+        'the same showroom and background, the same framing, lens, lighting and colour grade, and the motion continuing naturally — no cut back to an intro, no titles, no restart.',
     );
     C.push('');
     continuityLock(brief, mode, ctx.vehicle).forEach((line) => C.push(line));
     C.push('');
-    if (brief.attachedCarPhotos) {
-      C.push(
-        'The vehicle photos supplied with this segment are the vehicle. Build every shot of it on them and on the reference frame, and on nothing else you know about this model.',
-        '',
-      );
-    }
     if (mode.onCameraPerson) {
       // A continuation that re-imagines its presenter leaves two of them on screen, the
       // one from the seed frame fading away behind the new one.
       C.push(
-        'The presenter in the reference frame is the only presenter. Carry that same person on from exactly where they stand in the first frame — never create another presenter elsewhere while the first one fades, melts or disappears.',
+        'The presenter in the supplied photograph and still is the only presenter. Carry that same person on from exactly where they stand at the start of this segment — never create another presenter elsewhere while the first one fades, melts or disappears.',
         '',
       );
     }
@@ -805,7 +883,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     }
     if (mode.onCameraPerson) {
       C.push(
-        `The on-camera presenter is the same person as in the reference frame${
+        `The on-camera presenter is the same person as in the supplied photograph of them${
           actor.style ? `, styled as: ${actor.style}` : ''
         }. Do NOT write the presenter's name or any label anywhere on screen.`,
       );
@@ -816,7 +894,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     C.push(
       ctx.useFake
         ? `Fictional branding only: ${ctx.displayBrandModel} — ${contOem ? 'Manufacturer' : 'Dealership'}: ${ctx.displayDealer}. No real manufacturer logo or badge.`
-        : `Brand and model: ${ctx.displayBrandModel}. ${contOem ? 'Manufacturer' : 'Dealership'}: ${ctx.displayDealer}.`,
+        : named
+          ? `${contOem ? 'Manufacturer' : 'Dealership'}: ${ctx.displayDealer}.`
+          : `Brand and model: ${ctx.displayBrandModel}. ${contOem ? 'Manufacturer' : 'Dealership'}: ${ctx.displayDealer}.`,
     );
     if (contOem)
       C.push(
@@ -825,9 +905,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     if (brief.modelSpecific && brief.carColour) {
       // A continuation segment is built on the previous frame, but a model
       // re-reading its references can still drift back to the photos' paint.
-      C.push(`Paint colour: ${brief.carColour} — the same ${brief.carColour} paint as the reference frame, on every body panel.`);
+      C.push(`Paint colour: ${brief.carColour} — the same ${brief.carColour} paint as every other part of this film, on every body panel.`);
     }
-    C.push(`Visual style: ${ctx.visStyle}. Keep the exact same grade and camera language as the reference frame.`);
+    C.push(`Visual style: ${ctx.visStyle}. Keep the exact same grade and camera language as the supplied still.`);
     const contTheme = storyTheme(brief);
     if (contTheme) C.push(themeDirection(contTheme));
     if (ctx.mode.speaks) {
@@ -847,13 +927,13 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     if (contDirection.length) {
       C.push('');
       C.push('Additional direction (applies to this segment too):');
-      contDirection.forEach((d) => C.push(d));
+      contDirection.forEach((d) => C.push(plain(d)));
     }
     C.push('');
     C.push('Scenes in this segment:');
     scenes.forEach((sc, i) => {
       const ov = sceneEditFor(overrides, plan, sc) ?? {};
-      C.push(`Scene ${i + 1} (~${sc.duration}s) — ${sc.beat.title}`);
+      C.push(`Scene ${i + 1} (~${sc.duration}s) — ${plain(sc.beat.title)}`);
       const baseShot = !mode.onCameraPerson && sc.beat.shotAlt ? sc.beat.shotAlt : sc.beat.shot;
       if (ov.shot?.trim() || baseShot) C.push(`  Shot: ${plain(ov.shot?.trim() || baseShot || '')}`);
       const contVisual = sceneVisualLine(
@@ -866,7 +946,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       if (d) {
         C.push(
           !mode.speaks
-            ? `  Told visually, no speech: ${d}`
+            ? `  Told visually, no speech: ${plain(d)}`
             : scriptedC
               ? `  Says, word for word: {${scriptedC}}`
               : `  Speaks ${brief.language?.name ?? 'Hindi/Hinglish'}, ~${wordBudget(speakingSeconds(plan, sc), 1, brief.speechWpm)} words, composed from this intent: ${d}`,

@@ -10,7 +10,34 @@
  * spent. One rule, two readers, no drift.
  */
 
+import { unnamed } from './buildPrompt.js';
 import type { Brief, DealerPhoto } from './types.js';
+
+/**
+ * What the model is told a picture is, beside the picture.
+ *
+ * The library calls a photograph by the car's name, and for a person that is the
+ * right name — but the model reads this label, and a name is how a model looks a
+ * car up. So the renderer says "the car, front" instead, and this is where it is
+ * decided: the editor's own list calls the same function, so the panel titled
+ * "What the model is handed" says what is handed over rather than what the
+ * library happens to call it.
+ */
+export function sentLabel(a: DealerPhoto, opts: { carModel?: string; vehicleKind?: 'car' | 'bike' } = {}): string {
+  const noun = opts.vehicleKind === 'bike' ? 'the bike' : 'the car';
+  const plain = (t: string): string => unnamed(t, opts.carModel, opts.vehicleKind === 'bike' ? 'bike' : 'car');
+  if (a.emblem) return plain(a.label);
+  if (a.kind === 'reference-video') return `a reference video — ${plain(a.label)}`;
+  if (a.kind === 'car-model' && a.otherModel) return plain(a.label);
+  if (a.kind === 'car-model') {
+    // A sheet carries its own warning in the label the brief wrote for it; a single
+    // photograph just needs naming by the side it shows.
+    return a.sheet ? plain(a.label) : a.angle ? `${noun}, ${a.angle}` : `${noun} — ${plain(a.label)}`;
+  }
+  if (a.kind === 'actor') return `${a.label} — the same face, hair and clothes in every shot`;
+  if (a.kind === 'logo' || a.kind === 'brand-logo') return a.label;
+  return a.sheet ? a.label : `${a.kind === 'extra' ? 'a reference for this film' : 'the dealership'} — ${a.label}`;
+}
 
 /** What a reference is a picture of. */
 export type RefRole = 'scene' | 'vehicle' | 'emblem' | 'presenter' | 'dealership' | 'extra' | 'video' | 'overlay';
@@ -108,6 +135,8 @@ export function orderReferences<T>(s: RefSlots<T>): T[] {
 /** One reference, and whether it made the cut. */
 export interface PlannedRef {
   photo: DealerPhoto;
+  /** What the model is told this picture is — not what the library calls it. */
+  label: string;
   role: RefRole;
   /** Its place in the reference list the model is given, or null when it did not fit. */
   slot: number | null;
@@ -135,7 +164,7 @@ export interface ReferencePlan {
  * which photographs exist — so this is the right thing to check before paying.
  */
 export function referencePlan(
-  brief: Pick<Brief, 'attachments'>,
+  brief: Pick<Brief, 'attachments' | 'carModel' | 'vehicleKind'>,
   opts: { max?: number; maxVideos?: number; held?: string[] } = {},
 ): ReferencePlan {
   const max = Math.max(1, opts.max ?? 10);
@@ -143,6 +172,7 @@ export function referencePlan(
   const held = new Set(opts.held ?? []);
   const all = (brief.attachments ?? []).map((photo) => ({
     photo,
+    label: sentLabel(photo, { carModel: brief.carModel, vehicleKind: brief.vehicleKind }),
     role: refRole(photo),
     slot: null as number | null,
     held: held.has(photo.filename),

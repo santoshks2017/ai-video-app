@@ -25,9 +25,20 @@ export interface VehicleVerdict {
   why: string;
   /** False when the check could not be made — no key, no car in frame, an API error. */
   checked: boolean;
+  /**
+   * Whether the paint is the paint in the photograph.
+   *
+   * Asked separately, because identity and paint are different questions: a red
+   * one and a blue one are the same car, and the identity check says so on
+   * purpose. But when nobody chose a colour, the photographs are the colour — and
+   * a car in a colour the photographs do not show came from somewhere other than
+   * the photographs, which is exactly the drift this whole check exists to catch.
+   * 'unknown' when the light, the angle or the grade make it a guess.
+   */
+  colour: 'same' | 'different' | 'unknown';
 }
 
-const UNCHECKED: VehicleVerdict = { same: true, why: '', checked: false };
+const UNCHECKED: VehicleVerdict = { same: true, why: '', checked: false, colour: 'unknown' };
 
 /**
  * Compare one frame against one reference photo.
@@ -50,14 +61,19 @@ export async function checkVehicleFrame(
     '',
     'Compare only the vehicle. Look at the shape of the face and grille, the lamp signatures,',
     'the roofline and proportions, the wheels and the badges. Paint colour, lighting, angle,',
-    'background and image quality do not matter — a different colour of the same model is a match.',
+    'background and image quality do not matter for same_vehicle — a different colour of the same model is a match.',
     'A different generation or facelift of the same vehicle is NOT a match — judge by what you see, not by what the vehicle is called.',
     "Look at the maker's emblem as well, on the grille and the tailgate: a different design of that maker's",
     'logo — an older or a newer one than the reference shows — is NOT a match. Judge the emblem only where it',
     'is legible in both images; where it is too small or too soft to read in either, ignore it.',
     '',
+    'Then, as a separate question, compare the paint. Answer "same" when the body colour in the frame is the',
+    'same colour as in the photograph — the same hue, allowing for light, shade, reflections and grade.',
+    'Answer "different" only when it is plainly another colour: blue against green, white against grey, red',
+    'against orange. Answer "unknown" when the light, the angle or the crop make it a guess.',
+    '',
     'Answer JSON only:',
-    '{"car_in_frame": true|false, "same_vehicle": true|false, "confidence": "high"|"low", "why": "<one short sentence>"}',
+    '{"car_in_frame": true|false, "same_vehicle": true|false, "paint": "same"|"different"|"unknown", "confidence": "high"|"low", "why": "<one short sentence>"}',
     'car_in_frame is false when the frame shows no vehicle, or only a fragment too small to judge.',
     'Use confidence "low" when the frame is blurred, dark, or shows too little of the vehicle to be sure.',
   ].join('\n');
@@ -91,6 +107,7 @@ export async function checkVehicleFrame(
     const parsed = JSON.parse(text) as {
       car_in_frame?: boolean;
       same_vehicle?: boolean;
+      paint?: string;
       confidence?: string;
       why?: string;
     };
@@ -100,6 +117,7 @@ export async function checkVehicleFrame(
       same: parsed.same_vehicle !== false,
       why: String(parsed.why ?? '').slice(0, 240),
       checked: true,
+      colour: parsed.paint === 'different' ? 'different' : parsed.paint === 'same' ? 'same' : 'unknown',
     };
   } catch {
     return UNCHECKED;

@@ -313,6 +313,20 @@ export interface Brief {
    * paints the car whatever colour its reference photos happen to be.
    */
   carColour?: string;
+  /**
+   * What each vehicle's number plate is lettered with, when the client wants them
+   * lettered at all.
+   *
+   * Unset — the default — and every plate in the frame is plain white and empty.
+   * A model cannot spell, so anything written here is a risk taken deliberately:
+   * it is the only text in the whole film the model is asked to draw.
+   *
+   * The first entry is the vehicle the film is about, which is never named — it is
+   * the one in the photographs. The rest are the other models a scene calls for,
+   * each named the way the reference legend names it, so a film with three cars in
+   * it does not letter all three with the first one's name.
+   */
+  plates?: { plate: string; name?: string }[];
   /** What the showroom sells. Two-wheelers are ridden: "test ride", never "test drive". */
   vehicleKind?: 'car' | 'bike';
   /**

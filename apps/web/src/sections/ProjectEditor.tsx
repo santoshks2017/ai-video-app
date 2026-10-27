@@ -734,6 +734,18 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
   const selectedCar = car;
   const variants = selectedCar?.variants ?? [];
   const colours = selectedCar?.colours ?? [];
+  /*
+   * What the plates would read if the client asked for them lettered.
+   *
+   * The same rule composeBrief uses, so the option says what the film will show:
+   * every vehicle wears its own model name — never the maker's and never a year,
+   * which are the words that fetch the older car. A project with three cars in it
+   * letters three different plates, not the first one's name three times.
+   */
+  const plateNames = [
+    (project.carModelOverride?.trim() || selectedCar?.model || '').trim().toUpperCase(),
+    ...vehicles.slice(1).map((v) => (v.model ?? '').trim().toUpperCase()),
+  ].filter(Boolean);
 
   // A festival is the setting, not a topic, so it does not count towards crowding the ad.
   const topicCount = project.useCases.filter((id) => CATEGORIES.find((c) => c.id === id)?.layer !== 'theme').length;
@@ -1099,6 +1111,24 @@ export function ProjectEditor({ projectId }: { projectId: string }) {
                     </select>
                   </Field>
                 </>
+              )}
+              {plateNames.length > 0 && (
+                <Field
+                  label="Number plate"
+                  hint={
+                    project.numberPlate === 'model'
+                      ? `Each vehicle wears its own name — ${plateNames.join(', ')} — the way a showroom's display cars do. It is the only lettering the model is asked to draw anywhere in the film, and a model cannot spell: look at the plates in the storyboard before you pay for the video.`
+                      : 'Plain white and empty, on every vehicle in shot. Nothing written is nothing to misspell.'
+                  }
+                >
+                  <select
+                    value={project.numberPlate ?? 'blank'}
+                    onChange={(e) => set({ numberPlate: e.target.value === 'model' ? 'model' : undefined })}
+                  >
+                    <option value="blank">Blank — plain white</option>
+                    <option value="model">The model&rsquo;s own name</option>
+                  </select>
+                </Field>
               )}
             </div>
           </Section>

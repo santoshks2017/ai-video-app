@@ -505,6 +505,9 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
    */
   const vehicleName = car ? `${car.brand} ${car.model}` : `${client?.brand ? `${client.brand} ` : ''}vehicle in the photograph`;
   const vehicleKind: 'car' | 'bike' = (car?.kind ?? client?.vehicleKind) === 'bike' ? 'bike' : 'car';
+  /** What the plates would read if the client asked for them lettered, as the film does it. */
+  const plateReads = (car?.model ?? '').trim().toUpperCase();
+  const plate = p.numberPlate === 'model' && plateReads ? plateReads : undefined;
 
   /** The vehicle's photographs for the model: the chosen one first, then its other sides. */
   const carRefList = (): Array<{ storagePath: string; label: string }> => {
@@ -557,7 +560,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
       ...(p.engine?.secondary ? { secondary: p.engine.secondary } : {}),
       ...(p.templateId ? { template: p.templateId } : {}),
       ...(occasion ? { occasion } : {}),
-      vehicle: { name: vehicleName, ...(p.carColour ? { colour: p.carColour } : {}), kind: vehicleKind },
+      vehicle: { name: vehicleName, ...(p.carColour ? { colour: p.carColour } : {}), kind: vehicleKind, ...(plate ? { plate } : {}) },
       ...(p.sceneNote?.trim() ? { note: p.sceneNote.trim() } : {}),
       words: designWordsOf(c, input),
       language: { name: language.name, script: language.script },
@@ -657,7 +660,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
             aspect,
             engine: engineId,
             ...(occasion ? { occasion } : {}),
-            vehicle: { name: vehicleName, colour: p.carColour, kind: vehicleKind },
+            vehicle: { name: vehicleName, colour: p.carColour, kind: vehicleKind, ...(plate ? { plate } : {}) },
             note: p.sceneNote,
             textBand: ASPECT_TEXT_BAND[aspect],
             panel: false,
@@ -771,7 +774,7 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
             aspect,
             engine: engineId,
             occasion,
-            vehicle: { name: vehicleName, colour: p.carColour, kind: vehicleKind },
+            vehicle: { name: vehicleName, colour: p.carColour, kind: vehicleKind, ...(plate ? { plate } : {}) },
             note: p.sceneNote,
             textBand: ASPECT_TEXT_BAND[aspect],
             ...(ASPECT_TEXT_BAND[aspect] === 'top' ? { band: bandFor(aspect) } : {}),
@@ -985,6 +988,24 @@ export function ImageProjectEditor({ projectId }: { projectId: string }) {
                 <p className="hint ip-blocked">
                   No {client.brand || 'matching'} vehicles in the library yet — add them under Cars, or attach a photo of the vehicle in 02.
                 </p>
+              )}
+              {plateReads && (
+                <Field
+                  label="Number plate"
+                  hint={
+                    p.numberPlate === 'model'
+                      ? `The plate reads ${plateReads}, the vehicle's own name. It is the only lettering drawn onto the vehicle itself — check it before the creative goes out.`
+                      : 'Plain white and empty, on this vehicle and any other in shot.'
+                  }
+                >
+                  <select
+                    value={p.numberPlate ?? 'blank'}
+                    onChange={(e) => set({ numberPlate: e.target.value === 'model' ? 'model' : undefined })}
+                  >
+                    <option value="blank">Blank — plain white</option>
+                    <option value="model">The model&rsquo;s own name</option>
+                  </select>
+                </Field>
               )}
               {car && car.colours.length > 0 && (
                 <Field label="Colour">

@@ -866,6 +866,67 @@ test('every part is held to the photographs, and no part is told what the car is
   assert.match(res.parts[0]!.text, /Introduce the car, not the old car\./);
 });
 
+test('the plates are blank unless the client asks for the name, and then every part letters it', () => {
+  const brief = (plateText?: string) =>
+    base({
+      categories: ['feature'],
+      narration: 'presenter',
+      durationSec: 40,
+      maxChunkSec: 10,
+      modelSpecific: true,
+      carModel: 'Skoda Slavia',
+      ...(plateText ? { plates: [{ plate: plateText }] } : {}),
+      fieldValues: { feature: { feature1: 'Sunroof', feature2: '6 airbags' } },
+    });
+
+  // What a model that cannot spell should be asked for, and still the default.
+  const blank = buildPrompt(brief())!;
+  for (const part of blank.parts) {
+    for (const text of [part.text, part.continuationText ?? '']) {
+      assert.match(text, /NUMBER PLATES ARE PLAIN WHITE AND BLANK/);
+      assert.doesNotMatch(text, /SLAVIA/);
+    }
+  }
+
+  // And what a showroom's display cars actually wear, when it is asked for.
+  const lettered = buildPrompt(brief('SLAVIA'))!;
+  assert.ok(lettered.parts.length > 1);
+  for (const part of lettered.parts) {
+    for (const text of [part.text, part.continuationText ?? '']) {
+      assert.doesNotMatch(text, /NUMBER PLATES ARE PLAIN WHITE AND BLANK/);
+      assert.doesNotMatch(text, /plates stay blank whatever the photographs show/);
+      assert.match(text, /NUMBER PLATES READ THE VEHICLE'S OWN MODEL NAME/);
+      assert.match(text, /the one in the photographs — reads “SLAVIA”/);
+      // Only the film's own vehicles: anything else in shot still has an empty plate.
+      assert.match(text, /Every vehicle in the frame that was not supplied with this film keeps a plain white plate with nothing on it/);
+    }
+  }
+  // The frame is still otherwise free of lettering — the plate is the one exception.
+  assert.match(lettered.parts[0]!.text, /NO LETTERING ANYWHERE IN THE FRAME/);
+
+  /*
+   * A film with more than one model in it.
+   *
+   * Harsh Hyundai's films carry a Creta, an Exter and an Aura, and every one of
+   * them came back wearing CRETA: the plate was one string for the whole film.
+   * Each vehicle wears its own name now, and is named here only on its plate.
+   */
+  const many = buildPrompt(
+    base({
+      ...brief('CRETA'),
+      alsoFeatured: ['Hyundai Exter', 'Hyundaimotor Aura'],
+      plates: [{ plate: 'CRETA' }, { plate: 'EXTER', name: 'Hyundai Exter' }, { plate: 'AURA', name: 'Hyundaimotor Aura' }],
+    }),
+  )!;
+  for (const part of many.parts) {
+    for (const text of [part.text, part.continuationText ?? '']) {
+      assert.match(text, /reads “CRETA”/);
+      assert.match(text, /“EXTER” on the Hyundai Exter, “AURA” on the Hyundaimotor Aura/);
+      assert.match(text, /Never put one vehicle's name on another vehicle's plate/);
+    }
+  }
+});
+
 test('a later part takes its vehicle from the photographs, not from the still drawn for it', () => {
   const b = base({
     categories: ['feature'],
@@ -1435,9 +1496,11 @@ test('the prompt never spells out a mangled name for the model to copy', () => {
   for (const bad of ['XUV 3OO', 'XUV300', 'Mahindri', 'Medton']) {
     assert.ok(!every.includes(bad), `the prompt still contains "${bad}"`);
   }
-  // The rule itself survives: lettering only where the photographs show it.
+  // The rule itself survives: lettering only where the photographs show it, and
+  // the plates following the one rule that decides what they read.
   assert.match(every, /already moulded into the car in the supplied photographs/);
-  assert.match(every, /Number plates stay blank/);
+  assert.match(every, /NUMBER PLATES ARE PLAIN WHITE AND BLANK/);
+  assert.match(every, /Number plates follow their own rule above, whatever the photographs show/);
 });
 
 test('the car is named, not specified — the variant picks photos, not words', () => {

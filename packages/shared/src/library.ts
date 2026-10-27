@@ -509,6 +509,15 @@ export interface Project {
    * name to say. The references are unchanged — only the words are.
    */
   carModelOverride?: string;
+  /**
+   * What the number plates read.
+   *
+   * 'blank' — and anything unset — keeps every plate plain white and empty, which
+   * is what a model that cannot spell should be asked for. 'model' letters the
+   * vehicle's own name across them, the way a showroom's display cars carry it in
+   * place of a registration.
+   */
+  numberPlate?: 'blank' | 'model';
   /** Extra reference images added on this project only. */
   extraRefs: StoredImage[];
   /**

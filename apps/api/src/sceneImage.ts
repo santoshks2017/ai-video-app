@@ -132,6 +132,11 @@ export interface SceneImageRequest {
   cast?: string;
   /** The look the whole film is graded to. */
   style?: string;
+  /**
+   * What each vehicle's number plate reads, the film's own vehicle first. Empty:
+   * plain white and blank, as usual.
+   */
+  plates?: { plate: string; name?: string }[];
   vehicleKind: 'car' | 'bike';
   /** Whether a person is on camera in this film at all. */
   onCameraPerson: boolean;
@@ -180,7 +185,16 @@ function instruction(req: SceneImageRequest): string {
     `- Build the ${noun} only from the supplied photographs. If this shot needs a view of the ${noun} they do not cover, move the camera to an angle they do cover, or come closer, or let the ${noun} sit out of focus. Never fill the gap from memory.`,
     `- The grille and the trim that borders it are exactly as the photographs show them — the same shape, the same width, the same finish, chrome or black or body colour. That moulding is where one generation of a ${noun} differs from the one before it.`,
     `- The maker's emblem on the grille, the tailgate and the wheels is exactly the emblem in the photographs, in that exact design — never an older or a newer version of that maker's logo. Where it is not legible in the photographs, leave that surface plain.`,
-    '- Every number plate in the frame is a plain white plate with nothing on it, whatever the photographs show. Never copy writing from a plate in a photograph.',
+    req.plates?.length
+      ? `- Every number plate is a plain white plate lettered with that vehicle's own model name in plain black capitals, centred, on one line, with nothing else on it — spelled exactly, character for character, on the front plate and the back plate alike. The ${noun} this frame is about reads \u201c${req.plates[0]!.plate}\u201d.${
+          req.plates.length > 1
+            ? ` Any other model in the frame wears its own name instead: ${req.plates
+                .slice(1)
+                .map((p) => `\u201c${p.plate}\u201d on the ${p.name}`)
+                .join(', ')}.`
+            : ''
+        } Any vehicle not supplied with this frame keeps a plain white plate with nothing on it. Writing on a plate in a photograph is not this plate; never copy it.`
+      : '- Every number plate in the frame is a plain white plate with nothing on it, whatever the photographs show. Never copy writing from a plate in a photograph.',
     '- The supplied images are records of what the subjects look like. Never draw a photograph, a grid of photographs, a contact sheet, a poster or a screen showing one. Draw the real scene.',
     `- Framing: ${req.aspect}. A real lens, real depth of field, real light.`,
     ...(req.style?.trim() ? [`- Look: ${req.style.trim()}`] : []),
@@ -292,13 +306,16 @@ export async function drawSceneFrame(
  */
 export function sceneImageContext(
   brief: Brief,
-): Pick<SceneImageRequest, 'aspect' | 'style' | 'vehicleKind' | 'rules' | 'cast'> {
+): Pick<SceneImageRequest, 'aspect' | 'style' | 'vehicleKind' | 'rules' | 'cast' | 'plates'> {
   const mode = narrationMode(brief.narration);
   const who = brief.actor?.name?.trim();
   return {
     aspect: brief.aspect,
     style: brief.visualStyle,
     vehicleKind: brief.vehicleKind ?? 'car',
+    // A still with a blank plate, sent to a film that letters one, is a still the
+    // film has to argue with — so the storyboard letters it too.
+    ...(brief.plates?.length ? { plates: brief.plates } : {}),
     rules: sceneRules(brief),
     cast: mode.onCameraPerson
       ? `${who || 'the presenter'} — exactly the face, hair, build and clothes in the supplied photograph of them, never a lookalike and never a different person.`

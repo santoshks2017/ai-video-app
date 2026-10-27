@@ -101,8 +101,22 @@ import { rulebookText } from './rulebook.js';
  * therefore leave that furniture out — anything it draws would sit underneath
  * our overlay and show through at the edges.
  */
-const CLEAN_FRAME =
-  'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. This includes the things a real showroom has written on it: a fascia, a banner, a poster, a price board, a screen. Render them blank, or out of focus, or out of frame — never with letters or numbers on them. A number plate is not one of those: it is never cropped out or blurred to get round it — it stays on the vehicle as a plain white plate with nothing written on it. A model cannot spell, and what it writes is gibberish on the client\u2019s own building.';
+const cleanFrame = (plate?: string): string =>
+  'Leave the frame CLEAN of any text or branding furniture. NO text of any kind anywhere in the picture: no titles, no captions, no callouts, no price cards, no offer badges, no subtitles, no lower third, no footer bar, no contact strip, no address or phone number, no logo, wordmark, badge or watermark in any corner, and no end card. Every word the viewer reads is composited afterwards in post, where it is guaranteed legible — anything you draw would sit underneath it and show through at the edges. Film only the scene itself, edge to edge, keeping the top and bottom eighth of the frame free of important action so the overlays have somewhere to sit. This includes the things a real showroom has written on it: a fascia, a banner, a poster, a price board, a screen. Render them blank, or out of focus, or out of frame — never with letters or numbers on them. A number plate is not one of those: it is never cropped out or blurred to get round it — ' +
+  (plate
+    ? `it stays on the vehicle as a plain white plate lettered ${quoted(plate)}, which is the one piece of lettering in the whole frame. `
+    : 'it stays on the vehicle as a plain white plate with nothing written on it. ') +
+  'A model cannot spell, and what it writes is gibberish on the client\u2019s own building.';
+
+/** The plate's own lettering, in the quotation marks that tell a model it is copying, not composing. */
+const quoted = (text: string): string => `\u201c${text}\u201d`;
+
+/** What the vehicles' plates read, or nothing when they are plain white and blank. */
+const platesOf = (brief: Brief): { plate: string; name?: string }[] =>
+  (brief.plates ?? []).map((p) => ({ ...p, plate: p.plate.trim() })).filter((p) => p.plate);
+
+/** The film's own vehicle's plate — the one vehicle that is never named anywhere else. */
+const heroPlate = (brief: Brief): string => platesOf(brief)[0]?.plate ?? '';
 
 /**
  * The film's hard rules, for anything else that draws from the same brief.
@@ -115,7 +129,7 @@ const CLEAN_FRAME =
  */
 export function sceneRules(brief: Brief): string[] {
   const ctx = buildContext(brief);
-  return [CLEAN_FRAME, ...continuityLock(brief, ctx.mode, ctx.vehicle)];
+  return [cleanFrame(heroPlate(brief)), ...continuityLock(brief, ctx.mode, ctx.vehicle)];
 }
 
 /**
@@ -159,8 +173,25 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
    * plate off altogether or blurred it away. So the plate has a rule of its own, said
    * before anything else about the vehicle: always there, always white, nothing on it.
    */
+  /*
+   * And what it reads, when the client wants it read.
+   *
+   * A showroom's display cars carry the model's name where a registration would
+   * go, and dealers ask for their films to look the same. It is off unless
+   * somebody turns it on, because it is the only lettering the model is asked to
+   * draw anywhere in the film, and a model cannot spell — so it is said in
+   * quotation marks, said once, and nothing else is allowed onto the plate.
+   */
+  const plates = platesOf(brief);
+  const [hero, ...alsoPlated] = plates;
   lines.push(
-    `- NUMBER PLATES ARE PLAIN WHITE AND BLANK — A HARD RULE FOR EVERY SHOT OF EVERY PART. Whenever the front or the back of the ${noun} is in frame, its number plate is there, mounted where a plate belongs, as a plain white plate with nothing on it: no letters, no numbers, no state code, no brand or model name, no dealer name, no sticker, no logo, no border lettering. The same holds for every other vehicle anywhere in the frame. Never leave a plate off, never show an empty holder or a dark recess where it belongs, never make it any colour but white, and never hide it by cropping around it or blurring it. The supplied photographs may show writing on a plate: that writing is not part of the ${noun} — never copy it, and never write anything else in its place.`,
+    hero
+      ? `- NUMBER PLATES READ THE VEHICLE'S OWN MODEL NAME — A HARD RULE FOR EVERY SHOT OF EVERY PART. Whenever the front or the back of a vehicle is in frame, its number plate is there, mounted where a plate belongs: a plain white plate lettered in plain black capitals, centred, on one line, and nothing else on it — no numbers, no state code, no dealer name, no sticker, no logo, no border lettering, no second line. Spell it exactly, character for character as it is written between the quotation marks below, on the front plate and the back plate alike and in every shot of every part. The ${noun} this film is about — the one in the photographs — reads ${quoted(hero.plate)}.${
+          alsoPlated.length
+            ? ` Each of the other models supplied with this film wears its own name instead, never this one: ${alsoPlated.map((p) => `${quoted(p.plate)} on the ${p.name}`).join(', ')}. Never put one vehicle's name on another vehicle's plate.`
+            : ''
+        } Every vehicle in the frame that was not supplied with this film keeps a plain white plate with nothing on it at all. Never leave a plate off, never show an empty holder or a dark recess where it belongs, never make it any colour but white, and never hide it by cropping around it or blurring it. The supplied photographs may show something else written on a plate: that writing is not this plate — letter the name and nothing else.`
+      : `- NUMBER PLATES ARE PLAIN WHITE AND BLANK — A HARD RULE FOR EVERY SHOT OF EVERY PART. Whenever the front or the back of the ${noun} is in frame, its number plate is there, mounted where a plate belongs, as a plain white plate with nothing on it: no letters, no numbers, no state code, no brand or model name, no dealer name, no sticker, no logo, no border lettering. The same holds for every other vehicle anywhere in the frame. Never leave a plate off, never show an empty holder or a dark recess where it belongs, never make it any colour but white, and never hide it by cropping around it or blurring it. The supplied photographs may show writing on a plate: that writing is not part of the ${noun} — never copy it, and never write anything else in its place.`,
   );
   if (brief.carModel) {
     /*
@@ -194,8 +225,8 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
    * recognisable signature should be.
    */
   lines.push(
-    '- NO LETTERING ANYWHERE IN THE FRAME. Not one letter, digit or word, on anything, at any distance, in or out of focus: no signage, fascia, banner, poster, standee, price board, sticker, screen, brochure, no watermark, no caption, no subtitle. Where a real place would carry writing, render the surface blank, or turn it away from camera, or let it fall out of focus entirely. Number plates follow their own rule above: plain white and blank. Every word the viewer reads is added afterwards.',
-    `- The one exception is lettering already moulded into the ${noun} in the supplied photographs, and only where you can read it there and copy it character for character. Nothing is added from what you believe a badge on this ${noun} ought to say. Where a panel's lettering is not legible in the photographs, leave that panel plain — an unbadged tailgate is fine, an invented one is not. Number plates stay blank whatever the photographs show — plain white, with nothing on them.`,
+    `- NO LETTERING ANYWHERE IN THE FRAME. Not one letter, digit or word, on anything, at any distance, in or out of focus: no signage, fascia, banner, poster, standee, price board, sticker, screen, brochure, no watermark, no caption, no subtitle. Where a real place would carry writing, render the surface blank, or turn it away from camera, or let it fall out of focus entirely. Number plates follow their own rule above${hero ? '' : ': plain white and blank'}. Every word the viewer reads is added afterwards.`,
+    `- The one exception is lettering already moulded into the ${noun} in the supplied photographs, and only where you can read it there and copy it character for character. Nothing is added from what you believe a badge on this ${noun} ought to say. Where a panel's lettering is not legible in the photographs, leave that panel plain — an unbadged tailgate is fine, an invented one is not. Number plates follow their own rule above, whatever the photographs show.`,
   );
   /*
    * Which reference wins.
@@ -243,7 +274,7 @@ function continuityLock(brief: Brief, mode: RenderContext['mode'], vehicle: 'car
     `- The maker's emblem on the grille, the tailgate, the wheels and the steering wheel is exactly the emblem in the photographs and in the emblem artwork supplied with them, in that exact design — never an older or a newer version of that maker's logo, and never another maker's. The same emblem, the same design, on the sign over the showroom and anywhere else in the scene that carries it. Makers redraw their emblems, and the one you have seen most is the one they have stopped using: copy what is supplied, not what you remember. Where an emblem is not legible in the photographs and none is supplied, leave that surface plain.`,
   );
   lines.push(
-    `- Build this ${noun} only from the supplied photographs. Every panel, lamp, badge, wheel, surface and piece of trim is copied from them — the moulding around the grille most of all, because that is where one generation of a ${noun} differs from the one before it and where a wrong one is spotted first — all but the number plates, which stay plain white and blank — and nothing about it comes from anywhere else — not from another ${noun} of this name, not from an earlier generation, not from anything you have seen elsewhere. If a shot would need a view of the ${noun} the photographs do not cover, film an angle they do cover, or hold the camera closer, or let the ${noun} sit out of focus — never fill the gap from memory.`,
+    `- Build this ${noun} only from the supplied photographs. Every panel, lamp, badge, wheel, surface and piece of trim is copied from them — the moulding around the grille most of all, because that is where one generation of a ${noun} differs from the one before it and where a wrong one is spotted first — all but the number plates, which follow their own rule above — and nothing about it comes from anywhere else — not from another ${noun} of this name, not from an earlier generation, not from anything you have seen elsewhere. If a shot would need a view of the ${noun} the photographs do not cover, film an angle they do cover, or hold the camera closer, or let the ${noun} sit out of focus — never fill the gap from memory.`,
   );
   lines.push(
     `- Every lamp on the ${noun} is complete and lit exactly as in the photographs — the full headlamp signature, the daytime running lamps and the connected tail bar, each one present, the right shape and the right length, and glowing. Never leave a dark panel, a blank recess or a half-drawn lamp where a light belongs.`,
@@ -752,7 +783,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
 
     L.push('');
     L.push('## CLEAN FRAME — NO BRANDING FURNITURE');
-    L.push(CLEAN_FRAME);
+    L.push(cleanFrame(heroPlate(brief)));
 
     L.push('');
     L.push('## IMPORTANT');
@@ -779,7 +810,11 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       );
     if (!mode.speaks) important.push('No lip movement, no talking head, no implied speech anywhere.');
     important.push('No warped text, no garbled letters, no distorted vehicle geometry.');
-    important.push('Every number plate is a plain white plate with nothing on it — never lettered, never missing.');
+    important.push(
+      heroPlate(brief)
+        ? "Every number plate is a plain white plate carrying that vehicle's own model name, spelled exactly as the rule above gives it — never missing, never another vehicle's name."
+        : 'Every number plate is a plain white plate with nothing on it — never lettered, never missing.',
+    );
     important.push('Realistic human motion — natural walking, natural gestures, no floating or sliding.');
     if (isFirst)
       important.push(
@@ -790,7 +825,9 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
     if (!isFirst) important.push('Continue the previous clip exactly — same subject, same location, same grade.');
     if (attachments.length)
       important.push(
-        'Reference images are faithful guides to how the car, the showroom and the logos look — copy their details exactly, except any writing on a number plate, which is never copied; and never show a reference photo itself as a picture, poster or screen in the video.',
+        `Reference images are faithful guides to how the car, the showroom and the logos look — copy their details exactly, except any writing on a number plate, which is never copied${
+          heroPlate(brief) ? ': the plates read what the rule above says and nothing else' : ''
+        }; and never show a reference photo itself as a picture, poster or screen in the video.`,
       );
     if (isFirst) {
       for (const a of storyGuidance(brief).avoid) important.push(`Avoid: ${a}`);
@@ -922,7 +959,7 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push('No spoken audio; carry the message through footage and on-screen text.');
     }
     C.push('No background music of any kind — no score, no jingle, no beat. One continuous track is added under the finished video afterwards; voice and natural room sound only.');
-    C.push(CLEAN_FRAME);
+    C.push(cleanFrame(heroPlate(brief)));
     const contDirection = (brief.extraDirection ?? []).filter((x) => x.trim());
     if (contDirection.length) {
       C.push('');
@@ -967,12 +1004,16 @@ export function buildPrompt(brief: Brief, opts: BuildPromptOptions = {}): BuildP
       C.push(spokenLock(brief));
       C.push('');
     }
-    C.push(CLEAN_FRAME);
+    C.push(cleanFrame(heroPlate(brief)));
     if (mode.speaks) C.push('Same pronunciation and delivery rules as the earlier parts. Never speak or show numbers/prices that are not in this prompt.');
     C.push(
       `Before finishing, check the continuity lock above: ${
         mode.onCameraPerson ? "one presenter only, with unchanged hair, outfit and look, never popping in or out and never standing inside the car; " : ''
-      }${mode.speaks ? 'the voice is the same one as before; ' : ''}every number plate is a plain white plate with nothing on it; the ${ctx.vehicle === 'bike' ? 'bike' : 'car'} is a real vehicle in the real location, never a picture or studio shot of one.`,
+      }${mode.speaks ? 'the voice is the same one as before; ' : ''}${
+        heroPlate(brief)
+          ? "every number plate is a plain white plate carrying that vehicle's own model name, spelled exactly as the rule above gives it"
+          : 'every number plate is a plain white plate with nothing on it'
+      }; the ${ctx.vehicle === 'bike' ? 'bike' : 'car'} is a real vehicle in the real location, never a picture or studio shot of one.`,
     );
     if (isLast) C.push(`This is the final segment — end cleanly on the last scene.${mode.speaks ? ` ${CLOSING_BEAT}` : ''}`);
     else

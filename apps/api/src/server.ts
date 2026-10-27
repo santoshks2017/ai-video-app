@@ -1764,6 +1764,13 @@ interface CarRef extends LabelledRef {
   angle?: DealerPhoto['angle'];
 }
 
+/** What a finished film's plates were lettered with, if anything. */
+const plateOf = (job: { brief?: unknown }): string =>
+  ((job.brief as Brief | undefined)?.plates ?? [])
+    .map((p) => p.plate.trim())
+    .filter(Boolean)
+    .join(', ');
+
 async function loadBriefAssets(brief: Brief): Promise<{
   /** Everything that is not the vehicle: the showroom, the team, project extras. */
   references: LabelledRef[];
@@ -3493,9 +3500,15 @@ app.post<{ Params: { jobId: string }; Body: { modelId?: string } }>(
       '',
       'What to improve, and only this: lighting quality and depth, material and surface detail — paint, chrome, glass, fabric, skin — focus, micro-contrast, colour depth and the overall filmic, premium look of a high-end car commercial.',
       'Do not restage, reframe, re-time, add or remove anything. Do not add text, logos, graphics or effects. Do not speed up or slow down.',
-      // The one thing a pass may change: a plate the film drew with writing on it is
-      // put right rather than preserved, since keeping it is keeping a misspelling.
-      'Every number plate is a plain white plate with nothing on it. Never add writing to a plate, and where a plate in this video shows any letters or numbers, render that plate plain white and blank.',
+      /*
+       * The one thing a pass may change: a plate the film drew with writing on it is
+       * put right rather than preserved, since keeping it is keeping a misspelling.
+       * Unless the film was asked for a lettered plate, in which case the lettering
+       * is part of what was approved and the pass keeps it exactly as it is.
+       */
+      plateOf(job)
+        ? `The number plates carry the vehicles' own model names (${plateOf(job)}) — keep that lettering exactly as it is, on the vehicle it is on, in the same place and spelled the same way. Do not reword it, re-letter it, move it to another vehicle or blank it out.`
+        : 'Every number plate is a plain white plate with nothing on it. Never add writing to a plate, and where a plate in this video shows any letters or numbers, render that plate plain white and blank.',
     ].join('\n');
 
     try {
@@ -4553,8 +4566,10 @@ async function checkDesign(
     readCreativeWords(await asReadable(bytes), key),
     canvas ? logoDrift(canvas, bytes) : Promise.resolve(null),
   ]);
-  // The maker's badge and the model's name, as they are on the vehicle itself.
-  const badge = [design.vehicle.name, ...design.vehicle.name.split(/\s+/)];
+  // The maker's badge and the model's name, as they are on the vehicle itself —
+  // and what the number plate was asked to read, which is lettering by request
+  // rather than lettering nobody wanted.
+  const badge = [design.vehicle.name, ...design.vehicle.name.split(/\s+/), ...(design.vehicle.plate ? [design.vehicle.plate] : [])];
   const expected = design.canvas?.logos ?? 0;
   const extra = read && read.logos >= 0 && canvas ? Math.max(0, read.logos - expected) : 0;
   const logos: LogosVerdict =

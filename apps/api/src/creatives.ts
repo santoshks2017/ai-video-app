@@ -209,7 +209,7 @@ export interface SceneRequest {
   aspect: PictureAspect;
   engine: CreativeEngineId;
   occasion?: string;
-  vehicle: { name: string; colour?: string; kind?: 'car' | 'bike' };
+  vehicle: { name: string; colour?: string; kind?: 'car' | 'bike'; plate?: string };
   /** Designer's direction, added to the scene. */
   note?: string;
   /** Where the words will sit, so the picture keeps it calm. */
@@ -247,7 +247,7 @@ export function sceneInstruction(req: SceneRequest, rawLabels: string[]): string
     '',
     `## The ${noun}`,
     `<IMAGE_REF_0> is the ${noun} this picture is about${req.vehicle.colour ? `, in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the photograph: the same body shape, grille, headlamps, tail-lamps, badges, alloy wheels and trim as in the reference photographs${refLabels.length > 1 ? ', which show its other sides' : ''}. You are not told what it is called and you do not need to know: the photographs are its only description. Build it only from them — never from a name, and never from an older or different model.`,
-    `NUMBER PLATES ARE PLAIN WHITE AND BLANK — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is there, as a plain white plate with nothing on it: no letters, no numbers, no state code, no dealer name, no sticker. The same for any other vehicle in the frame. Writing on a plate in the reference photographs is not part of the ${noun}; never copy it.`,
+    plateRule(noun, req.vehicle.plate),
     `The ${noun} is whole and uncropped, sharp, the hero of the picture${tall ? '' : ', about half the width of the frame'}, seen three-quarters from the front unless the reference angle suggests otherwise, on the ground with correct contact shadows under the tyres and true reflections in the paint and glass.`,
     '',
     '## The scene',
@@ -299,7 +299,7 @@ export interface DesignRequest {
   /** The layout's character, which sets the typography. Unset: the engine's own. */
   template?: CreativeTemplateId;
   occasion?: string;
-  vehicle: { name: string; colour?: string; kind?: 'car' | 'bike' };
+  vehicle: { name: string; colour?: string; kind?: 'car' | 'bike'; plate?: string };
   /** Designer's direction for the scene. */
   note?: string;
   words: DesignWords;
@@ -324,6 +324,18 @@ const TYPE_MOOD: Record<CreativeTemplateId, string> = {
 const pct = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 100);
 const pct1 = (v: number): number => Math.round(Math.min(1, Math.max(0, v)) * 1000) / 10;
 const quoted = (s: string): string => `"${s.replace(/"/g, '”')}"`;
+
+/**
+ * What the vehicle's number plates read, said the same way in every creative prompt.
+ *
+ * Blank by default, because a model cannot spell and a misspelled plate is the
+ * first thing a dealer notices. Lettered when the client asks for it, the way a
+ * showroom's display cars carry the model's name in place of a registration.
+ */
+const plateRule = (noun: string, plate?: string): string =>
+  plate?.trim()
+    ? `NUMBER PLATES READ ${quoted(plate.trim())} — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is there, as a plain white plate lettered ${quoted(plate.trim())} in plain black capitals, centred, on one line, with nothing else on it: no numbers, no state code, no dealer name, no sticker. Spell it exactly, character for character. Any other vehicle in the frame keeps a plain white plate with nothing on it. Writing on a plate in the reference photographs is not this plate; never copy it.`
+    : `NUMBER PLATES ARE PLAIN WHITE AND BLANK — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is there, as a plain white plate with nothing on it: no letters, no numbers, no state code, no dealer name, no sticker. The same for any other vehicle in the frame. Writing on a plate in the reference photographs is not part of the ${noun}; never copy it.`;
 
 /** The words a design is asked to set, each with its part in the hierarchy. */
 function wordsBrief(w: DesignWords): string[] {
@@ -454,15 +466,19 @@ export function designInstruction(req: DesignRequest, rawLabels: string[]): stri
           '',
           `## The ${noun}`,
           basePhoto
-            ? `The vehicle in the advertisement is the one in the photograph — keep it exactly as shot, including its number plate area, repainted plain white and blank.`
-            : `The vehicle in the advertisement is the one in the reference advertisement: the same model, colour and trim, rebuilt faithfully. Its number plates are plain white and blank.`,
+            ? `The vehicle in the advertisement is the one in the photograph — keep it exactly as shot, including its number plate area, ${
+                req.vehicle.plate ? `repainted plain white and lettered ${quoted(req.vehicle.plate)}` : 'repainted plain white and blank'
+              }.`
+            : `The vehicle in the advertisement is the one in the reference advertisement: the same model, colour and trim, rebuilt faithfully. ${
+                req.vehicle.plate ? `Its number plates are plain white, lettered ${quoted(req.vehicle.plate)}.` : 'Its number plates are plain white and blank.'
+              }`,
         ]
       : [
           '',
           `## The ${noun}`,
           `<IMAGE_REF_${car}> is the ${noun} this creative is about${req.vehicle.colour ? `, in ${req.vehicle.colour}` : ''}. Put THIS ${noun} in the creative: the same body shape, grille, headlamps, tail-lamps, badges, alloy wheels and trim as in the reference photographs${carLabels.length > 1 ? ', which show its other sides' : ''}. You are not told what it is called and you do not need to know: the photographs are its only description. A model name may appear in the words you set — that is a word to set, never a description to draw from. Build the ${noun} only from the photographs — never from a name, and never from an older or different model.`,
           `The ${noun} is whole and uncropped, sharp, the hero of the picture, on the ground with correct contact shadows and true reflections in the paint and glass.`,
-          `NUMBER PLATES ARE PLAIN WHITE AND BLANK — a hard rule. Wherever the front or back of the ${noun} is in frame, its plate is a plain white plate with nothing on it: no letters, no numbers, no state code, no dealer name. Writing on a plate in the reference photographs is not part of the ${noun}; never copy it.`,
+          plateRule(noun, req.vehicle.plate),
         ]),
     '',
     '## The scene',
@@ -502,7 +518,7 @@ export function reviseInstruction(req: DesignRequest, change: string, carRefs: n
     `Make this one change to the advertisement: ${quoted(change.trim())}`,
     '',
     `Keep everything else exactly as it is: the same ${noun} (as in the photographs), the same scene, layout, colours and typography, the logos exactly where they are, and every word exactly as written — unless the change asks for different words.`,
-    `Number plates stay plain white and blank. Add no other text, logos or watermarks. Nothing may overlap: no word on the ${noun}, on a logo or on another word.`,
+    `${req.vehicle.plate ? `Number plates stay plain white, lettered ${quoted(req.vehicle.plate)} and nothing else.` : 'Number plates stay plain white and blank.'} Add no other text, logos or watermarks. Nothing may overlap: no word on the ${noun}, on a logo or on another word.`,
     `Frame: ${CREATIVE_FORMAT_BY_ID[req.format].pictureAspect}.`,
   ]
     .filter((l) => l !== '')

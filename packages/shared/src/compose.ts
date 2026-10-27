@@ -322,6 +322,26 @@ export function composeBrief(project: Project, inputs: ComposeInputs = {}): Brie
     b.carModel = namedByHand;
   }
 
+  /*
+   * What the number plates read.
+   *
+   * A showroom's display cars wear the model's name where a registration would
+   * go, and a dealer who asks for that is asking for the one thing the whole
+   * prompt otherwise forbids: letters the model has to spell. It is off unless
+   * somebody turns it on, and what it letters is the model's own name — not the
+   * maker's and not the year, which are the words that fetch the older car.
+   */
+  if (project.numberPlate === 'model') {
+    const plates = [
+      { plate: (namedByHand || car?.model || '').trim().toUpperCase() },
+      // Each of the others wears its own name, named here the way the reference
+      // legend names it: a film with a Creta, an Exter and an Aura in it was
+      // lettering all three CRETA.
+      ...vehicles.slice(1).map((v) => ({ plate: (v.model ?? '').trim().toUpperCase(), name: `${v.brand} ${v.model}`.trim() })),
+    ].filter((p) => p.plate);
+    if (plates.length) b.plates = plates;
+  }
+
   // The storyboard as the designer arranged it: their order, and any scene they
   // wrote themselves. Timing and the split into parts are worked out downstream,
   // so a scene moved into a full part pushes the rest along on its own.

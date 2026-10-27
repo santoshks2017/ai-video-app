@@ -74,6 +74,12 @@ export interface ImageProject {
   /** The model the post is about. */
   carId?: string;
   carColour?: string;
+  /**
+   * What the number plates read. Unset or 'blank' keeps them plain white and
+   * empty; 'model' letters the vehicle's own name across them, the way a
+   * showroom's display cars carry it in place of a registration.
+   */
+  numberPlate?: 'blank' | 'model';
   /** The photo the picture is built on: a library photo or an attached one. */
   heroPhoto?: StoredImage;
   /** Photos attached to this project, which take the library's place. */
